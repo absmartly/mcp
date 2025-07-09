@@ -86,16 +86,73 @@ The server will be available at: `https://mcp.absmartly.com`
 
 ## Usage
 
-### Quick Setup for Claude Desktop
+### Setup Options Overview
 
-Add the ABsmartly MCP server to Claude Desktop:
+The ABsmartly MCP server can be connected to Claude in several ways:
 
-1. Go to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or the respective config file on your OS
-   - You can also reach it via Claude > Settings > Developer > Edit Config
+1. **DXT Extension (Easiest)** - One-click installation for Claude Desktop
+2. **Remote MCP (Claude Pro/Teams)** - Direct connection with OAuth authentication
+3. **Local Bridge (All Users)** - Uses mcp-remote proxy for any Claude version
+4. **Claude Code** - Project-specific MCP configuration
 
-2. If you already have MCP servers configured, add the `absmartly` entry to your `mcpServers` object:
+### Method 1: DXT Extension (Recommended for Most Users)
+
+The easiest installation method using the DXT (Desktop Extension) file:
+
+1. **Download the DXT file** from [https://mcp.absmartly.com/absmartly-mcp.dxt](https://mcp.absmartly.com/absmartly-mcp.dxt)
+2. **Double-click the `.dxt` file** to open it in Claude Desktop
+3. **Click "Install"** when prompted
+4. **Enter your ABsmartly endpoint** when asked (e.g., `https://sandbox.absmartly.com`)
+5. **The extension will be automatically configured** and ready to use
+
+**Benefits of DXT installation:**
+- No need to install Node.js or manage dependencies
+- One-click installation process
+- Automatic configuration
+- Secure credential storage in OS keychain
+
+### Method 2: Remote MCP (Claude Pro/Teams Only)
+
+Direct connection with OAuth authentication for Claude Pro and Teams users:
+
+1. **Open Claude Desktop Settings**
+2. **Navigate to Remote MCP Servers**
+3. **Add a new server** with these details:
+   - **Name**: ABsmartly MCP
+   - **URL**: `https://mcp.absmartly.com/sse`
+   - **Authorization**: OAuth (will redirect to ABsmartly for authentication)
+
+4. **Configure endpoint** by adding query parameter:
+   ```
+   https://mcp.absmartly.com/sse?absmartly-endpoint=https://sandbox.absmartly.com
+   ```
+
+5. **Complete OAuth flow** when prompted - you'll be redirected to ABsmartly to authenticate
+
+**Note**: Remote MCP requires OAuth authentication through ABsmartly. Replace `https://sandbox.absmartly.com` with your ABsmartly endpoint.
+
+### Method 3: Local Bridge (All Claude Versions)
+
+Uses mcp-remote proxy to work with any Claude version:
+
+#### Step 1: Locate your Claude Desktop config file
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
+- **Linux**: `~/.config/Claude/claude_desktop_config.json`
+
+Or access via Claude > Settings > Developer > Edit Config
+
+#### Step 2: Add ABsmartly MCP configuration
+
+If you already have MCP servers configured, add the `absmartly` entry:
 
 ```json
+{
+  "mcpServers": {
+    "your-existing-server": {
+      "command": "...",
+      "args": ["..."]
+    },
     "absmartly": {
       "command": "npx",
       "args": [
@@ -103,9 +160,11 @@ Add the ABsmartly MCP server to Claude Desktop:
         "--header", "x-absmartly-endpoint:https://sandbox.absmartly.com"
       ]
     }
+  }
+}
 ```
 
-3. If your config file is empty, add the complete configuration:
+If your config file is empty, use this complete configuration:
 
 ```json
 {
@@ -121,86 +180,155 @@ Add the ABsmartly MCP server to Claude Desktop:
 }
 ```
 
-**Important**: Replace `https://sandbox.absmartly.com` with your ABsmartly endpoint (e.g., `https://dev-1.absmartly.com/` or your custom endpoint).
+You can also add an API Key, in that case it will bypass the OAuth flow.
 
-### Quick Setup for Claude Code
-
-To use ABsmartly MCP with Claude Code, follow the [Claude Code MCP documentation](https://docs.anthropic.com/en/docs/claude-code/mcp):
-
-1. Create a project-specific `.claude_mcp_config.json` file in your project root
-2. Add the ABsmartly MCP configuration to this file
-
-For more detailed instructions on setting up MCP servers with Claude Code, see the [official documentation](https://docs.anthropic.com/en/docs/claude-code/mcp).
-
-### Quick Setup with DXT Extension (Easiest)
-
-For the easiest installation, use the DXT (Desktop Extension) file:
-
-1. Download the `absmartly-mcp.dxt` file from [https://mcp.absmartly.com/absmartly-mcp.dxt](https://mcp.absmartly.com/absmartly-mcp.dxt)
-2. Double-click the `.dxt` file to open it in Claude Desktop
-3. Click "Install" when prompted
-4. Enter your ABsmartly endpoint when asked (e.g., `https://sandbox.absmartly.com`)
-5. The extension will be automatically configured and ready to use
-
-**Benefits of DXT installation:**
-- No need to install Node.js or manage dependencies
-- One-click installation process
-- Automatic configuration
-- Secure credential storage in OS keychain
-
-### Two Access Methods
-
-#### 1. Local Bridge Mode (All Users)
-Use the local MCP bridge for connection - works with all Claude versions.
-
-#### 2. Remote MCP Mode (Claude Pro Only)
-Direct connection via Cloudflare Access - requires Claude Pro and proper authentication. See the [Claude Desktop Remote MCP documentation](https://support.anthropic.com/en/articles/11503834-building-custom-integrations-via-remote-mcp-servers) for setup details.
-
-**Remote MCP Configuration**: For Claude Pro/Teams Remote MCP, use:
-```
-https://mcp.absmartly.com/sse?absmartly-endpoint=https://sandbox.absmartly.com
-```
-
-**Note**: Remote MCP requires OAuth authentication. Claude will first redirect you through the OAuth flow to authenticate with your ABsmartly account before connecting to the MCP server.
-
-Replace `https://sandbox.absmartly.com` with your ABsmartly endpoint.
-
-### Configuration
-
-#### For Local Bridge Users
-
-**Important**: You must configure the API credentials before using any ABsmartly tools.
-
-First, call the configuration tool:
-
-```typescript
-// Configure ABsmartly credentials
-await client.callTool({
-    name: 'configure_absmartly',
-    arguments: {
-        api_key: 'your-absmartly-api-key',
-        api_endpoint: 'https://your-instance.absmartly.com/v1' // optional, defaults to sandbox
+```json
+{
+  "mcpServers": {
+    "absmartly": {
+      "command": "npx",
+      "args": [
+        "mcp-remote", "https://mcp.absmartly.com/sse",
+        "--header", "x-absmartly-endpoint:https://sandbox.absmartly.com"
+        "--header", "Authorization:YOUR_API_KEY_HERE",
+      ]
     }
-});
+  }
+}
 ```
 
-#### For Remote MCP Users (Claude Pro)
+#### Step 3: Configure your credentials
 
-If you're using Claude Pro with remote MCP access through Cloudflare Access, use the simplified configuration tool that uses pre-configured credentials:
+Replace the placeholders:
+- `YOUR_API_KEY_HERE` with your ABsmartly API key
+- `https://sandbox.absmartly.com` with your ABsmartly endpoint
 
-```typescript
-// Configure ABsmartly for remote access (uses default sandbox environment)
-await client.callTool({
-    name: 'configure_absmartly_remote',
-    arguments: {}
-});
+#### Advanced Authorization Formats
+
+The server supports multiple authorization formats:
+
+**Format 1: Simple API Key**
+```json
+"--header", "Authorization:BxYKd1U2DlzOLJ74gdvaIkwy4qyOCkXi"
 ```
+
+**Format 2: Explicit Api-Key**
+```json
+"--header", "Authorization:Api-Key BxYKd1U2DlzOLJ74gdvaIkwy4qyOCkXi"
+```
+
+**Format 3: Subdomain Shorthand**
+```json
+"--header", "Authorization:demo-1 BxYKd1U2DlzOLJ74gdvaIkwy4qyOCkXi"
+```
+- Auto-constructs the ABsmartly endpoint as: `https://demo-1.absmartly.com/v1`
+
+**Format 4: Full domain as ABsmartly endpoint**
+```json
+"--header", "Authorization:demo-1.absmartly.com BxYKd1U2DlzOLJ74gdvaIkwy4qyOCkXi"
+```
+- Auto-constructs the ABsmartly endpoint as: `https://demo-1.absmartly.com/v1`
+
+All formats automatically add `/v1` suffix to endpoints if missing.
+All formats automatically remove the `Bearer` prefix if present. Some clients add it automatically.
+
+### Method 4: Claude Code
+
+For Claude Code users, create a project-specific MCP configuration:
+
+#### Step 1: Create MCP config file
+
+Create `.claude_mcp_config.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "absmartly": {
+      "command": "npx",
+      "args": [
+        "mcp-remote", 
+        "https://mcp.absmartly.com/sse",
+        "--header", "Authorization:YOUR_API_KEY_HERE",
+        "--header", "x-absmartly-endpoint:https://sandbox.absmartly.com"
+      ]
+    }
+  }
+}
+```
+
+#### Step 2: Configure credentials
+
+Replace the placeholders with your actual ABsmartly credentials.
+
+#### Step 3: Restart Claude Code
+
+Restart Claude Code to load the new MCP configuration.
+
+For more detailed instructions, see the [Claude Code MCP documentation](https://docs.anthropic.com/en/docs/claude-code/mcp).
+
+### Troubleshooting
+
+**Connection Issues:**
+- Ensure your ABsmartly endpoint is correct and includes the proper protocol (https://)
+- Verify your API key has the necessary permissions
+- Check that your network allows connections to `mcp.absmartly.com`
+
+**Authentication Problems:**
+- For OAuth (Remote MCP): Complete the authentication flow in your browser
+- For API keys: Ensure the key is valid and hasn't expired
+- Check that your endpoint URL is correct
+
+**Performance Issues:**
+- DXT extension generally provides the best performance
+- Remote MCP (OAuth) offers good performance for Pro/Teams users
+- Local bridge (mcp-remote) may have slightly higher latency but works universally
+
+
+### Getting Started After Setup
+
+Once you've connected the ABsmartly MCP server using any of the methods above, you can start using ABsmartly tools in Claude:
+
+
+
+Your credentials are automatically configured from the setup. You can start using ABsmartly tools immediately:
+
+```
+Show me all running experiments
+```
+
+```
+Create a new feature flag called "dark-mode" for the main app
+```
+
+#### For OAuth Authentication (Method 2)
+
+After completing the OAuth flow, you can use ABsmartly tools directly:
+
+```
+List all my experiments
+```
+
+```
+Get analytics for experiment ID 123
+```
+
+#### Verifying Your Connection
+
+Test your connection with:
+
+```
+Check my ABsmartly configuration status
+```
+
+This will show you:
+- Whether you're connected
+- Which endpoint you're using
+- Authentication method
+- Available tools
 
 ### Available MCP Tools
 
 #### Configuration Tools
-- `configure_absmartly` - **Required first**: Set API key and endpoint (local bridge mode)
-- `configure_absmartly_remote` - **Required first**: Auto-configure for remote access (Claude Pro mode)
 - `get_configuration` - Check current configuration status
 
 #### Core Experiment Management
@@ -226,62 +354,50 @@ await client.callTool({
 #### Advanced Operations
 - `custom_request` - Make direct API calls to any ABsmartly endpoint
 
-### Example MCP Client Usage
+### Example Usage
 
-```typescript
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+Once connected, you can use ABsmartly tools directly in Claude:
 
-// Connect to the MCP server
-const client = new Client({
-    name: "absmartly-client",
-    version: "1.0.0"
-}, {
-    capabilities: {}
-});
+**List running experiments:**
+```
+Show me all running experiments
+```
 
-const transport = new SSEClientTransport(
-    new URL('https://mcp.absmartly.com/agents/absmartly-mcp/default')
-);
+**Create a feature flag:**
+```
+Create a feature flag called "new-checkout-flow" with 50% traffic
+```
 
-await client.connect(transport);
+**Get experiment details:**
+```
+Get details for experiment ID 123
+```
 
-// Step 1: Configure API credentials (required)
-await client.callTool({
-    name: 'configure_absmartly',
-    arguments: {
-        api_key: 'your-api-key-here',
-        api_endpoint: 'https://sandbox.absmartly.com/v1'
-    }
-});
+**Check experiment metrics:**
+```
+What are the current metrics for experiment "homepage-redesign"?
+```
 
-// Step 2: Use ABsmartly tools
-const experiments = await client.callTool({
-    name: 'list_experiments',
-    arguments: {
-        state: 'running',
-        page: 1,
-        items: 10
-    }
-});
+**Manage experiment lifecycle:**
+```
+Start experiment ID 456
+```
 
-// Create a feature flag
-const featureFlag = await client.callTool({
-    name: 'create_feature_flag',
-    arguments: {
-        name: 'new-checkout-flow',
-        unit_type_id: 1,
-        application_id: 1,
-        feature_enabled_percentage: 50
-    }
-});
+**Create a new experiment:**
+```
+Create a new A/B test for the checkout page with two variants
 ```
 
 ## Configuration
 
 ### No Server-Side Secrets Required
 
-This MCP server doesn't require any server-side API keys or secrets. All credentials are provided by the MCP client using the `configure_absmartly` tool.
+This MCP server doesn't require any server-side API keys or secrets. All credentials are provided through the connection setup:
+
+- **DXT Extension**: Credentials stored securely in OS keychain
+- **Remote MCP**: OAuth authentication with ABsmartly
+- **Local Bridge**: API keys provided via headers in configuration
+- **Claude Code**: API keys provided via headers in project config
 
 ### Cloudflare Workers Configuration
 
@@ -304,163 +420,49 @@ bindings = [
 ]
 ```
 
-## Remote MCP Setup (Claude Pro)
+## Advanced Configuration
 
-For Claude Pro users, you can connect directly to the ABsmartly MCP server without running a local bridge. This requires setting up Cloudflare Access for authentication.
+### Remote MCP with OAuth (Claude Pro/Teams)
 
-### Prerequisites
+For Claude Pro and Teams users, the server supports OAuth authentication through ABsmartly:
 
-- Claude Pro subscription (required for remote MCP access)
-- Cloudflare account with Access enabled
-- Admin access to configure Cloudflare Access policies
+1. **OAuth Flow**: When using Remote MCP, Claude will redirect you to ABsmartly for authentication
+2. **Session Management**: OAuth sessions are managed securely with proper token handling
+3. **Automatic Configuration**: Once authenticated, the server automatically configures your ABsmartly connection
 
-### Setting Up Cloudflare Access
+### Local Development Setup
 
-1. **Create an Access Application** in your Cloudflare dashboard:
-   - Go to Zero Trust → Access → Applications → Add an application
-   - Choose "Self-hosted" 
-   - Set Application domain: `mcp.absmartly.com`
-   - Path: `/remote-mcp`
+For developers who want to run the server locally:
 
-2. **Configure Authentication**:
-   - Set up your preferred identity provider (Google Workspace, GitHub, etc.)
-   - Create policies to allow specific email addresses
-
-3. **Configure Environment Variables**:
+1. **Clone and Install**:
    ```bash
-   # Copy and edit the environment template
-   cp env.vars.example .dev.vars
-   
-   # Set your Cloudflare Access configuration
-   ACCESS_CLIENT_ID=your_access_client_id_here
-   ACCESS_CLIENT_SECRET=your_access_client_secret_here
-   ALLOWED_EMAILS=user1@example.com,user2@example.com
-   
-   # Set default ABsmartly credentials for authenticated users
-   DEFAULT_ABSMARTLY_API_KEY=your_default_api_key_here
-   DEFAULT_ABSMARTLY_ENDPOINT=https://sandbox.absmartly.com/v1
+   git clone <repository-url>
+   cd absmartly-mcp
+   npm install
    ```
 
-4. **Deploy with OAuth Support**:
+2. **Configure Environment**:
    ```bash
-   npm run deploy
+   cp .env.local.example .env.local
+   # Edit .env.local with your ABsmartly credentials
    ```
 
-### Using mcp-remote with Header Authentication
-
-Instead of using Claude Pro's remote MCP (which requires Cloudflare Access), you can use the `mcp-remote` proxy with header-based authentication. This works with any Claude version and provides more flexibility.
-
-#### Four Authentication Formats Supported:
-
-**Format 1: Subdomain Convenience**
-```json
-{
-  "absmartly": {
-    "command": "npx",
-    "args": [
-      "mcp-remote", 
-      "https://mcp.absmartly.com/sse",
-      "--header", "Authorization:demo-1 BxYKd1U2DlzOLJ74gdvaIkwy4qyOCkXi"
-    ]
-  }
-}
-```
-- Auto-constructs endpoint: `https://demo-1.absmartly.com/v1`
-- Perfect for standard subdomain setups
-- Automatically adds `/v1` suffix if missing
-
-**Format 2: Explicit Api-Key with Custom Endpoint**
-```json
-{
-  "absmartly": {
-    "command": "npx", 
-    "args": [
-      "mcp-remote",
-      "https://mcp.absmartly.com/sse",
-      "--header", "Authorization:Api-Key BxYKd1U2DlzOLJ74gdvaIkwy4qyOCkXi",
-      "--header", "X-ABSMARTLY-API-ENDPOINT:https://custom-domain.absmartly.com"
-    ]
-  }
-}
-```
-- Backwards compatible with existing setups
-- Supports custom domain endpoints
-- Automatically adds `/v1` suffix if missing
-
-**Format 3: OAuth Bearer Token**
-```json
-{
-  "absmartly": {
-    "command": "npx",
-    "args": [
-      "mcp-remote",
-      "https://mcp.absmartly.com/sse", 
-      "--header", "Authorization:Bearer your_oauth_token_here",
-      "--header", "X-ABSMARTLY-API-ENDPOINT:https://demo-1.absmartly.com"
-    ]
-  }
-}
-```
-- For OAuth-authenticated users
-- Requires explicit endpoint specification
-- Automatically adds `/v1` suffix if missing
-
-**Format 4: Simple API Key**
-```json
-{
-  "absmartly": {
-    "command": "npx",
-    "args": [
-      "mcp-remote",
-      "https://mcp.absmartly.com/sse",
-      "--header", "Authorization:BxYKd1U2DlzOLJ74gdvaIkwy4qyOCkXi",
-      "--header", "X-ABSMARTLY-API-ENDPOINT:https://dev-1.absmartly.com"
-    ]
-  }
-}
-```
-- Simplest format for testing
-- Requires explicit endpoint specification
-- Automatically adds `/v1` suffix if missing
-
-### Using Remote MCP in Claude Pro (Alternative)
-
-For Claude Pro users who prefer the direct connection method:
-
-1. **Add the MCP Server** in your Claude Pro settings:
-   - Server URL: `https://mcp.absmartly.com/remote-mcp`
-   - This will require authentication through your configured Cloudflare Access
-
-2. **Configure the Connection**:
-   ```typescript
-   // After Claude Pro connects, configure ABsmartly
-   await client.callTool({
-       name: 'configure_absmartly_remote',
-       arguments: {}
-   });
+3. **Start Development Server**:
+   ```bash
+   npm run dev
    ```
 
-### Security Features
-
-- **Cloudflare Access Protection**: Only authenticated users can access the remote MCP endpoint
-- **Email Allowlist**: Restrict access to specific email addresses
-- **Default Credentials**: Server administrators can provide default ABsmartly credentials for authenticated users
-- **Backwards Compatibility**: Local bridge mode continues to work for all users
 
 ### Environment Variables
 
-Copy `env.vars.example` to `.dev.vars` for local development or set as Cloudflare Worker environment variables for production:
+For deployment, configure these environment variables in your Cloudflare Worker:
 
 ```bash
-# Cloudflare Access OAuth Settings
-ACCESS_CLIENT_ID=your_access_client_id_here
-ACCESS_CLIENT_SECRET=your_access_client_secret_here
+# OAuth Configuration (for Remote MCP)
+OAUTH_CLIENT_ID=your_oauth_client_id_here
+OAUTH_CLIENT_SECRET=your_oauth_client_secret_here
 
-# Allowed email addresses for remote MCP access (comma-separated)
-ALLOWED_EMAILS=user1@example.com,user2@example.com
-
-# ABsmartly API Configuration (for users without local setup)
-DEFAULT_ABSMARTLY_API_KEY=your_default_api_key_here
+# Default ABsmartly Configuration (optional)
 DEFAULT_ABSMARTLY_ENDPOINT=https://sandbox.absmartly.com/v1
 ```
 
@@ -470,7 +472,6 @@ The server provides these endpoints at `https://mcp.absmartly.com`:
 
 - **Health Check**: `/health`
 - **MCP Local Bridge**: `/mcp` (WebSocket), `/sse` (Server-Sent Events)
-- **MCP Remote Access**: `/remote-mcp` (Cloudflare Access protected)
 - **Health with Status**: Shows whether Cloudflare Access is enabled
 
 ## Architecture
