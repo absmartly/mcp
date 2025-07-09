@@ -1,0 +1,22 @@
+{
+  "hooks": [
+    {
+      "description": "Voice notification when agent task is complete (cross-platform)",
+      "triggers": ["agent_task_complete", "task_complete"],
+      "command": "node .claude/voice-notify.js 'Agent task complete'",
+      "cwd": "."
+    },
+    {
+      "description": "Voice notification when sub-agent task is complete (cross-platform)",
+      "triggers": ["subagent_task_complete"],
+      "command": "node .claude/voice-notify.js 'Sub-agent task complete'",
+      "cwd": "."
+    },
+    {
+      "description": "Block rm commands for safety",
+      "triggers": ["before_bash"],
+      "command": "node .claude/rm-guard.js",
+      "cwd": "."
+    }
+  ]
+}
