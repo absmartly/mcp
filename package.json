@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "wrangler dev",
-    "deploy": "npm run test && wrangler deploy",
+    "deploy": "npm run test && ./scripts/build-dxt.sh && wrangler deploy",
     "deploy:staging": "npm run test && wrangler deploy --env staging",
     "deploy:production": "npm run test && wrangler deploy --env production",
     "deploy:force": "wrangler deploy",
@@ -25,7 +25,10 @@
     "test:api": "node test-local-api.js",
     "test:dynamic": "node test-dynamic-fields-complete.js",
     "test:dynamic:full": "./run-dynamic-fields-test.sh",
-    "precommit": "npm run test"
+    "precommit": "npm run test",
+    "build:dxt": "dxt pack",
+    "upload:dxt": "./scripts/build-dxt.sh",
+    "install:dxt": "npm install -g @anthropic-ai/dxt"
   },
   "keywords": [
     "mcp",

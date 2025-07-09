@@ -1,0 +1,50 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "absmartly-mcp",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-03-10",
+	"account_id": "8ec66ff1f67c2bf53e7970533604ebe9",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"class_name": "ABsmartlyMCP",
+				"name": "MCP_OBJECT"
+			}
+		]
+	},
+	"kv_namespaces": [
+		{
+			"binding": "OAUTH_KV",
+			"preview_id": "004ed493f0634c9aa08a4aba30dd39d9",
+			"id": "0cabc6c64f36452f934ff430793298b6"
+		}
+	],
+	"assets": {
+		"directory": "./public",
+		"binding": "ASSETS"
+	},
+	"vars": {
+		"ABSMARTLY_OAUTH_CLIENT_ID": "mcp-absmartly-universal",
+		"ABSMARTLY_OAUTH_CLIENT_SECRET": "mcp-secret"
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": [
+				"ABsmartlyMCP"
+			]
+		}
+	],
+	"observability": {
+		"enabled": true
+	},
+	"routes": [
+		{
+			"pattern": "mcp.absmartly.com",
+			"custom_domain": true
+		}
+	]
+}

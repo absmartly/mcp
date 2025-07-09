@@ -7,6 +7,7 @@ yarn-error.log*
 # Build outputs
 dist/
 *.tsbuildinfo
+*.dxt
 
 # Environment files
 .env
@@ -49,3 +50,6 @@ temp/
 openapi/
 openapi.json
 backend/
+shared/
+frontent-next-vue2/
+.git_old

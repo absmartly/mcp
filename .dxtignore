@@ -1,0 +1,10 @@
+# Include only essential files for DXT extension
+# Everything else is excluded
+
+# Exclude everything by default
+*
+
+# Include only what we need
+!manifest.json
+!index.js
+!icon.png

@@ -1,0 +1,100 @@
+{
+  "dxt_version": "1.0.0",
+  "name": "absmartly-mcp",
+  "displayName": "ABsmartly MCP Server",
+  "version": "1.0.0",
+  "description": "A Model Context Protocol (MCP) server that provides seamless access to the ABsmartly experimentation platform for A/B testing, feature flags, and analytics. Includes 25+ tools for experiment management, analytics, and team collaboration.",
+  "author": {
+    "name": "ABsmartly",
+    "email": "support@absmartly.com"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/absmartly/absmartly-mcp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/absmartly/absmartly-mcp"
+  },
+  
+  "server": {
+    "type": "node",
+    "entry_point": "index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["index.js"]
+    }
+  },
+  
+  "config": {
+    "fields": {
+      "absmartly_endpoint": {
+        "type": "string",
+        "label": "ABsmartly API Endpoint",
+        "description": "Your ABsmartly API endpoint (e.g., https://sandbox.absmartly.com or https://dev-1.absmartly.com)",
+        "default": "https://sandbox.absmartly.com",
+        "required": true,
+        "placeholder": "https://your-instance.absmartly.com"
+      }
+    }
+  },
+  
+  "permissions": {
+    "network": {
+      "domains": [
+        "mcp.absmartly.com",
+        "*.absmartly.com",
+        "*.absmartly.cloud"
+      ]
+    }
+  },
+  
+  "keywords": [
+    "absmartly",
+    "ab-testing",
+    "feature-flags",
+    "experiments",
+    "analytics",
+    "mcp",
+    "model-context-protocol"
+  ],
+  
+  "capabilities": {
+    "tools": [
+      "configure_absmartly",
+      "list_experiments",
+      "get_experiment",
+      "create_experiment",
+      "create_feature_flag",
+      "start_experiment",
+      "stop_experiment",
+      "update_experiment",
+      "list_goals",
+      "list_metrics",
+      "list_users",
+      "list_teams",
+      "get_goal",
+      "get_metric",
+      "get_user",
+      "get_team",
+      "create_goal",
+      "create_metric",
+      "create_user",
+      "create_team",
+      "update_goal",
+      "update_metric",
+      "update_user",
+      "update_team",
+      "custom_request"
+    ],
+    "resources": [
+      "experiment-results",
+      "analytics-data",
+      "user-management",
+      "team-management"
+    ],
+    "prompts": [
+      "experiment-analysis",
+      "feature-flag-strategy",
+      "ab-test-recommendations"
+    ]
+  }
+}
