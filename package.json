@@ -1,0 +1,55 @@
+{
+  "name": "absmartly-mcp",
+  "version": "1.0.0",
+  "description": "Remote MCP server for ABsmartly API on Cloudflare Workers",
+  "main": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "wrangler dev",
+    "deploy": "npm run test && wrangler deploy",
+    "deploy:staging": "npm run test && wrangler deploy --env staging",
+    "deploy:production": "npm run test && wrangler deploy --env production",
+    "deploy:force": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "start": "wrangler dev",
+    "bridge": "node mcp-bridge.js",
+    "test": "node tests/test-runner.js --unit-only",
+    "test:unit": "node tests/test-runner.js --unit-only",
+    "test:integration": "node tests/test-runner.js --integration-only",
+    "test:all": "node tests/test-runner.js",
+    "test:resources": "node tests/unit/resources-prompts.test.js",
+    "test:legacy": "npm run test:api && npm run test:server && npm run test:bridge",
+    "test:server": "node test-server.js",
+    "test:bridge": "node test-bridge.js",
+    "test:api": "node test-local-api.js",
+    "test:dynamic": "node test-dynamic-fields-complete.js",
+    "test:dynamic:full": "./run-dynamic-fields-test.sh",
+    "precommit": "npm run test"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "absmartly",
+    "cloudflare-workers",
+    "experimentation"
+  ],
+  "author": "ABsmartly",
+  "license": "MIT",
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "^0.0.5",
+    "@modelcontextprotocol/sdk": "^1.13.0",
+    "agents": "^0.0.95",
+    "dotenv": "^17.0.0",
+    "hono": "^4.8.3",
+    "workers-mcp": "^0.0.13",
+    "zod": "^3.25.67"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241106.0",
+    "@types/node": "^20.11.0",
+    "jsonwebtoken": "^9.0.2",
+    "typescript": "^5.3.3",
+    "wrangler": "^4.22.0"
+  }
+}
