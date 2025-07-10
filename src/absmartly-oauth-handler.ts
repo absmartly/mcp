@@ -223,7 +223,7 @@ async function redirectToAbsmartlyOAuth(
 	
 	// Redirect to our SAML → OAuth bridge (at /auth/oauth/authorize)
 	const absmartlyOAuthUrl = new URL(`${endpoint}/auth/oauth/authorize`);
-	absmartlyOAuthUrl.searchParams.set("client_id", env.ABSMARTLY_OAUTH_CLIENT_ID || "mcp-client");
+	absmartlyOAuthUrl.searchParams.set("client_id", "mcp-absmartly-universal");
 	absmartlyOAuthUrl.searchParams.set("redirect_uri", new URL("/oauth/callback", request.url).href);
 	absmartlyOAuthUrl.searchParams.set("scope", "api:read api:write");
 	absmartlyOAuthUrl.searchParams.set("response_type", "code");
@@ -303,11 +303,11 @@ app.get("/oauth/callback", async (c) => {
 		const tokenUrl = `${endpoint}/auth/oauth/token`;
 		const requestBody = new URLSearchParams({
 			grant_type: "authorization_code",
-			client_id: env.ABSMARTLY_OAUTH_CLIENT_ID || "mcp-client",
-			client_secret: env.ABSMARTLY_OAUTH_CLIENT_SECRET || "mcp-secret",
+			client_id: "mcp-absmartly-universal", // Use the pre-registered universal client
 			code: code,
 			redirect_uri: new URL("/oauth/callback", c.req.url).href,
 		});
+		// Note: No client_secret needed for the universal client
 		
 		debug('Token exchange request URL', tokenUrl);
 		debug('Token exchange request body', Object.fromEntries(requestBody.entries()));
