@@ -623,6 +623,29 @@ const oauthProvider = new OAuthProvider({
 	clientRegistrationEndpoint: "/register",
 	defaultHandler: ABsmartlyOAuthHandler as any,
 	tokenEndpoint: "/token",
+	// Add client lookup to use our KV storage
+	clientLookup: async (clientId: string, env: any) => {
+		console.log(`🔍 OAuth provider clientLookup called for: ${clientId}`);
+		if (!env.OAUTH_KV) {
+			console.log(`🔍 No KV storage available`);
+			return null;
+		}
+		
+		const clientData = await env.OAUTH_KV.get(`client:${clientId}`);
+		if (!clientData) {
+			console.log(`🔍 Client not found in KV: ${clientId}`);
+			return null;
+		}
+		
+		const client = JSON.parse(clientData);
+		console.log(`🔍 Client found in KV:`, client);
+		return {
+			clientId: client.clientId,
+			clientSecret: client.clientSecret,
+			redirectUris: client.redirectUris,
+			clientName: client.clientName
+		};
+	},
 });
 
 // Custom wrapper to handle OAuth discovery endpoint
