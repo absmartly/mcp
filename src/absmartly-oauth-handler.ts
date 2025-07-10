@@ -7,6 +7,9 @@ import {
 	renderApprovalDialog,
 } from "./workers-oauth-utils";
 
+// Default OAuth client ID fallback
+const DEFAULT_OAUTH_CLIENT_ID = "mcp-absmartly-universal";
+
 // Props that will be available to the MCP agent after authentication
 export type ABsmartlyProps = {
 	email: string;
@@ -223,7 +226,7 @@ async function redirectToAbsmartlyOAuth(
 	
 	// Redirect to our SAML → OAuth bridge (at /auth/oauth/authorize)
 	const absmartlyOAuthUrl = new URL(`${endpoint}/auth/oauth/authorize`);
-	absmartlyOAuthUrl.searchParams.set("client_id", env.ABSMARTLY_OAUTH_CLIENT_ID || "mcp-absmartly-universal");
+	absmartlyOAuthUrl.searchParams.set("client_id", env.ABSMARTLY_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID);
 	absmartlyOAuthUrl.searchParams.set("redirect_uri", new URL("/oauth/callback", request.url).href);
 	absmartlyOAuthUrl.searchParams.set("scope", "api:read api:write");
 	absmartlyOAuthUrl.searchParams.set("response_type", "code");
@@ -303,7 +306,7 @@ app.get("/oauth/callback", async (c) => {
 		const tokenUrl = `${endpoint}/auth/oauth/token`;
 		const requestBody = new URLSearchParams({
 			grant_type: "authorization_code",
-			client_id: env.ABSMARTLY_OAUTH_CLIENT_ID || "mcp-absmartly-universal",
+			client_id: env.ABSMARTLY_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID,
 			code: code,
 			redirect_uri: new URL("/oauth/callback", c.req.url).href,
 		});
