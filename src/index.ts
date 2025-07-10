@@ -1074,6 +1074,30 @@ export default {
 			return ABsmartlyMCP.mount("/sse").fetch(authenticatedRequest, env, ctx);
 		}
 		
+		// Check for API key sessions before allowing OAuth endpoints
+		if (env.OAUTH_KV && (url.pathname === "/authorize" || url.pathname === "/token" || url.pathname === "/register" || url.pathname.startsWith("/oauth/"))) {
+			const userAgent = request.headers.get("User-Agent") || "unknown";
+			const clientFingerprint = `${request.headers.get("CF-Connecting-IP") || "unknown"}-${userAgent}`;
+			console.log(`🔍 Checking API key session before OAuth endpoint ${url.pathname} - fingerprint: ${clientFingerprint}`);
+			const apiKeySession = await env.OAUTH_KV.get(`api_key_session:${clientFingerprint}`);
+			console.log(`🔍 API key session result: ${apiKeySession ? "FOUND" : "NOT FOUND"}`);
+			
+			if (apiKeySession) {
+				console.log(`🔍 Blocking OAuth endpoint ${url.pathname} - client is using API key auth`);
+				// Client is using API key auth, block OAuth endpoints
+				return new Response(JSON.stringify({
+					error: "oauth_not_available",
+					error_description: "OAuth endpoints not available when using API key authentication"
+				}), {
+					status: 404,
+					headers: {
+						"Content-Type": "application/json",
+						"Access-Control-Allow-Origin": "*",
+					},
+				});
+			}
+		}
+		
 		// For everything else (no Authorization header, or non-/sse paths), use OAuth
 		return await oauthProvider.fetch(request, env, ctx);
 	}
