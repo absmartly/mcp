@@ -129,7 +129,7 @@ Direct connection with OAuth authentication for Claude Pro and Teams users:
 
 5. **Complete OAuth flow** when prompted - you'll be redirected to ABsmartly to authenticate
 
-**Note**: Remote MCP requires OAuth authentication through ABsmartly. Replace `https://sandbox.absmartly.com` with your ABsmartly endpoint.
+**Note**: Remote MCP requires OAuth authentication through ABsmartly. Replace `https://sandbox.absmartly.com` with your ABsmartly endpoint. The OAuth provider uses a universal client ("mcp-absmartly-universal") for all connections - dynamic client registration is not currently supported.
 
 ### Method 3: Local Bridge (All Claude Versions)
 
