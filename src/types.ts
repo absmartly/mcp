@@ -10,6 +10,10 @@ export interface Env {
   OAUTH_TOKEN_URL?: string;
   OAUTH_USERINFO_URL?: string;
   
+  // ABsmartly OAuth Configuration
+  ABSMARTLY_OAUTH_CLIENT_ID?: string;
+  ABSMARTLY_OAUTH_CLIENT_SECRET?: string;
+  
   // Legacy Cloudflare Access Configuration (for backwards compatibility)
   ACCESS_CLIENT_ID?: string;
   ACCESS_CLIENT_SECRET?: string;
@@ -51,6 +55,8 @@ export interface ABsmartlyResponse<T = any> {
   data?: T;
   errors?: string[];
   details?: any;
+  status?: number;
+  statusText?: string;
 }
 
 // Common ABsmartly entity interfaces

@@ -26,7 +26,7 @@ export class ABsmartlyMCP extends McpAgent<any, Record<string, never>, any> {
 	});
 
 	private apiClient: ABsmartlyAPIClient | null = null;
-	private customFields: any[] = [];
+	private _customFields: any[] = [];
 	private users: any[] = [];
 	private teams: any[] = [];
 	private applications: any[] = [];
@@ -38,8 +38,16 @@ export class ABsmartlyMCP extends McpAgent<any, Record<string, never>, any> {
 	// OAuth props from authentication
 	props: any = null;
 	
+	// Request object for header access
+	request: Request | null = null;
+	
 	// Debug log collection
 	private debugLogs: string[] = [];
+	
+	// Getter for customFields to be accessible from resources
+	get customFields() {
+		return this._customFields;
+	}
 	
 	constructor(ctx: DurableObjectState, env: any) {
 		console.log("🚨 ABsmartlyMCP constructor START");
@@ -117,7 +125,7 @@ export class ABsmartlyMCP extends McpAgent<any, Record<string, never>, any> {
 						});
 					}
 				} catch (e) {
-					this.debug("❌ Failed to decode absmartly_api_key JWT:", e.message);
+					this.debug("❌ Failed to decode absmartly_api_key JWT:", e instanceof Error ? e.message : String(e));
 				}
 			}
 			
@@ -136,7 +144,7 @@ export class ABsmartlyMCP extends McpAgent<any, Record<string, never>, any> {
 						});
 					}
 				} catch (e) {
-					this.debug("❌ Failed to decode oauth_jwt JWT:", e.message);
+					this.debug("❌ Failed to decode oauth_jwt JWT:", e instanceof Error ? e.message : String(e));
 				}
 			}
 
@@ -205,7 +213,7 @@ export class ABsmartlyMCP extends McpAgent<any, Record<string, never>, any> {
 							this.debug(`🔍 JWT payload content:`, payload);
 						}
 					} catch (jwtError) {
-						this.debug(`❌ Failed to decode JWT: ${jwtError.message}`);
+						this.debug(`❌ Failed to decode JWT: ${jwtError instanceof Error ? jwtError.message : String(jwtError)}`);
 					}
 				}
 				
@@ -245,8 +253,10 @@ export class ABsmartlyMCP extends McpAgent<any, Record<string, never>, any> {
 			console.log("✅ AbsmartlyMcpOAuth.init() completed successfully");
 		} catch (error) {
 			console.error("❌ AbsmartlyMcpOAuth.init() ERROR:", error);
-			console.error("❌ Init error message:", error?.message);
-			console.error("❌ Init error stack:", error?.stack);
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			const errorStack = error instanceof Error ? error.stack : undefined;
+			console.error("❌ Init error message:", errorMessage);
+			console.error("❌ Init error stack:", errorStack);
 			this.debug("❌ Error in AbsmartlyMcpOAuth.init()", error);
 			throw error;
 		}
@@ -259,7 +269,7 @@ export class ABsmartlyMCP extends McpAgent<any, Record<string, never>, any> {
 			if (!this.apiClient) {
 				console.log("📦 No API client - setting empty arrays for all entities");
 				this.debug("📦 No API client available, skipping entities fetch");
-				this.customFields = [];
+				this._customFields = [];
 				this.users = [];
 				this.teams = [];
 				this.applications = [];
@@ -296,11 +306,11 @@ export class ABsmartlyMCP extends McpAgent<any, Record<string, never>, any> {
 
 			// Process custom fields
 			if (customFieldsResponse.status === 'fulfilled' && customFieldsResponse.value.ok) {
-				this.customFields = customFieldsResponse.value.data?.experiment_custom_section_fields || [];
-				this.debug("✅ Fetched custom fields:", this.customFields.length);
+				this._customFields = customFieldsResponse.value.data?.experiment_custom_section_fields || [];
+				this.debug("✅ Fetched custom fields:", this._customFields.length);
 			} else {
 				this.debug("❌ Failed to fetch custom fields:", customFieldsResponse.status === 'rejected' ? customFieldsResponse.reason : customFieldsResponse.value.errors);
-				this.customFields = [];
+				this._customFields = [];
 			}
 
 			// Process users
@@ -402,7 +412,7 @@ export class ABsmartlyMCP extends McpAgent<any, Record<string, never>, any> {
 			}
 
 			this.debug("✅ All entities fetched successfully:", {
-				customFields: this.customFields.length,
+				customFields: this._customFields.length,
 				users: this.users.length,
 				teams: this.teams.length,
 				applications: this.applications.length,
@@ -414,11 +424,13 @@ export class ABsmartlyMCP extends McpAgent<any, Record<string, never>, any> {
 			console.log("✅ fetchAllEntities completed successfully");
 		} catch (error) {
 			console.error("❌ fetchAllEntities ERROR:", error);
-			console.error("❌ fetchAllEntities error message:", error?.message);
-			console.error("❌ fetchAllEntities error stack:", error?.stack);
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			const errorStack = error instanceof Error ? error.stack : undefined;
+			console.error("❌ fetchAllEntities error message:", errorMessage);
+			console.error("❌ fetchAllEntities error stack:", errorStack);
 			this.debug("❌ Error fetching entities:", error);
 			// Set all arrays to empty on error
-			this.customFields = [];
+			this._customFields = [];
 			this.users = [];
 			this.teams = [];
 			this.applications = [];
@@ -1321,7 +1333,8 @@ export class ABsmartlyMCP extends McpAgent<any, Record<string, never>, any> {
 			console.log("✅ setupTools completed successfully");
 		} catch (error) {
 			console.error("❌ setupTools ERROR:", error);
-			console.error("❌ setupTools error stack:", error?.stack);
+			const errorStack = error instanceof Error ? error.stack : undefined;
+			console.error("❌ setupTools error stack:", errorStack);
 			throw error;
 		}
 	}
@@ -1386,14 +1399,18 @@ export class ABsmartlyMCP extends McpAgent<any, Record<string, never>, any> {
 								order_index: 0
 							}
 						] : [],
-						custom_fields: this.customFields.reduce((acc, field) => {
+						custom_fields: this._customFields.reduce((acc, field) => {
 							acc[field.name] = field.type === 'boolean' ? false : '';
 							return acc;
 						}, {} as any)
 					};
 					
 					return {
-						text: JSON.stringify(template, null, 2)
+						contents: [{
+							uri: "absmartly://templates/experiment",
+							mimeType: "application/json",
+							text: JSON.stringify(template, null, 2)
+						}]
 					};
 				}
 			);
@@ -1415,11 +1432,15 @@ export class ABsmartlyMCP extends McpAgent<any, Record<string, never>, any> {
 						experiment_tags: this.experimentTags,
 						metrics: this.metrics,
 						goals: this.goals,
-						custom_fields: this.customFields
+						custom_fields: this._customFields
 					};
 					
 					return {
-						text: JSON.stringify(entities, null, 2)
+						contents: [{
+							uri: "absmartly://entities/available",
+							mimeType: "application/json",
+							text: JSON.stringify(entities, null, 2)
+						}]
 					};
 				}
 			);
@@ -1427,7 +1448,8 @@ export class ABsmartlyMCP extends McpAgent<any, Record<string, never>, any> {
 			console.log("✅ setupResources completed successfully");
 		} catch (error) {
 			console.error("❌ setupResources ERROR:", error);
-			console.error("❌ setupResources error stack:", error?.stack);
+			const errorStack = error instanceof Error ? error.stack : undefined;
+			console.error("❌ setupResources error stack:", errorStack);
 			throw error;
 		}
 	}
@@ -1536,7 +1558,8 @@ Which experiment would you like to analyze?`
 			console.log("✅ setupPrompts completed successfully");
 		} catch (error) {
 			console.error("❌ setupPrompts ERROR:", error);
-			console.error("❌ setupPrompts error stack:", error?.stack);
+			const errorStack = error instanceof Error ? error.stack : undefined;
+			console.error("❌ setupPrompts error stack:", errorStack);
 			throw error;
 		}
 	}
@@ -1551,10 +1574,9 @@ const oauthProvider = new OAuthProvider({
 	tokenEndpoint: "/token",
 	// Allow public client registration (PKCE-only clients)
 	disallowPublicClientRegistration: false,
-	// Require authentication for the API route
-	requireAuth: true,
 	// Custom client lookup to handle public clients (PKCE without client_secret)
-	async clientLookup(clientId: string, env: any) {
+	// NOTE: clientLookup may be handled differently in this version
+	/* async clientLookup(clientId: string, env: any) {
 		// First check if it's a dynamically registered client
 		if (env.OAUTH_KV && clientId.startsWith("claude-mcp-")) {
 			const clientData = await env.OAUTH_KV.get(`client:${clientId}`);
@@ -1585,7 +1607,7 @@ const oauthProvider = new OAuthProvider({
 			],
 			clientName: "ABsmartly MCP Universal Client"
 		};
-	}
+	} */
 });
 
 // Custom wrapper to handle OAuth discovery endpoint
@@ -1902,7 +1924,7 @@ export default {
 		// Handle Dynamic Client Registration endpoint
 		if (url.pathname === "/register" && request.method === "POST") {
 			try {
-				const body = await request.json();
+				const body = await request.json() as any;
 				console.log(`🔍 Client registration request:`, body);
 				
 				// Check if this is a public client request
@@ -1916,7 +1938,7 @@ export default {
 				
 				// Store the client registration in KV
 				if (env.OAUTH_KV) {
-					const clientData = {
+					const clientData: any = {
 						clientId: clientId,
 						redirectUris: body.redirect_uris || [],
 						clientName: body.client_name || "Claude MCP Client",
@@ -1933,7 +1955,7 @@ export default {
 				}
 				
 				// Build registration response - only include client_secret for confidential clients
-				const registrationResponse = {
+				const registrationResponse: any = {
 					client_id: clientId,
 					client_id_issued_at: Math.floor(Date.now() / 1000),
 					client_name: body.client_name || "Claude MCP Client",

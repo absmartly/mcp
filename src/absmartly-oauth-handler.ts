@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import type { AuthRequest, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
+import type { Env } from "./types";
 import { Hono } from "hono";
 import {
 	clientIdAlreadyApproved,
@@ -91,9 +92,11 @@ app.get("/authorize", async (c) => {
 		debug('Parsed OAuth request', oauthReqInfo);
 	} catch (error) {
 		debug('Error parsing OAuth request', error);
-		debug('Error message', error.message);
-		debug('Error stack', error.stack);
-		return c.text(`OAuth request parsing failed: ${error.message}\n\nDebug Logs:\n${debugLogs.join('\n')}`, 400);
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		const errorStack = error instanceof Error ? error.stack : undefined;
+		debug('Error message', errorMessage);
+		debug('Error stack', errorStack);
+		return c.text(`OAuth request parsing failed: ${errorMessage}\n\nDebug Logs:\n${debugLogs.join('\n')}`, 400);
 	}
 	
 	const { clientId } = oauthReqInfo;
@@ -120,7 +123,7 @@ app.get("/authorize", async (c) => {
 	// Check if client is already approved AND exists
 	try {
 		debug('Checking if client is already approved', oauthReqInfo.clientId);
-		const isApproved = await clientIdAlreadyApproved(c.req.raw, oauthReqInfo.clientId, env.COOKIE_ENCRYPTION_KEY || "default-key");
+		const isApproved = await clientIdAlreadyApproved(c.req.raw, oauthReqInfo.clientId, c.env.COOKIE_ENCRYPTION_KEY || "default-key");
 		debug('Client approval check result', isApproved);
 		
 		if (isApproved) {
@@ -152,8 +155,10 @@ app.get("/authorize", async (c) => {
 		}
 	} catch (error) {
 		debug('Error in client approval check', error);
-		debug('Error message', error.message);
-		debug('Error stack', error.stack);
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		const errorStack = error instanceof Error ? error.stack : undefined;
+		debug('Error message', errorMessage);
+		debug('Error stack', errorStack);
 		// Continue to approval dialog even if check fails
 	}
 
@@ -183,7 +188,8 @@ app.get("/authorize", async (c) => {
 	const enhancedClientInfo = clientInfo ? clientInfo : {
 		clientId: clientId,
 		clientName: inferredClientName || clientId,
-		redirectUris: [oauthReqInfo.redirectUri]
+		redirectUris: [oauthReqInfo.redirectUri],
+		tokenEndpointAuthMethod: 'none' as const
 	};
 	
 	return renderApprovalDialog(c.req.raw, {
@@ -199,7 +205,7 @@ app.get("/authorize", async (c) => {
 
 app.post("/authorize", async (c) => {
 	// Validates form submission, extracts state, and generates Set-Cookie headers to skip approval dialog next time
-	const { state, headers } = await parseRedirectApproval(c.req.raw, env.COOKIE_ENCRYPTION_KEY || "default-key");
+	const { state, headers } = await parseRedirectApproval(c.req.raw, c.env.COOKIE_ENCRYPTION_KEY || "default-key");
 	if (!state.oauthReqInfo) {
 		return c.text("Invalid request", 400);
 	}
@@ -249,7 +255,7 @@ async function redirectToAbsmartlyOAuth(
 	
 	// Redirect to our SAML → OAuth bridge (at /auth/oauth/authorize)
 	const absmartlyOAuthUrl = new URL(`${endpoint}/auth/oauth/authorize`);
-	absmartlyOAuthUrl.searchParams.set("client_id", env.ABSMARTLY_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID);
+	absmartlyOAuthUrl.searchParams.set("client_id", c.env.ABSMARTLY_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID);
 	absmartlyOAuthUrl.searchParams.set("redirect_uri", new URL("/oauth/callback", request.url).href);
 	absmartlyOAuthUrl.searchParams.set("scope", "api:read api:write");
 	absmartlyOAuthUrl.searchParams.set("response_type", "code");
@@ -329,14 +335,14 @@ app.get("/oauth/callback", async (c) => {
 		const tokenUrl = `${endpoint}/auth/oauth/token`;
 		const requestBody = new URLSearchParams({
 			grant_type: "authorization_code",
-			client_id: env.ABSMARTLY_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID,
+			client_id: c.env.ABSMARTLY_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID,
 			code: code,
 			redirect_uri: new URL("/oauth/callback", c.req.url).href,
 		});
 		
 		// Add client_secret if provided in environment
-		if (env.ABSMARTLY_OAUTH_CLIENT_SECRET) {
-			requestBody.set("client_secret", env.ABSMARTLY_OAUTH_CLIENT_SECRET);
+		if (c.env.ABSMARTLY_OAUTH_CLIENT_SECRET) {
+			requestBody.set("client_secret", c.env.ABSMARTLY_OAUTH_CLIENT_SECRET);
 		}
 		
 		debug('Token exchange request URL', tokenUrl);
@@ -453,9 +459,11 @@ app.get("/oauth/callback", async (c) => {
 		return Response.redirect(redirectTo);
 	} catch (error) {
 		debug('OAuth callback error', error);
-		debug('Error message', error?.message);
-		debug('Error stack', error?.stack);
-		return c.text(`Authentication failed: ${error?.message || error}\n\nDebug Logs:\n${debugLogs.join('\n')}`, 500);
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		const errorStack = error instanceof Error ? error.stack : undefined;
+		debug('Error message', errorMessage);
+		debug('Error stack', errorStack);
+		return c.text(`Authentication failed: ${errorMessage}\n\nDebug Logs:\n${debugLogs.join('\n')}`, 500);
 	}
 });
 

@@ -90,7 +90,7 @@ export class ABsmartlyAPIClient {
         ...headers,
         'Authorization': `${this.authType === 'jwt' ? 'JWT' : 'Api-Key'} ${this.authToken.slice(0, 8)}...${this.authToken.slice(-8)}`
       },
-      bodyPreview: options.body ? options.body.substring(0, 500) + (options.body.length > 500 ? '...' : '') : undefined
+      bodyPreview: options.body ? (typeof options.body === 'string' ? options.body.substring(0, 500) + (options.body.length > 500 ? '...' : '') : '[binary data]') : undefined
     });
 
     try {
@@ -248,7 +248,7 @@ export class ABsmartlyAPIClient {
     const searchParams = new URLSearchParams();
     if (params) {
       Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
+        if (value !== undefined && value !== null) {
           searchParams.append(key, value.toString());
         }
       });
@@ -372,7 +372,7 @@ export class ABsmartlyAPIClient {
     const searchParams = new URLSearchParams();
     if (params) {
       Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
+        if (value !== undefined && value !== null) {
           searchParams.append(key, value.toString());
         }
       });
@@ -404,7 +404,7 @@ export class ABsmartlyAPIClient {
     const searchParams = new URLSearchParams();
     if (params) {
       Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
+        if (value !== undefined && value !== null) {
           searchParams.append(key, value.toString());
         }
       });
@@ -436,7 +436,7 @@ export class ABsmartlyAPIClient {
     const searchParams = new URLSearchParams();
     if (params) {
       Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
+        if (value !== undefined && value !== null) {
           searchParams.append(key, value.toString());
         }
       });
@@ -454,7 +454,7 @@ export class ABsmartlyAPIClient {
     const searchParams = new URLSearchParams();
     if (params) {
       Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
+        if (value !== undefined && value !== null) {
           searchParams.append(key, value.toString());
         }
       });
@@ -467,7 +467,7 @@ export class ABsmartlyAPIClient {
     const searchParams = new URLSearchParams();
     if (params) {
       Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
+        if (value !== undefined && value !== null) {
           searchParams.append(key, value.toString());
         }
       });
@@ -480,7 +480,7 @@ export class ABsmartlyAPIClient {
     const searchParams = new URLSearchParams();
     if (params) {
       Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
+        if (value !== undefined && value !== null) {
           searchParams.append(key, value.toString());
         }
       });
@@ -493,7 +493,7 @@ export class ABsmartlyAPIClient {
     const searchParams = new URLSearchParams();
     if (params) {
       Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
+        if (value !== undefined && value !== null) {
           searchParams.append(key, value.toString());
         }
       });
@@ -507,7 +507,7 @@ export class ABsmartlyAPIClient {
     const searchParams = new URLSearchParams();
     if (params) {
       Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
+        if (value !== undefined && value !== null) {
           searchParams.append(key, value.toString());
         }
       });
@@ -539,7 +539,7 @@ export class ABsmartlyAPIClient {
     const searchParams = new URLSearchParams();
     if (params) {
       Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
+        if (value !== undefined && value !== null) {
           searchParams.append(key, value.toString());
         }
       });
@@ -592,7 +592,7 @@ export class ABsmartlyAPIClient {
     const searchParams = new URLSearchParams();
     if (params) {
       Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
+        if (value !== undefined && value !== null) {
           searchParams.append(key, value.toString());
         }
       });
