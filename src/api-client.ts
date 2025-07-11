@@ -587,6 +587,38 @@ export class ABsmartlyAPIClient {
     });
   }
 
+  // Experiment Tags API
+  async listExperimentTags(params?: any): Promise<ABsmartlyResponse> {
+    const searchParams = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined) {
+          searchParams.append(key, value.toString());
+        }
+      });
+    }
+    const endpoint = `/experiment_tags${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
+    return this.makeRequest(endpoint);
+  }
+
+  async getExperimentTag(id: number): Promise<ABsmartlyResponse> {
+    return this.makeRequest(`/experiment_tags/${id}`);
+  }
+
+  async createExperimentTag(data: any): Promise<ABsmartlyResponse> {
+    return this.makeRequest('/experiment_tags', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateExperimentTag(id: number, data: any): Promise<ABsmartlyResponse> {
+    return this.makeRequest(`/experiment_tags/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
   // Generic API method for any endpoint
   async request(endpoint: string, options: RequestInit = {}): Promise<ABsmartlyResponse> {
     return this.makeRequest(endpoint, options);

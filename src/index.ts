@@ -4,10 +4,15 @@ import { McpAgent } from "agents/mcp";
 import { z } from "zod";
 import { ABsmartlyAPIClient } from "./api-client";
 import { ABsmartlyOAuthHandler } from "./absmartly-oauth-handler";
+import { ABsmartlyResources } from "./resources";
 // import type { Env } from "./types";
 
 // Default ABsmartly API endpoint
 const DEFAULT_ABSMARTLY_ENDPOINT = "https://dev-1.absmartly.com/v1";
+
+// Default OAuth configuration
+const DEFAULT_OAUTH_CLIENT_ID = "mcp-absmartly-universal";
+const DEFAULT_BACKEND_ENDPOINT = "https://dev-1.absmartly.com";
 
 export class ABsmartlyMCP extends McpAgent<any, Record<string, never>, any> {
 	server = new McpServer({
@@ -22,6 +27,13 @@ export class ABsmartlyMCP extends McpAgent<any, Record<string, never>, any> {
 
 	private apiClient: ABsmartlyAPIClient | null = null;
 	private customFields: any[] = [];
+	private users: any[] = [];
+	private teams: any[] = [];
+	private applications: any[] = [];
+	private unitTypes: any[] = [];
+	private experimentTags: any[] = [];
+	private metrics: any[] = [];
+	private goals: any[] = [];
 	
 	// OAuth props from authentication
 	props: any = null;
@@ -149,8 +161,34 @@ export class ABsmartlyMCP extends McpAgent<any, Record<string, never>, any> {
 				this.apiClient = null;
 			} else {
 				// Determine auth token and type
-				const authToken = this.props.absmartly_api_key || this.props.oauth_jwt;
-				const authType = this.props.absmartly_api_key ? 'api-key' : 'jwt';
+				let authToken: string;
+				let authType: 'api-key' | 'jwt';
+				
+				// Check if we have a valid API key (should not contain @ or : which indicates it's not a real API key)
+				const hasValidApiKey = this.props.absmartly_api_key && 
+					!this.props.absmartly_api_key.includes('@') && 
+					!this.props.absmartly_api_key.includes(':') &&
+					!this.props.absmartly_api_key.startsWith('unknown');
+				
+				if (hasValidApiKey) {
+					// We have a valid API key - use it
+					authToken = this.props.absmartly_api_key;
+					authType = 'api-key';
+					this.debug("🔑 Using ABsmartly API key for authentication");
+				} else if (this.props.oauth_jwt) {
+					// We have an OAuth JWT - use it
+					authToken = this.props.oauth_jwt;
+					authType = 'jwt';
+					this.debug("🔑 Using OAuth JWT for authentication");
+				} else if (this.props.absmartly_api_key) {
+					// We have an invalid API key, but let's try using it anyway and log the issue
+					authToken = this.props.absmartly_api_key;
+					authType = 'api-key';
+					this.debug("⚠️ Using potentially invalid API key (contains @ or :):", this.props.absmartly_api_key.substring(0, 20) + '...');
+				} else {
+					this.debug("❌ No valid authentication token found");
+					throw new Error("No authentication token available");
+				}
 				
 				this.debug(`🔑 Initializing API client with ${authType} authentication`);
 				this.debug(`🔑 Token preview: ${authToken?.substring(0, 20)}...`);
@@ -404,91 +442,98 @@ export class ABsmartlyMCP extends McpAgent<any, Record<string, never>, any> {
 	 */
 	setupResources() {
 		try {
-			console.log("📚 Setting up resources");
+			console.log("📚 Setting up resources with ABsmartlyResources class");
 			
-			// API Documentation resource
+			// Use the dedicated resources class for comprehensive documentation
+			const resourcesManager = new ABsmartlyResources(this);
+			resourcesManager.setupResources();
+			
+			// Add experiment template resource with all available entities
 			this.server.resource(
-				"absmartly://docs/api",
-				"text/markdown",
+				"absmartly://templates/experiment",
+				"application/json",
 				{
-					name: "ABsmartly API Documentation",
-					description: "OpenAPI specification and endpoint documentation"
+					name: "Experiment Template",
+					description: "Template for creating new experiments with available entities"
 				},
 				async () => {
+					const template = {
+						state: "ready",
+						name: "my_new_experiment",
+						display_name: "My New Experiment",
+						description: "Description of the experiment",
+						hypothesis: "We believe that changing X will result in Y",
+						iteration: 1,
+						percentage_of_traffic: 100,
+						unit_type: this.unitTypes.length > 0 ? {
+							unit_type_id: this.unitTypes[0].id
+						} : { unit_type_id: 1 },
+						nr_variants: 2,
+						percentages: "50/50",
+						audience: '{"filter":[{"and":[]}]}',
+						audience_strict: true,
+						owners: this.users.length > 0 ? [
+							{ user_id: this.users[0].id }
+						] : [],
+						teams: this.teams.length > 0 ? [
+							{ team_id: this.teams[0].id }
+						] : [],
+						experiment_tags: this.experimentTags.length > 0 ? [
+							{ experiment_tag_id: this.experimentTags[0].id }
+						] : [],
+						applications: this.applications.length > 0 ? [
+							{
+								application_id: this.applications[0].id,
+								application_version: "0"
+							}
+						] : [],
+						primary_metric: this.metrics.length > 0 ? {
+							metric_id: this.metrics[0].id
+						} : null,
+						secondary_metrics: this.metrics.length > 1 ? [
+							{
+								metric_id: this.metrics[1].id,
+								type: "secondary",
+								order_index: 0
+							}
+						] : [],
+						custom_fields: this.customFields.reduce((acc, field) => {
+							acc[field.name] = field.type === 'boolean' ? false : '';
+							return acc;
+						}, {} as any)
+					};
+					
 					return {
-						text: `# ABsmartly API Documentation
-
-## Base URL
-${this.props?.absmartly_endpoint || DEFAULT_ABSMARTLY_ENDPOINT}
-
-## Authentication
-- **API Key**: Pass as \`X-API-Key\` header
-- **JWT Token**: Pass as \`Authorization: Bearer <token>\` header
-
-## Key Endpoints
-
-### Experiments
-- \`GET /experiments\` - List all experiments
-- \`GET /experiments/{id}\` - Get experiment details
-- \`POST /experiments\` - Create new experiment
-- \`PUT /experiments/{id}\` - Update experiment
-- \`DELETE /experiments/{id}\` - Delete experiment
-
-### Metrics
-- \`GET /metrics\` - List all metrics
-- \`POST /metrics\` - Create new metric
-
-### Goals
-- \`GET /goals\` - List all goals
-- \`POST /goals\` - Create new goal
-
-## Experiment States
-- \`draft\` - Initial state, can be edited
-- \`running\` - Live and collecting data
-- \`paused\` - Temporarily stopped
-- \`stopped\` - Permanently ended
-
-## Custom Fields
-This instance has ${this.customFields.length} custom fields configured for experiments.
-${this.customFields.map(f => `- ${f.name} (${f.type})`).join('\n')}
-`
+						text: JSON.stringify(template, null, 2)
 					};
 				}
 			);
 			
-			// Experiment Template resource
-			if (this.customFields.length > 0) {
-				this.server.resource(
-					"absmartly://templates/experiment",
-					"application/json",
-					{
-						name: "Experiment Template",
-						description: "Template for creating new experiments with custom fields"
-					},
-					async () => {
-						const template = {
-							name: "New Experiment",
-							description: "Experiment description",
-							state: "draft",
-							type: "ab",
-							variants: [
-								{ name: "Control", split: 50 },
-								{ name: "Treatment", split: 50 }
-							],
-							metrics: [],
-							goals: [],
-							custom_fields: this.customFields.reduce((acc, field) => {
-								acc[field.name] = field.type === 'boolean' ? false : '';
-								return acc;
-							}, {} as any)
-						};
-						
-						return {
-							text: JSON.stringify(template, null, 2)
-						};
-					}
-				);
-			}
+			// Add available entities resource for reference
+			this.server.resource(
+				"absmartly://entities/available",
+				"application/json",
+				{
+					name: "Available Entities",
+					description: "All available entities for experiment creation"
+				},
+				async () => {
+					const entities = {
+						users: this.users,
+						teams: this.teams,
+						applications: this.applications,
+						unit_types: this.unitTypes,
+						experiment_tags: this.experimentTags,
+						metrics: this.metrics,
+						goals: this.goals,
+						custom_fields: this.customFields
+					};
+					
+					return {
+						text: JSON.stringify(entities, null, 2)
+					};
+				}
+			);
 			
 			console.log("✅ setupResources completed successfully");
 		} catch (error) {

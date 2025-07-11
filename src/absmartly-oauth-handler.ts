@@ -14,10 +14,10 @@ const DEFAULT_OAUTH_CLIENT_ID = "mcp-absmartly-universal";
 export type ABsmartlyProps = {
 	email: string;
 	absmartly_endpoint: string;
-	absmartly_api_key: string;
+	absmartly_api_key?: string; // Optional - may not be present when using OAuth JWT
 	user_id: string;
 	name?: string;
-	oauth_jwt?: string;
+	oauth_jwt?: string; // Optional - contains OAuth JWT for API authentication
 };
 
 const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>();
@@ -117,15 +117,38 @@ app.get("/authorize", async (c) => {
 		debug('Client lookup error', error);
 	}
 
-	// Check if client is already approved
+	// Check if client is already approved AND exists
 	try {
 		debug('Checking if client is already approved', oauthReqInfo.clientId);
 		const isApproved = await clientIdAlreadyApproved(c.req.raw, oauthReqInfo.clientId, env.COOKIE_ENCRYPTION_KEY || "default-key");
 		debug('Client approval check result', isApproved);
 		
 		if (isApproved) {
-			debug('Client is already approved, redirecting to OAuth');
-			return redirectToAbsmartlyOAuth(c, c.req.raw, oauthReqInfo, {}, debugLogs);
+			// Double-check that the client actually exists
+			const clientExists = await c.env.OAUTH_PROVIDER.lookupClient(clientId);
+			debug('Client exists check', !!clientExists);
+			
+			if (clientExists) {
+				debug('Client is already approved and exists, redirecting to OAuth');
+				return redirectToAbsmartlyOAuth(c, c.req.raw, oauthReqInfo, {}, debugLogs);
+			} else {
+				debug('Client is approved but does not exist, auto-registering new public client');
+				// Client was approved but deleted, automatically register a new public client with the same ID
+				const newClientData = {
+					clientId: clientId,
+					redirectUris: [oauthReqInfo.redirectUri],
+					clientName: "Claude MCP Client",
+					registrationDate: Date.now(),
+					tokenEndpointAuthMethod: 'none' // Public client
+					// No clientSecret for public clients
+				};
+				
+				await c.env.OAUTH_KV.put(`client:${clientId}`, JSON.stringify(newClientData));
+				debug('Auto-registered new public client', newClientData);
+				
+				// Now redirect to OAuth with the newly registered client
+				return redirectToAbsmartlyOAuth(c, c.req.raw, oauthReqInfo, {}, debugLogs);
+			}
 		}
 	} catch (error) {
 		debug('Error in client approval check', error);
@@ -396,20 +419,30 @@ app.get("/oauth/callback", async (c) => {
 			hasOAuthJWT: !!access_token
 		});
 
+		// Prepare props object
+		const props: any = {
+			email,
+			name,
+			absmartly_endpoint: absmartlyEndpoint,
+			user_id: userId,
+			oauth_jwt: access_token, // Store the original OAuth JWT
+		};
+		
+		// Only include absmartly_api_key if we actually have one
+		if (absmartlyApiKey) {
+			props.absmartly_api_key = absmartlyApiKey;
+			debug('Including API key in props:', absmartlyApiKey.substring(0, 10) + '...');
+		} else {
+			debug('No API key available, will use OAuth JWT for API calls');
+		}
+
 		// Return back to the MCP client a new token with ABsmartly credentials
 		const { redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({
 			metadata: {
 				label: name || email,
 			},
 			// This will be available on this.props inside AbsmartlyMcpOAuth
-			props: {
-				email,
-				name,
-				absmartly_endpoint: absmartlyEndpoint,
-				absmartly_api_key: absmartlyApiKey, // Only set if we have a real API key
-				user_id: userId,
-				oauth_jwt: access_token, // Store the original OAuth JWT
-			} as ABsmartlyProps,
+			props: props as ABsmartlyProps,
 			request: oauthReqInfo,
 			scope: oauthReqInfo.scope,
 			userId: userId,
