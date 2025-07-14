@@ -82,16 +82,7 @@ export class ABsmartlyAPIClient {
       ...options.headers,
     };
 
-    // Debug logging
-    console.log('🔗 ABsmartly API Request:', {
-      url,
-      method: options.method || 'GET',
-      headers: {
-        ...headers,
-        'Authorization': `${this.authType === 'jwt' ? 'JWT' : 'Api-Key'} ${this.authToken.slice(0, 8)}...${this.authToken.slice(-8)}`
-      },
-      bodyPreview: options.body ? (typeof options.body === 'string' ? options.body.substring(0, 500) + (options.body.length > 500 ? '...' : '') : '[binary data]') : undefined
-    });
+    console.log(`🔗 ABsmartly API Request: [Auth: ${this.authType === 'jwt' ? 'JWT' : 'Api-Key'}] ${options.method || 'GET'} ${url}`);
 
     try {
       const response = await fetch(url, {
@@ -115,13 +106,11 @@ export class ABsmartlyAPIClient {
         data = { message: text };
       }
 
-      console.log('📡 ABsmartly API Response:', {
-        status: response.status,
-        statusText: response.statusText,
-        ok: response.ok,
-        dataType: typeof data,
-        dataPreview: JSON.stringify(data).slice(0, 500)
-      });
+      if (response.ok) {
+        console.log(`📡 ABsmartly API Response: ${response.status} ${response.ok ? 'OK' : 'ERROR'} ${url} ${JSON.stringify(data).slice(0, 200)}`);
+      } else {
+        console.error(`❌ ABsmartly API Error: ${response.status} ${url} "${response.errors.join(', ')}" - ${JSON.stringify(data).slice(0, 200)}`);
+      }
 
       if (!response.ok) {
         // Enhanced error details for debugging
@@ -133,7 +122,6 @@ export class ABsmartlyAPIClient {
           responseData: data
         };
         
-        console.error('❌ ABsmartly API Error:', errorDetails);
         
         return {
           ok: false,
