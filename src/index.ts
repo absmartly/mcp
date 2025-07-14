@@ -14,6 +14,12 @@ const DEFAULT_ABSMARTLY_ENDPOINT = "https://dev-1.absmartly.com/v1";
 const DEFAULT_OAUTH_CLIENT_ID = "mcp-absmartly-universal";
 const DEFAULT_BACKEND_ENDPOINT = "https://dev-1.absmartly.com";
 
+// Helper function to clean endpoint URLs
+function cleanEndpointUrl(endpoint: string): string {
+	if (!endpoint) return endpoint;
+	return endpoint.replace(/[,\s]+$/, '');
+}
+
 export class ABsmartlyMCP extends McpAgent<any, Record<string, never>, any> {
 	server = new McpServer({
 		name: "ABsmartly MCP Server",
@@ -93,11 +99,21 @@ export class ABsmartlyMCP extends McpAgent<any, Record<string, never>, any> {
 				
 				if (apiKeyFromHeader && endpointFromHeader && (!this.props || !this.props.absmartly_api_key)) {
 					this.debug("🔑 Using credentials from request headers");
+					
+					// Clean up endpoint URL
+					const cleanEndpoint = cleanEndpointUrl(endpointFromHeader);
+					if (cleanEndpoint !== endpointFromHeader) {
+						this.debug("🧹 Cleaned endpoint URL:", {
+							original: endpointFromHeader,
+							cleaned: cleanEndpoint
+						});
+					}
+					
 					// Create props from headers
 					this.props = {
 						email: 'unknown@example.com',
 						name: 'API Key User',
-						absmartly_endpoint: endpointFromHeader,
+						absmartly_endpoint: cleanEndpoint,
 						absmartly_api_key: apiKeyFromHeader,
 						user_id: 'api-key-user'
 					};
@@ -217,10 +233,19 @@ export class ABsmartlyMCP extends McpAgent<any, Record<string, never>, any> {
 					}
 				}
 				
+				// Clean up endpoint URL
+				const endpoint = cleanEndpointUrl(this.props.absmartly_endpoint || DEFAULT_ABSMARTLY_ENDPOINT);
+				if (endpoint !== (this.props.absmartly_endpoint || DEFAULT_ABSMARTLY_ENDPOINT)) {
+					this.debug("🧹 Cleaned endpoint URL for API client:", {
+						original: this.props.absmartly_endpoint || DEFAULT_ABSMARTLY_ENDPOINT,
+						cleaned: endpoint
+					});
+				}
+				
 				// Initialize API client with authenticated user's credentials
 				this.apiClient = new ABsmartlyAPIClient(
 					authToken,
-					this.props.absmartly_endpoint || DEFAULT_ABSMARTLY_ENDPOINT,
+					endpoint,
 					authType
 				);
 				
@@ -2015,7 +2040,19 @@ export default {
 		}
 
 		// Store ABsmartly endpoint in KV if provided (from header or query param)
-		const absmartlyEndpoint = request.headers.get("x-absmartly-endpoint") || url.searchParams.get("absmartly-endpoint");
+		const rawEndpoint = request.headers.get("x-absmartly-endpoint") || url.searchParams.get("absmartly-endpoint");
+		
+		// Clean up endpoint URL if present
+		let absmartlyEndpoint = rawEndpoint;
+		if (rawEndpoint) {
+			absmartlyEndpoint = cleanEndpointUrl(rawEndpoint);
+			if (absmartlyEndpoint !== rawEndpoint) {
+				console.log("🧹 Cleaned endpoint URL:", {
+					original: rawEndpoint,
+					cleaned: absmartlyEndpoint
+				});
+			}
+		}
 		if (absmartlyEndpoint && env.OAUTH_KV) {
 			await env.OAUTH_KV.put("absmartly_endpoint_config", absmartlyEndpoint);
 		}
