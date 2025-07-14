@@ -26,6 +26,7 @@
     "test:dynamic": "node test-dynamic-fields-complete.js",
     "test:dynamic:full": "./run-dynamic-fields-test.sh",
     "precommit": "npm run test",
+    "clean-whitespace": "find src -name '*.ts' -exec sed -i '' '/^[[:space:]]*$/d' {} +",
     "build:dxt": "dxt pack",
     "upload:dxt": "./scripts/build-dxt.sh",
     "install:dxt": "npm install -g @anthropic-ai/dxt"

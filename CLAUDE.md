@@ -1,12 +1,23 @@
 # Claude Code Guidelines
 
-## Constants and Magic Strings
+## Code Quality Standards
+
+### Constants and Magic Strings
 
 **NEVER use magic strings or hardcoded values inline in code**
 
 - **All default values must be declared as constants at the top of the file**
 - **Use descriptive constant names with ALL_CAPS naming convention**
 - **Group related constants together**
+
+### Whitespace and Formatting
+
+**NEVER create lines containing only whitespace characters**
+
+- **Lines should either be completely empty or contain meaningful content**
+- **No lines with only spaces, tabs, or other invisible characters**
+- **The `npm run clean-whitespace` command automatically removes such lines**
+- **This rule is enforced by post-edit hooks to maintain code cleanliness**
 
 ```javascript
 // ❌ Bad - magic strings inline
