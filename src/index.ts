@@ -477,10 +477,25 @@ function detectApiKey(request: Request): { apiKey: string | null, endpoint: stri
 // Create single MCP handler to ensure session consistency
 const baseMcpHandler = ABsmartlyMCP.mount("/sse");
 
+// Create custom OAuth handler instance
+const oauthHandler = new ABsmartlyOAuthHandler();
+
+// Wrap the OAuth handler to add debugging
+const debugOAuthHandler = {
+    fetch: async (request: Request, env: any, ctx: any) => {
+        console.log(`🔍 debugOAuthHandler: ${request.method} ${new URL(request.url).pathname}`);
+        const response = await oauthHandler.fetch(request, env, ctx);
+        console.log(`📍 debugOAuthHandler response status: ${response.status}`);
+        return response;
+    }
+};
+
 // Create OAuth provider for OAuth flow endpoints only
 const oauthProvider = new OAuthProvider({
-    // Empty apiHandlers to satisfy OAuth provider requirements
-    apiHandlers: {},
+    // API handlers for protected endpoints
+    apiHandlers: {
+        "/sse": baseMcpHandler
+    },
     authorizeEndpoint: "/authorize",
     tokenEndpoint: "/token",
     clientRegistrationEndpoint: "/register",
@@ -529,367 +544,159 @@ const oauthProvider = new OAuthProvider({
         return null;
     },
 
-    // Default handler to redirect to ABsmartly OAuth
-    defaultHandler: {
-        async fetch(request: Request, env: any, context: any) {
-            const url = new URL(request.url);
-
-            // Store the ABsmartly endpoint from the resource parameter
-            const resourceParam = url.searchParams.get('resource');
-            if (resourceParam && env.OAUTH_KV) {
-                try {
-                    const resourceUrl = new URL(resourceParam);
-                    const absmartlyEndpoint = resourceUrl.searchParams.get('absmartly-endpoint');
-                    if (absmartlyEndpoint) {
-                        await env.OAUTH_KV.put("absmartly_endpoint_config", absmartlyEndpoint);
-                    }
-                } catch (e) {
-                    console.warn("Failed to parse resource parameter:", e);
-                }
-            }
-
-            // Get the endpoint from KV storage
-            let endpoint = "https://dev-1.absmartly.com"; // Default fallback
-            if (env.OAUTH_KV) {
-                const storedEndpoint = await env.OAUTH_KV.get("absmartly_endpoint_config");
-                if (storedEndpoint) {
-                    endpoint = storedEndpoint;
-                }
-            }
-
-            // Redirect to ABsmartly OAuth
-            const absmartlyOAuthUrl = new URL(`${endpoint}/auth/oauth/authorize`);
-            absmartlyOAuthUrl.searchParams.set("client_id", env.ABSMARTLY_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID);
-            absmartlyOAuthUrl.searchParams.set("redirect_uri", new URL("/oauth/callback", request.url).href);
-            absmartlyOAuthUrl.searchParams.set("scope", "api:read api:write");
-            absmartlyOAuthUrl.searchParams.set("response_type", "code");
-
-            // Pass through the state parameter
-            const state = url.searchParams.get("state");
-            if (state) {
-                absmartlyOAuthUrl.searchParams.set("state", state);
-            }
-
-            return Response.redirect(absmartlyOAuthUrl.toString());
-        }
-    },
-
-    // Token exchange callback to handle ABsmartly OAuth
-    tokenExchangeCallback: async (params: { code: string; state: string }, env: any, context: any) => {
-        console.log("🔄 Token exchange callback triggered");
-
-        const { code: authorizationCode, state } = params;
-
-        if (!authorizationCode || !state) {
-            throw new Error("Missing authorization code or state");
-        }
-
-        console.log("📋 Authorization code received:", authorizationCode.substring(0, 10) + "...");
-
-        // Parse the state to get the original OAuth request info
-        const oauthReqInfo = JSON.parse(atob(state));
-        console.log("📋 OAuth request info:", oauthReqInfo);
-
-        // Get the endpoint from KV storage
-        let endpoint = "https://dev-1.absmartly.com"; // Default fallback
-        if (env.OAUTH_KV) {
-            const storedEndpoint = await env.OAUTH_KV.get("absmartly_endpoint_config");
-            if (storedEndpoint) {
-                endpoint = storedEndpoint;
-            }
-        }
-
-        console.log("🔗 Using endpoint:", endpoint);
-
-        // Build the callback URL from the environment or use a default
-        const baseUrl = context?.request?.url ? new URL(context.request.url).origin : "https://mcp.absmartly.com";
-        const callbackUrl = `${baseUrl}/oauth/callback`;
-
-        // Exchange the code for an access token with ABsmartly OAuth
-        const tokenUrl = `${endpoint}/auth/oauth/token`;
-        const requestBody = new URLSearchParams({
-            grant_type: "authorization_code",
-            client_id: env.ABSMARTLY_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID,
-            code: authorizationCode,
-            redirect_uri: callbackUrl,
-        });
-
-        // Add client_secret if provided
-        if (env.ABSMARTLY_OAUTH_CLIENT_SECRET) {
-            requestBody.set("client_secret", env.ABSMARTLY_OAUTH_CLIENT_SECRET);
-        }
-
-        console.log("🔗 Token exchange request to:", tokenUrl);
-        console.log("🔗 Callback URL:", callbackUrl);
-
-        const tokenResponse = await fetch(tokenUrl, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-                "User-Agent": "ABsmartly-MCP-OAuth/1.0",
-                "Accept": "application/json",
-                "ngrok-skip-browser-warning": "true",
-            },
-            body: requestBody,
-        });
-
-        if (!tokenResponse.ok) {
-            const errorText = await tokenResponse.text();
-            console.error("❌ Token exchange failed:", errorText);
-            throw new Error(`Token exchange failed: ${errorText}`);
-        }
-
-        const tokenData = JSON.parse(await tokenResponse.text());
-        console.log("✅ Token exchange successful");
-
-        // Decode the JWT to extract user information
-        let userInfo: any = {};
-        try {
-            const jwtParts = tokenData.access_token.split('.');
-            if (jwtParts.length === 3) {
-                const payload = atob(jwtParts[1]);
-                userInfo = JSON.parse(payload);
-            }
-        } catch (error) {
-            console.warn("⚠️ Failed to decode JWT:", error);
-        }
-
-        // Extract user information
-        const email = userInfo?.email || userInfo?.sub || "unknown@example.com";
-        const name = userInfo?.name || userInfo?.given_name || email;
-        const userId = userInfo?.sub || userInfo?.absmartly_user_id?.toString() || email;
-
-        // Prepare endpoint for API client
-        const cleanEndpoint = endpoint.replace(/\/+$/, '');
-        const absmartlyEndpoint = cleanEndpoint.endsWith('/v1') ? cleanEndpoint : `${cleanEndpoint}/v1`;
-
-        // Return props for the MCP session
-        return {
-            email,
-            name,
-            absmartly_endpoint: absmartlyEndpoint,
-            oauth_jwt: tokenData.access_token,
-            user_id: userId,
-            absmartly_api_key: tokenData.api_key || tokenData.absmartly_api_key || undefined
-        };
-    }
+    // Use our custom OAuth handler as the default handler
+    defaultHandler: oauthHandler
 });
 
-// Main fetch handler with API key bypass
+// Main handler
 export default {
-    async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    async fetch(request: Request, env: any, ctx: any): Promise<Response> {
         const url = new URL(request.url);
-
-        console.log(`🔍 Main handler - ${request.method} ${url.pathname}`);
-
-        // Debug: Log Authorization header to understand token flow
-        const authHeader = request.headers.get("Authorization");
-        if (authHeader) {
-            console.log(`🔍 Authorization header found: ${authHeader.substring(0, 30)}...`);
-            if (authHeader.startsWith("Bearer ")) {
-                const token = authHeader.substring(7);
-                console.log(`🔍 Bearer token: ${token.substring(0, 20)}...`);
-
-                // Check if this token exists in KV storage
-                if (env.OAUTH_KV) {
-                    const tokenData = await env.OAUTH_KV.get(`token:${token}`);
-                    console.log(`🔍 Token in KV storage: ${!!tokenData}`);
-                    if (tokenData) {
-                        try {
-                            const parsed = JSON.parse(tokenData);
-                            console.log(`🔍 Token data preview:`, {
-                                hasProps: !!parsed.props,
-                                propsKeys: parsed.props ? Object.keys(parsed.props) : [],
-                                userId: parsed.userId,
-                                clientId: parsed.clientId
-                            });
-                        } catch (error) {
-                            console.error(`❌ Failed to parse token data:`, error);
-                        }
-                    }
-                }
-            }
-        } else {
-            console.log(`🔍 No Authorization header found`);
-        }
-
-        // Handle CORS preflight
-        if (request.method === "OPTIONS") {
-            return new Response(null, {
-                headers: {
-                    "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-                    "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
-                    "Access-Control-Max-Age": "86400",
-                },
+        
+        // Handle API key detection and session tracking
+        const { apiKey, endpoint } = detectApiKey(request);
+        
+        // Create client fingerprint for session tracking
+        const clientFingerprint = `${request.headers.get('CF-Connecting-IP') || 'unknown'}-${request.headers.get('User-Agent') || 'unknown'}`;
+        
+        // Store API key session in KV if using API key
+        if (apiKey && env.OAUTH_KV) {
+            await env.OAUTH_KV.put(`api_key_session:${clientFingerprint}`, 'active', {
+                expirationTtl: 300 // 5 minutes
             });
         }
-
-        // For SSE endpoints, handle authentication ourselves
-        if (url.pathname === "/sse" || url.pathname.startsWith("/sse/")) {
-            // First check for API key (including Bearer Api-Key format)
-            const { apiKey, endpoint } = detectApiKey(request);
-
-            if (apiKey && endpoint) {
-                console.log("🔑 API key detected, fetching user info");
-
-                // Check if we have cached user info for this API key
-                const userCacheKey = `user:${apiKey}`;
-                let userInfo: any = null;
-
+        
+        // Check for OAuth discovery endpoints and block them for API key users
+        const isOAuthDiscoveryEndpoint = url.pathname === '/.well-known/oauth-authorization-server' || 
+                                        url.pathname === '/.well-known/oauth-protected-resource' ||
+                                        url.pathname.startsWith('/.well-known/oauth-authorization-server/') ||
+                                        url.pathname.startsWith('/.well-known/oauth-protected-resource/');
+        
+        if (env.OAUTH_KV && isOAuthDiscoveryEndpoint) {
+            const apiKeySession = await env.OAUTH_KV.get(`api_key_session:${clientFingerprint}`);
+            if (apiKeySession) {
+                return new Response(JSON.stringify({
+                    error: "oauth_not_available",
+                    error_description: "OAuth not available when using API key authentication"
+                }), { status: 404 });
+            }
+        }
+        
+        // Handle MCP SSE endpoint
+        if (url.pathname.startsWith("/sse")) {
+            // Check if API key is detected
+            if (apiKey) {
+                console.log("🔑 API key detected, bypassing OAuth flow");
+                
                 try {
-                    const cachedUserData = await env.OAUTH_KV?.get(userCacheKey);
-                    if (cachedUserData) {
-                        userInfo = JSON.parse(cachedUserData);
-                        console.log("📦 Using cached user info");
+                    // Create API client and fetch current user
+                    const apiClient = new ABsmartlyAPIClient(
+                        apiKey,
+                        endpoint || DEFAULT_ABSMARTLY_ENDPOINT,
+                        'api-key'
+                    );
+                    
+                    const userResponse = await apiClient.getCurrentUser();
+                    
+                    if (!userResponse.ok) {
+                        console.error("Failed to fetch user info:", userResponse.status);
+                        return new Response("Unauthorized", {
+                            status: 401,
+                            headers: {
+                                "Access-Control-Allow-Origin": "*",
+                                "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                                "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
+                            },
+                        });
                     }
-                } catch (error) {
-                    console.log("📦 Error reading cached user info:", error);
-                }
-
-                // If no cached user info, fetch from API
-                if (!userInfo) {
-                    try {
-                        console.log("🔍 Fetching user info from API");
-                        // Create temporary API client to fetch user
-                        const tempClient = new ABsmartlyAPIClient(apiKey, endpoint, 'api-key');
-                        const userResponse = await tempClient.getCurrentUser();
-
-                        if (userResponse.ok && userResponse.data) {
-                            userInfo = userResponse.data;
-                            // Cache for 1 hour
-                            await env.OAUTH_KV?.put(userCacheKey, JSON.stringify(userInfo), { 
-                                expirationTtl: 3600 
-                            });
-                            console.log("✅ User info fetched and cached");
-                        } else {
-                            console.error("❌ Failed to fetch user info:", userResponse.errors);
-                            // Fall back to using API key as identifier
-                            userInfo = {
-                                id: apiKey,
-                                email: 'api-key-user@example.com',
-                                first_name: 'API Key',
-                                last_name: 'User'
-                            };
-                        }
-                    } catch (error) {
-                        console.error("❌ Error fetching user info:", error);
-                        // Fall back to using API key as identifier
-                        userInfo = {
-                            id: apiKey,
-                            email: 'api-key-user@example.com',
-                            first_name: 'API Key',
-                            last_name: 'User'
+                    
+                    // Extract user information
+                    const user = userResponse.data;
+                    const userId = user.id?.toString() || user.email;
+                    
+                    // Create props from user data
+                    const props: ABsmartlyProps = {
+                        email: user.email || "unknown@example.com",
+                        name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email,
+                        absmartly_endpoint: endpoint || DEFAULT_ABSMARTLY_ENDPOINT,
+                        absmartly_api_key: apiKey,
+                        user_id: userId
+                    };
+                    
+                    console.log(`✅ API key authenticated for user: ${props.email} (ID: ${props.user_id})`);
+                    
+                    // Store session in KV if available
+                    if (env.OAUTH_KV) {
+                        const session = {
+                            userId: userId,
+                            email: props.email,
+                            name: props.name,
+                            absmartly_endpoint: props.absmartly_endpoint,
+                            absmartly_api_key: apiKey,
+                            createdAt: Date.now(),
+                            expiresAt: Date.now() + (24 * 60 * 60 * 1000) // 24 hours
                         };
+                        
+                        await env.OAUTH_KV.put(`session:${userId}`, JSON.stringify(session), {
+                            expirationTtl: 86400 // 24 hours
+                        });
                     }
+                    
+                    // Pass props to MCP handler
+                    ctx.props = props;
+                    return await baseMcpHandler(request, env, ctx);
+                    
+                } catch (error) {
+                    console.error("Error during API key authentication:", error);
+                    return new Response("Internal Server Error", {
+                        status: 500,
+                        headers: {
+                            "Access-Control-Allow-Origin": "*",
+                            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                            "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
+                        },
+                    });
                 }
-
-                // Create deterministic session ID based on real user ID + endpoint
-                const userIdentity = `${userInfo.id}:${endpoint}`;
-                const encoder = new TextEncoder();
-                const data = encoder.encode(userIdentity);
-                const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-                const hashArray = Array.from(new Uint8Array(hashBuffer));
-                const sessionId = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-
-                console.log(`📱 User session ID: ${sessionId.substring(0, 8)}... (user ${userInfo.id})`);
-
-                // Add sessionId to URL if not present (for deterministic session creation)
-                const modifiedUrl = new URL(request.url);
-                if (!modifiedUrl.searchParams.has('sessionId')) {
-                    modifiedUrl.searchParams.set('sessionId', sessionId);
-                }
-
-                // Create modified request with sessionId
-                const modifiedRequest = new Request(modifiedUrl.toString(), request);
-
-                // Set props in context with real user info
-                const apiKeyProps = {
-                    email: userInfo.email || 'api-key-user@example.com',
-                    name: `${userInfo.first_name || 'API'} ${userInfo.last_name || 'User'}`.trim(),
-                    absmartly_endpoint: endpoint,
-                    absmartly_api_key: apiKey,
-                    user_id: userInfo.id.toString()
-                };
-
-                const enrichedCtx = { ...ctx, props: apiKeyProps };
-
-                // Route to MCP handler with modified request and enriched context
-                return baseMcpHandler.fetch(modifiedRequest, env, enrichedCtx);
             }
-
-            // No API key found, check for OAuth Bearer token
+            
+            // No API key detected - check for OAuth token
             const authHeader = request.headers.get("Authorization");
-            if (authHeader?.startsWith("Bearer ") && !authHeader.includes("Api-Key")) {
-                const token = authHeader.substring(7);
-                console.log("🔐 OAuth Bearer token detected");
-
-                // Try to get token data from KV storage
-                if (env.OAUTH_KV) {
-                    const tokenData = await env.OAUTH_KV.get(`token:${token}`);
-                    if (tokenData) {
-                        try {
-                            const parsed = JSON.parse(tokenData);
-                            console.log("✅ Valid OAuth token found");
-
-                            // Extract props from token data
-                            const props = parsed.props || {};
-
-                            // Generate session ID for OAuth user
-                            const userIdentity = `${props.user_id}:${props.absmartly_endpoint}`;
-                            const encoder = new TextEncoder();
-                            const data = encoder.encode(userIdentity);
-                            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-                            const hashArray = Array.from(new Uint8Array(hashBuffer));
-                            const sessionId = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-
-                            console.log(`📱 OAuth session ID: ${sessionId.substring(0, 8)}... (user ${props.user_id})`);
-
-                            // Add sessionId to URL
-                            const modifiedUrl = new URL(request.url);
-                            modifiedUrl.searchParams.set('sessionId', sessionId);
-
-                            // Create modified request and context
-                            const modifiedRequest = new Request(modifiedUrl.toString(), request);
-                            const enrichedCtx = { ...ctx, props };
-
-                            // Route to MCP handler
-                            return baseMcpHandler.fetch(modifiedRequest, env, enrichedCtx);
-                        } catch (error) {
-                            console.error("❌ Failed to parse token data:", error);
-                        }
-                    } else {
-                        console.warn("⚠️ Token not found in KV storage");
-                    }
+            
+            // Manual 401 response for SSE endpoints without valid auth to trigger OAuth flow
+            if (!authHeader || !authHeader.startsWith("Bearer ")) {
+                console.log("⚠️ No valid Authorization header, returning 401 to trigger OAuth flow");
+                
+                // Store the requested endpoint in KV for the OAuth flow
+                const requestedEndpoint = url.searchParams.get('absmartly-endpoint') || endpoint;
+                if (requestedEndpoint && env.OAUTH_KV) {
+                    console.log(`📍 Storing requested endpoint for OAuth flow: ${requestedEndpoint}`);
+                    await env.OAUTH_KV.put(
+                        `oauth_endpoint:${clientFingerprint}`,
+                        requestedEndpoint,
+                        { expirationTtl: 600 } // 10 minutes
+                    );
                 }
+                
+                return new Response("Unauthorized", {
+                    status: 401,
+                    headers: {
+                        "WWW-Authenticate": 'Bearer realm="OAuth"',
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Allow-Methods": "GET, POST, OPTIONS", 
+                        "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
+                        "X-Auth-Debug": "basic-401-response",
+                    },
+                });
             }
-
-            // No valid authentication found - return 401 to trigger OAuth flow
-            console.log("🚫 No valid authentication found, returning 401");
-            return new Response("Unauthorized", {
-                status: 401,
-                headers: {
-                    "WWW-Authenticate": 'Bearer realm="OAuth"',
-                    "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-                    "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
-                }
-            });
+            
+            // Route OAuth authenticated requests through OAuth provider for token validation
+            return await oauthProvider.fetch(request, env, ctx);
         }
-
-        // For OAuth authorization endpoints, use our custom handler
-        if (url.pathname === "/authorize" || url.pathname === "/oauth/callback") {
-            console.log("🔄 Routing to ABsmartly OAuth handler for:", url.pathname);
-            // Pass OAUTH_PROVIDER in environment for the handler to use
-            const enrichedEnv = {
-                ...env,
-                OAUTH_PROVIDER: oauthProvider
-            };
-            return ABsmartlyOAuthHandler.fetch(request, enrichedEnv, ctx);
-        }
-
-        // For other OAuth endpoints, use OAuth provider
-        console.log("🔄 Routing to OAuth provider for endpoint:", url.pathname);
-        return oauthProvider.fetch(request, env, ctx);
+        
+        // Route all other requests to OAuth provider (only for non-API key requests)
+        console.log(`🔍 Routing non-SSE request to OAuth provider: ${request.method} ${url.pathname}`);
+        const oauthResponse = await oauthProvider.fetch(request, env, ctx);
+        console.log(`📍 OAuth provider response status: ${oauthResponse.status}`);
+        return oauthResponse;
     }
 };

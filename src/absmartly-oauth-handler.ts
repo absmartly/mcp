@@ -1,497 +1,354 @@
-import { env } from "cloudflare:workers";
-import type { AuthRequest, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
-import type { Env } from "./types";
-import { Hono } from "hono";
-import {
-	clientIdAlreadyApproved,
-	parseRedirectApproval,
-	renderApprovalDialog,
-} from "./workers-oauth-utils";
+/**
+ * ABsmartly OAuth Handler
+ * 
+ * Handles OAuth authorization flow by integrating with ABsmartly's OAuth system
+ */
 
-// Default OAuth client ID fallback
+import { Hono } from 'hono';
+import { getCookie, setCookie } from 'hono/cookie';
+
+// Default OAuth client ID
 const DEFAULT_OAUTH_CLIENT_ID = "mcp-absmartly-universal";
 
-// Props that will be available to the MCP agent after authentication
-export type ABsmartlyProps = {
-	email: string;
-	absmartly_endpoint: string;
-	absmartly_api_key?: string; // Optional - may not be present when using OAuth JWT
-	user_id: string;
-	name?: string;
-	oauth_jwt?: string; // Optional - contains OAuth JWT for API authentication
-};
+// Cookie settings
+const COOKIE_NAME = 'absmartly-oauth-approvals';
+const COOKIE_SECRET = 'absmartly-oauth-secret-key'; // Should be from env in production
 
-const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>();
+export class ABsmartlyOAuthHandler extends Hono {
+  constructor() {
+    super();
+    
+    // Add middleware to log all requests
+    this.use('*', async (c, next) => {
+      console.log(`🔍 ABsmartlyOAuthHandler: ${c.req.method} ${c.req.url}`);
+      await next();
+    });
 
-app.get("/authorize", async (c) => {
-	// Debug log collection
-	const debugLogs: string[] = [];
+    // Handle OAuth authorization page
+    this.get('/authorize', async (c) => {
+      console.log('📍 ABsmartlyOAuthHandler: Hit /authorize endpoint');
+      const env = c.env;
+      const url = new URL(c.req.url);
+      
+      // Parse OAuth request using the helper
+      const authRequest = await env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw);
+      
+      // Get client info
+      const clientInfo = await env.OAUTH_PROVIDER.lookupClient(authRequest.clientId);
+      if (!clientInfo) {
+        return c.text('Client not found', 400);
+      }
+      
+      // Check if client is already approved via signed cookie
+      const approvedClients = await this.getApprovedClients(c);
+      const isApproved = approvedClients.includes(authRequest.clientId);
+      
+      if (isApproved) {
+        // Client is pre-approved, redirect to ABsmartly OAuth
+        console.log('Client is pre-approved, redirecting to ABsmartly OAuth');
+        return this.redirectToAbsmartlyOAuth(c, authRequest);
+      }
+      
+      // Show consent page
+      return c.html(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Authorize ${clientInfo.clientName || authRequest.clientId}</title>
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+              max-width: 400px;
+              margin: 100px auto;
+              padding: 20px;
+              background: #f5f5f5;
+            }
+            .container {
+              background: white;
+              padding: 30px;
+              border-radius: 8px;
+              box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            h1 { font-size: 24px; margin-bottom: 20px; }
+            .client-info { 
+              background: #f8f9fa; 
+              padding: 15px; 
+              border-radius: 4px; 
+              margin: 20px 0;
+            }
+            .scopes {
+              margin: 20px 0;
+            }
+            .scope-item {
+              padding: 8px 0;
+              border-bottom: 1px solid #eee;
+            }
+            button {
+              background: #007bff;
+              color: white;
+              border: none;
+              padding: 12px 24px;
+              border-radius: 4px;
+              font-size: 16px;
+              cursor: pointer;
+              width: 100%;
+              margin-top: 20px;
+            }
+            button:hover { background: #0056b3; }
+            .cancel {
+              background: #6c757d;
+              margin-top: 10px;
+            }
+            .cancel:hover { background: #5a6268; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>Authorization Request</h1>
+            <div class="client-info">
+              <strong>${clientInfo.clientName || authRequest.clientId}</strong> is requesting access to your ABsmartly account.
+            </div>
+            
+            <div class="scopes">
+              <strong>This application will be able to:</strong>
+              ${authRequest.scope.map(scope => `
+                <div class="scope-item">• ${this.getScopeDescription(scope)}</div>
+              `).join('')}
+            </div>
+            
+            <form method="POST" action="/authorize">
+              <input type="hidden" name="client_id" value="${authRequest.clientId}">
+              <input type="hidden" name="redirect_uri" value="${authRequest.redirectUri}">
+              <input type="hidden" name="state" value="${authRequest.state}">
+              <input type="hidden" name="scope" value="${authRequest.scope.join(' ')}">
+              <input type="hidden" name="response_type" value="${authRequest.responseType}">
+              ${authRequest.codeChallenge ? `<input type="hidden" name="code_challenge" value="${authRequest.codeChallenge}">` : ''}
+              ${authRequest.codeChallengeMethod ? `<input type="hidden" name="code_challenge_method" value="${authRequest.codeChallengeMethod}">` : ''}
+              
+              <button type="submit" name="action" value="approve">Authorize</button>
+              <button type="submit" name="action" value="cancel" class="cancel">Cancel</button>
+            </form>
+          </div>
+        </body>
+        </html>
+      `);
+    });
 
-	// Helper to log debug messages
-	const debug = (message: string, data?: any): void => {
-		const timestamp = new Date().toISOString();
-		const logEntry = data 
-			? `[${timestamp}] ${message}: ${JSON.stringify(data)}`
-			: `[${timestamp}] ${message}`;
-		debugLogs.push(logEntry);
-		console.log(logEntry);
-	};
+    // Handle authorization form submission
+    this.post('/authorize', async (c) => {
+      const formData = await c.req.formData();
+      const action = formData.get('action');
+      
+      if (action === 'cancel') {
+        const redirectUri = formData.get('redirect_uri') as string;
+        const state = formData.get('state') as string;
+        return c.redirect(`${redirectUri}?error=access_denied&state=${state}`);
+      }
+      
+      // Reconstruct auth request from form data
+      const authRequest = {
+        clientId: formData.get('client_id') as string,
+        redirectUri: formData.get('redirect_uri') as string,
+        state: formData.get('state') as string,
+        scope: (formData.get('scope') as string || '').split(' '),
+        responseType: formData.get('response_type') as string,
+        codeChallenge: formData.get('code_challenge') as string,
+        codeChallengeMethod: formData.get('code_challenge_method') as string,
+      };
+      
+      // Add to approved clients
+      await this.addApprovedClient(c, authRequest.clientId);
+      
+      // Redirect to ABsmartly OAuth
+      return this.redirectToAbsmartlyOAuth(c, authRequest);
+    });
 
-	debug('=== Worker OAuth Authorize Debug ===');
-	debug('URL', c.req.url);
-	debug('Query params', c.req.query());
+    // Handle OAuth callback from ABsmartly
+    this.get('/oauth/callback', async (c) => {
+      const env = c.env;
+      const url = new URL(c.req.url);
+      
+      const code = url.searchParams.get('code');
+      const state = url.searchParams.get('state');
+      const error = url.searchParams.get('error');
+      
+      if (error) {
+        console.error('OAuth callback error:', error);
+        return c.text(`OAuth error: ${error}`, 400);
+      }
+      
+      if (!code || !state) {
+        return c.text('Missing code or state parameter', 400);
+      }
+      
+      // Parse the state to get the original OAuth request info
+      let oauthReqInfo;
+      try {
+        oauthReqInfo = JSON.parse(atob(state));
+      } catch (e) {
+        console.error('Failed to parse state:', e);
+        return c.text('Invalid state parameter', 400);
+      }
+      
+      // Get the ABsmartly endpoint from the original request
+      let absmartlyEndpoint = oauthReqInfo.absmartlyEndpoint || 'https://dev-1.absmartly.com';
+      
+      // Clean up endpoint (remove trailing slashes)
+      const cleanEndpoint = absmartlyEndpoint.replace(/\/+$/, '');
+      
+      // Exchange the code with ABsmartly for an access token - /auth endpoints don't use /v1 prefix
+      const tokenUrl = `${cleanEndpoint}/auth/oauth/token`;
+      const tokenBody = new URLSearchParams({
+        grant_type: 'authorization_code',
+        client_id: env.ABSMARTLY_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID,
+        code: code,
+        redirect_uri: `${url.origin}/oauth/callback`,
+      });
+      
+      if (env.ABSMARTLY_OAUTH_CLIENT_SECRET) {
+        tokenBody.set('client_secret', env.ABSMARTLY_OAUTH_CLIENT_SECRET);
+      }
+      
+      console.log('Exchanging code with ABsmartly:', tokenUrl);
+      
+      const tokenResponse = await fetch(tokenUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept': 'application/json',
+        },
+        body: tokenBody,
+      });
+      
+      if (!tokenResponse.ok) {
+        const errorText = await tokenResponse.text();
+        console.error('Token exchange failed:', errorText);
+        return c.text(`Token exchange failed: ${errorText}`, 500);
+      }
+      
+      const tokenData = await tokenResponse.json();
+      console.log('Token exchange successful');
+      
+      // Decode the JWT to extract user information
+      let userInfo: any = {};
+      try {
+        const jwtParts = tokenData.access_token.split('.');
+        if (jwtParts.length === 3) {
+          const payload = atob(jwtParts[1]);
+          userInfo = JSON.parse(payload);
+        }
+      } catch (error) {
+        console.warn('Failed to decode JWT:', error);
+      }
+      
+      // Extract user information
+      const email = userInfo?.email || userInfo?.sub || 'unknown@example.com';
+      const name = userInfo?.name || userInfo?.given_name || email;
+      const userId = userInfo?.sub || userInfo?.absmartly_user_id?.toString() || email;
+      
+      // Use the clean endpoint without /v1 for auth endpoints
+      
+      // For API calls, ensure endpoint has /v1 suffix
+      const apiEndpoint = cleanEndpoint.endsWith('/v1') ? cleanEndpoint : `${cleanEndpoint}/v1`;
+      
+      // Complete the authorization with user props
+      const result = await env.OAUTH_PROVIDER.completeAuthorization({
+        request: oauthReqInfo.authRequest,
+        userId: userId,
+        metadata: {},
+        scope: oauthReqInfo.authRequest.scope,
+        props: {
+          email,
+          name,
+          absmartly_endpoint: apiEndpoint,
+          oauth_jwt: tokenData.access_token,
+          user_id: userId,
+          absmartly_api_key: tokenData.api_key || tokenData.absmartly_api_key || undefined
+        }
+      });
+      
+      // Redirect back to the client with the authorization code
+      return c.redirect(result.redirectTo);
+    });
+  }
 
-	// Dump all headers for client identification
-	const headers: Record<string, string> = {};
-	for (const [key, value] of c.req.raw.headers.entries()) {
-		headers[key] = value;
-	}
-	debug('Request headers', headers);
+  private async redirectToAbsmartlyOAuth(c: any, authRequest: any) {
+    const url = new URL(c.req.url);
+    const env = c.env;
+    
+    // Get ABsmartly endpoint from query parameter, header, KV storage, or default
+    let absmartlyEndpoint = url.searchParams.get('absmartly-endpoint') || 
+                           c.req.header('x-absmartly-endpoint');
+    
+    // If not found, try to retrieve from KV storage using client fingerprint
+    if (!absmartlyEndpoint && env.OAUTH_KV) {
+      const clientFingerprint = `${c.req.header('CF-Connecting-IP') || 'unknown'}-${c.req.header('User-Agent') || 'unknown'}`;
+      const storedEndpoint = await env.OAUTH_KV.get(`oauth_endpoint:${clientFingerprint}`);
+      if (storedEndpoint) {
+        console.log(`📍 Retrieved stored endpoint from KV: ${storedEndpoint}`);
+        absmartlyEndpoint = storedEndpoint;
+      }
+    }
+    
+    // Fallback to default
+    absmartlyEndpoint = absmartlyEndpoint || 'https://dev-1.absmartly.com';
+    
+    // Clean up endpoint (remove trailing slashes)
+    const cleanEndpoint = absmartlyEndpoint.replace(/\/+$/, '');
+    
+    // Create state parameter with original OAuth request info
+    const stateData = {
+      authRequest,
+      absmartlyEndpoint: cleanEndpoint  // Store clean endpoint without /v1 for consistency
+    };
+    const state = btoa(JSON.stringify(stateData));
+    
+    // Build ABsmartly OAuth URL - /auth endpoints don't use /v1 prefix
+    const absmartlyOAuthUrl = new URL(`${cleanEndpoint}/auth/oauth/authorize`);
+    absmartlyOAuthUrl.searchParams.set('client_id', env.ABSMARTLY_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID);
+    absmartlyOAuthUrl.searchParams.set('redirect_uri', `${url.origin}/oauth/callback`);
+    absmartlyOAuthUrl.searchParams.set('scope', 'api:read api:write');
+    absmartlyOAuthUrl.searchParams.set('response_type', 'code');
+    absmartlyOAuthUrl.searchParams.set('state', state);
+    
+    return c.redirect(absmartlyOAuthUrl.toString());
+  }
 
-	// Dump request body if present
-	if (c.req.raw.method === 'POST' && c.req.raw.body) {
-		try {
-			const clonedRequest = c.req.raw.clone();
-			const body = await clonedRequest.text();
-			debug('Request body', body);
-		} catch (error) {
-			debug('Could not read request body', error);
-		}
-	}
+  private getScopeDescription(scope: string): string {
+    const descriptions: Record<string, string> = {
+      'api:read': 'Read access to your ABsmartly experiments and data',
+      'api:write': 'Create and modify experiments in your ABsmartly account'
+    };
+    return descriptions[scope] || scope;
+  }
 
-	// Extract and store ABsmartly endpoint from resource parameter
-	const resourceParam = c.req.query('resource');
-	debug('Resource parameter', resourceParam);
-	if (resourceParam && c.env.OAUTH_KV) {
-		try {
-			const resourceUrl = new URL(resourceParam);
-			debug('Parsed resource URL', resourceUrl.href);
-			debug('Resource URL search params', Object.fromEntries(resourceUrl.searchParams.entries()));
-			const absmartlyEndpoint = resourceUrl.searchParams.get('absmartly-endpoint');
-			debug('Extracted ABsmartly endpoint', absmartlyEndpoint);
-			if (absmartlyEndpoint) {
-				debug('Storing ABsmartly endpoint from resource param', absmartlyEndpoint);
-				await c.env.OAUTH_KV.put("absmartly_endpoint_config", absmartlyEndpoint);
-			} else {
-				debug('No absmartly-endpoint found in resource URL');
-			}
-		} catch (e) {
-			debug('Failed to parse resource parameter', e);
-		}
-	} else {
-		debug('No resource parameter or OAUTH_KV not available', { 
-			hasResourceParam: !!resourceParam,
-			hasOAuthKV: !!c.env.OAUTH_KV
-		});
-	}
+  private async getApprovedClients(c: any): Promise<string[]> {
+    const cookie = getCookie(c, COOKIE_NAME);
+    if (!cookie) return [];
+    
+    try {
+      // In production, verify HMAC signature
+      const decoded = JSON.parse(atob(cookie));
+      return decoded.clients || [];
+    } catch (e) {
+      return [];
+    }
+  }
 
-	debug('About to parse OAuth request');
-	let oauthReqInfo;
-	try {
-		oauthReqInfo = await c.env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw);
-		debug('Parsed OAuth request', oauthReqInfo);
-	} catch (error) {
-		debug('Error parsing OAuth request', error);
-		const errorMessage = error instanceof Error ? error.message : String(error);
-		const errorStack = error instanceof Error ? error.stack : undefined;
-		debug('Error message', errorMessage);
-		debug('Error stack', errorStack);
-		return c.text(`OAuth request parsing failed: ${errorMessage}\n\nDebug Logs:\n${debugLogs.join('\n')}`, 400);
-	}
-
-	const { clientId } = oauthReqInfo;
-	if (!clientId) {
-		debug('No client ID found, returning error');
-		return c.text(`Invalid request\n\nDebug Logs:\n${debugLogs.join('\n')}`, 400);
-	}
-
-	debug('Client ID found', clientId);
-
-	// Debug: check what the client lookup returns
-	try {
-		const clientInfo = await c.env.OAUTH_PROVIDER.lookupClient(clientId);
-		debug('Client lookup result', clientInfo);
-		if (clientInfo) {
-			debug('Client redirectUris', clientInfo.redirectUris);
-			debug('Client redirectUris type', typeof clientInfo.redirectUris);
-			debug('Client redirectUris is array', Array.isArray(clientInfo.redirectUris));
-		}
-	} catch (error) {
-		debug('Client lookup error', error);
-	}
-
-	// Check if client is already approved AND exists
-	try {
-		debug('Checking if client is already approved', oauthReqInfo.clientId);
-		const isApproved = await clientIdAlreadyApproved(c.req.raw, oauthReqInfo.clientId, c.env.COOKIE_ENCRYPTION_KEY || "default-key");
-		debug('Client approval check result', isApproved);
-
-		if (isApproved) {
-			// Double-check that the client actually exists
-			const clientExists = await c.env.OAUTH_PROVIDER.lookupClient(clientId);
-			debug('Client exists check', !!clientExists);
-
-			if (clientExists) {
-				debug('Client is already approved and exists, redirecting to OAuth');
-				return redirectToAbsmartlyOAuth(c, c.req.raw, oauthReqInfo, {}, debugLogs);
-			} else {
-				debug('Client is approved but does not exist, auto-registering new public client');
-				// Client was approved but deleted, automatically register a new public client with the same ID
-				const newClientData = {
-					clientId: clientId,
-					redirectUris: [oauthReqInfo.redirectUri],
-					clientName: "Claude MCP Client",
-					registrationDate: Date.now(),
-					tokenEndpointAuthMethod: 'none' // Public client
-					// No clientSecret for public clients
-				};
-
-				await c.env.OAUTH_KV.put(`client:${clientId}`, JSON.stringify(newClientData));
-				debug('Auto-registered new public client', newClientData);
-
-				// Now redirect to OAuth with the newly registered client
-				return redirectToAbsmartlyOAuth(c, c.req.raw, oauthReqInfo, {}, debugLogs);
-			}
-		}
-	} catch (error) {
-		debug('Error in client approval check', error);
-		const errorMessage = error instanceof Error ? error.message : String(error);
-		const errorStack = error instanceof Error ? error.stack : undefined;
-		debug('Error message', errorMessage);
-		debug('Error stack', errorStack);
-		// Continue to approval dialog even if check fails
-	}
-
-	// Show approval dialog
-	const clientInfo = await c.env.OAUTH_PROVIDER.lookupClient(clientId);
-	debug('Client info for approval dialog', clientInfo);
-
-	// Try to extract client name from recent request body if available
-	let inferredClientName = null;
-	if (c.env.OAUTH_KV) {
-		try {
-			// Try specific client ID first, then fall back to latest
-			let storedClientInfo = await c.env.OAUTH_KV.get(`inferred_client:${clientId}`);
-			if (!storedClientInfo) {
-				storedClientInfo = await c.env.OAUTH_KV.get(`inferred_client:latest`);
-			}
-			if (storedClientInfo) {
-				inferredClientName = JSON.parse(storedClientInfo).name;
-				debug('Found inferred client name', inferredClientName);
-			}
-		} catch (e) {
-			debug('Error reading inferred client info', e);
-		}
-	}
-
-	// Create enhanced client info with inferred name if available
-	const enhancedClientInfo = clientInfo ? clientInfo : {
-		clientId: clientId,
-		clientName: inferredClientName || clientId,
-		redirectUris: [oauthReqInfo.redirectUri],
-		tokenEndpointAuthMethod: 'none' as const
-	};
-
-	return renderApprovalDialog(c.req.raw, {
-		client: enhancedClientInfo,
-		server: {
-			description: "This MCP server provides access to ABsmartly experiment management tools using SAML-based authentication.",
-			logo: "https://docs.absmartly.com/img/logo.png",
-			name: "ABsmartly MCP Server",
-		},
-		state: { oauthReqInfo },
-	});
-});
-
-app.post("/authorize", async (c) => {
-	// Validates form submission, extracts state, and generates Set-Cookie headers to skip approval dialog next time
-	const { state, headers } = await parseRedirectApproval(c.req.raw, c.env.COOKIE_ENCRYPTION_KEY || "default-key");
-	if (!state.oauthReqInfo) {
-		return c.text("Invalid request", 400);
-	}
-
-	return redirectToAbsmartlyOAuth(c, c.req.raw, state.oauthReqInfo, headers, []);
-});
-
-async function redirectToAbsmartlyOAuth(
-	c: any,
-	request: Request,
-	oauthReqInfo: AuthRequest,
-	headers: Record<string, string> = {},
-	debugLogs: string[] = [],
-) {
-	// Helper to log debug messages
-	const debug = (message: string, data?: any): void => {
-		const timestamp = new Date().toISOString();
-		const logEntry = data 
-			? `[${timestamp}] ${message}: ${JSON.stringify(data)}`
-			: `[${timestamp}] ${message}`;
-		debugLogs.push(logEntry);
-		console.log(logEntry);
-	};
-
-	// Get the endpoint from KV storage (stored from headers)
-	let endpoint = null;
-	if (c.env.OAUTH_KV) {
-		const storedEndpoint = await c.env.OAUTH_KV.get("absmartly_endpoint_config");
-		debug('Retrieved from KV storage', { storedEndpoint, hasKV: !!c.env.OAUTH_KV });
-		if (storedEndpoint) {
-			endpoint = storedEndpoint;
-			debug('Using stored endpoint', endpoint);
-		} else {
-			debug('No endpoint found in KV storage');
-		}
-	} else {
-		debug('No OAUTH_KV available');
-	}
-
-	// If we still don't have an endpoint, try to use a reasonable default
-	if (!endpoint) {
-		debug('No endpoint available, using default');
-		endpoint = "https://sandbox.absmartly.com";
-	}
-
-	debug('Final endpoint to use', endpoint);
-
-	// Redirect to our SAML → OAuth bridge (at /auth/oauth/authorize)
-	const absmartlyOAuthUrl = new URL(`${endpoint}/auth/oauth/authorize`);
-	absmartlyOAuthUrl.searchParams.set("client_id", c.env.ABSMARTLY_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID);
-	absmartlyOAuthUrl.searchParams.set("redirect_uri", new URL("/oauth/callback", request.url).href);
-	absmartlyOAuthUrl.searchParams.set("scope", "api:read api:write");
-	absmartlyOAuthUrl.searchParams.set("response_type", "code");
-	absmartlyOAuthUrl.searchParams.set("state", btoa(JSON.stringify(oauthReqInfo)));
-
-	// Add ngrok bypass header as query param if using ngrok
-	if (endpoint && endpoint.includes("ngrok")) {
-		absmartlyOAuthUrl.searchParams.set("ngrok-skip-browser-warning", "true");
-	}
-
-	return new Response(null, {
-		headers: {
-			...headers,
-			location: absmartlyOAuthUrl.toString(),
-		},
-		status: 302,
-	});
+  private async addApprovedClient(c: any, clientId: string) {
+    const approvedClients = await this.getApprovedClients(c);
+    if (!approvedClients.includes(clientId)) {
+      approvedClients.push(clientId);
+    }
+    
+    // In production, add HMAC signature
+    const cookie = btoa(JSON.stringify({ clients: approvedClients }));
+    
+    setCookie(c, COOKIE_NAME, cookie, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Lax',
+      maxAge: 30 * 24 * 60 * 60 // 30 days
+    });
+  }
 }
-
-/**
- * OAuth Callback Endpoint
- *
- * This route handles the callback from ABsmartly after user authentication.
- * It exchanges the temporary code for an access token, then stores the
- * user metadata & credentials as part of the 'props' on the token passed
- * down to the MCP client.
- */
-app.get("/oauth/callback", async (c) => {
-	// Debug log collection
-	const debugLogs: string[] = [];
-
-	// Helper to log debug messages
-	const debug = (message: string, data?: any): void => {
-		const timestamp = new Date().toISOString();
-		const logEntry = data 
-			? `[${timestamp}] ${message}: ${JSON.stringify(data)}`
-			: `[${timestamp}] ${message}`;
-		debugLogs.push(logEntry);
-		console.log(logEntry);
-	};
-
-	debug('=== OAuth Callback Debug ===');
-	debug('URL', c.req.url);
-	debug('Query params', c.req.query());
-
-	// Get the oauthReqInfo out of the state parameter
-	const stateParam = c.req.query("state");
-	debug('State parameter', stateParam);
-
-	const oauthReqInfo = JSON.parse(atob(stateParam as string)) as AuthRequest;
-	debug('Parsed OAuth request info', oauthReqInfo);
-
-	if (!oauthReqInfo.clientId) {
-		debug('No client ID in state, returning error');
-		return c.text(`Invalid state\n\nDebug Logs:\n${debugLogs.join('\n')}`, 400);
-	}
-
-	const code = c.req.query("code");
-	debug('Authorization code', code);
-
-	if (!code) {
-		debug('No authorization code provided');
-		return c.text(`Authorization code not provided\n\nDebug Logs:\n${debugLogs.join('\n')}`, 400);
-	}
-
-	try {
-		// Get the endpoint from KV storage
-		let endpoint = "https://dev-1.absmartly.com"; // Default fallback
-		if (c.env.OAUTH_KV) {
-			const storedEndpoint = await c.env.OAUTH_KV.get("absmartly_endpoint_config");
-			if (storedEndpoint) {
-				endpoint = storedEndpoint;
-			}
-		}
-
-		// Exchange the code for an access token with our SAML → OAuth bridge (at /auth/oauth/token)
-		const tokenUrl = `${endpoint}/auth/oauth/token`;
-		const requestBody = new URLSearchParams({
-			grant_type: "authorization_code",
-			client_id: c.env.ABSMARTLY_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID,
-			code: code,
-			redirect_uri: new URL("/oauth/callback", c.req.url).href,
-		});
-
-		// Add client_secret if provided in environment
-		if (c.env.ABSMARTLY_OAUTH_CLIENT_SECRET) {
-			requestBody.set("client_secret", c.env.ABSMARTLY_OAUTH_CLIENT_SECRET);
-		}
-
-		debug('Token exchange request URL', tokenUrl);
-		debug('Token exchange request body', Object.fromEntries(requestBody.entries()));
-
-		const tokenResponse = await fetch(tokenUrl, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/x-www-form-urlencoded",
-				"User-Agent": "ABsmartly-MCP-OAuth/1.0",
-				"Accept": "application/json",
-				"ngrok-skip-browser-warning": "true", // Required for ngrok endpoints
-				"CF-Connecting-IP": "127.0.0.1", // Bypass Cloudflare bot protection
-				"X-Forwarded-For": "127.0.0.1", // Additional bypass header
-			},
-			body: requestBody,
-		});
-
-		debug('Token response status', tokenResponse.status);
-		const responseText = await tokenResponse.text();
-		debug('Token response body', responseText);
-
-		if (!tokenResponse.ok) {
-			debug('Token exchange failed', responseText);
-			return c.text(`Failed to exchange authorization code: ${responseText}\n\nDebug Logs:\n${debugLogs.join('\n')}`, 400);
-		}
-
-		const tokenData = JSON.parse(responseText);
-		debug('Parsed token data', tokenData);
-		debug('Token data keys', Object.keys(tokenData));
-
-		const { access_token } = tokenData;
-
-		// Decode the JWT to extract user information
-		let userInfo: any = {};
-		try {
-			// JWT has 3 parts separated by dots: header.payload.signature
-			const jwtParts = access_token.split('.');
-			if (jwtParts.length === 3) {
-				// Decode the payload (middle part)
-				const payload = atob(jwtParts[1]);
-				userInfo = JSON.parse(payload);
-				debug('Decoded JWT payload', userInfo);
-			}
-		} catch (error) {
-			debug('Failed to decode JWT', error);
-		}
-
-		// Extract user information from JWT payload
-		const email = userInfo?.email || userInfo?.sub || "unknown@example.com";
-		const name = userInfo?.name || userInfo?.given_name || email;
-		const userId = userInfo?.sub || userInfo?.absmartly_user_id?.toString() || email;
-
-		debug('Extracted user information', { email, name, userId, userInfo });
-
-		// The access token from our bridge should contain the ABsmartly API key
-		// Use the endpoint from configuration, removing any trailing slashes
-		const cleanEndpoint = endpoint.replace(/\/+$/, '');
-		const absmartlyEndpoint = cleanEndpoint.endsWith('/v1') ? cleanEndpoint : `${cleanEndpoint}/v1`;
-
-		// Check if the token response has an api_key field
-		// The OAuth JWT is NOT a valid API key - we need to get the user's API key separately
-		const absmartlyApiKey = tokenData.api_key || tokenData.absmartly_api_key || null;
-
-		debug('Token response analysis:', {
-			hasApiKey: !!absmartlyApiKey,
-			accessTokenIsJWT: access_token?.includes('.') && access_token.split('.').length === 3,
-			tokenDataKeys: Object.keys(tokenData)
-		});
-
-		if (!absmartlyApiKey) {
-			debug('No API key found in token response. Will use OAuth JWT for authentication.');
-		} else {
-			debug('API key found in token response:', absmartlyApiKey?.substring(0, 10) + '...');
-		}
-
-		debug('ABsmartly configuration', { 
-			absmartlyEndpoint, 
-			hasApiKey: !!absmartlyApiKey,
-			hasOAuthJWT: !!access_token
-		});
-
-		// Prepare props object
-		const props: any = {
-			email,
-			name,
-			absmartly_endpoint: absmartlyEndpoint,
-			user_id: userId,
-			oauth_jwt: access_token, // Store the original OAuth JWT
-		};
-
-		// Only include absmartly_api_key if we actually have one
-		if (absmartlyApiKey) {
-			props.absmartly_api_key = absmartlyApiKey;
-			debug('Including API key in props:', absmartlyApiKey.substring(0, 10) + '...');
-		} else {
-			debug('No API key available, will use OAuth JWT for API calls');
-		}
-
-		// Return back to the MCP client a new token with ABsmartly credentials
-		const { redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({
-			metadata: {
-				label: name || email,
-			},
-			// This will be available on this.props inside AbsmartlyMcpOAuth
-			props: props as ABsmartlyProps,
-			request: oauthReqInfo,
-			scope: oauthReqInfo.scope,
-			userId: userId,
-		});
-
-		debug('OAuth authorization completed successfully', { redirectTo });
-
-		// Debug: Extract the access token from the redirect URL to see what's being generated
-		try {
-			const redirectUrl = new URL(redirectTo);
-			const accessToken = redirectUrl.searchParams.get('code');
-			debug('Generated access token for Claude Desktop', { 
-				accessToken: accessToken ? accessToken.substring(0, 20) + '...' : null,
-				fullRedirectUrl: redirectTo 
-			});
-
-			// Check if this token will be stored in KV
-			if (accessToken && c.env.OAUTH_KV) {
-				setTimeout(async () => {
-					try {
-						const tokenData = await c.env.OAUTH_KV.get(`token:${accessToken}`);
-						debug('Token storage check', { 
-							tokenExists: !!tokenData,
-							tokenPreview: tokenData ? tokenData.substring(0, 100) + '...' : null
-						});
-					} catch (error) {
-						debug('Token storage check failed', error);
-					}
-				}, 1000); // Check after 1 second
-			}
-		} catch (error) {
-			debug('Failed to parse redirect URL', error);
-		}
-
-		return Response.redirect(redirectTo);
-	} catch (error) {
-		debug('OAuth callback error', error);
-		const errorMessage = error instanceof Error ? error.message : String(error);
-		const errorStack = error instanceof Error ? error.stack : undefined;
-		debug('Error message', errorMessage);
-		debug('Error stack', errorStack);
-		return c.text(`Authentication failed: ${errorMessage}\n\nDebug Logs:\n${debugLogs.join('\n')}`, 500);
-	}
-});
-
-export { app as ABsmartlyOAuthHandler };

@@ -41,10 +41,11 @@
   "author": "ABsmartly",
   "license": "MIT",
   "dependencies": {
+    "@cloudflare/workers-oauth-provider": "^0.0.5",
     "@modelcontextprotocol/sdk": "^1.13.0",
     "agents": "^0.0.95",
     "dotenv": "^17.0.0",
-    "hono": "^4.8.3",
+    "hono": "^4.8.5",
     "workers-mcp": "^0.0.13",
     "zod": "^3.25.67"
   },
