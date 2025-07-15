@@ -477,49 +477,9 @@ function detectApiKey(request: Request): { apiKey: string | null, endpoint: stri
 // Create single MCP handler to ensure session consistency
 const baseMcpHandler = ABsmartlyMCP.mount("/sse");
 
-// OAuth session handler that adds session ID for OAuth users
-const oauthSessionHandler = {
-    async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-        const url = new URL(request.url);
-
-        // Only process SSE endpoints
-        if (url.pathname === "/sse" || url.pathname.startsWith("/sse/")) {
-            // If we already have a sessionId, use it
-            if (url.searchParams.has('sessionId')) {
-                return baseMcpHandler.fetch(request, env, ctx);
-            }
-
-            // For OAuth users, generate session ID from props
-            if (ctx.props && ctx.props.user_id && ctx.props.absmartly_endpoint) {
-                const userIdentity = `${ctx.props.user_id}:${ctx.props.absmartly_endpoint}`;
-                const encoder = new TextEncoder();
-                const data = encoder.encode(userIdentity);
-                const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-                const hashArray = Array.from(new Uint8Array(hashBuffer));
-                const sessionId = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-
-                console.log(`📱 OAuth session ID: ${sessionId.substring(0, 8)}... (user ${ctx.props.user_id})`);
-
-                // Add sessionId to URL
-                const modifiedUrl = new URL(request.url);
-                modifiedUrl.searchParams.set('sessionId', sessionId);
-
-                // Create modified request with sessionId
-                const modifiedRequest = new Request(modifiedUrl.toString(), request);
-
-                return baseMcpHandler.fetch(modifiedRequest, env, ctx);
-            }
-        }
-
-        // For non-SSE endpoints, pass through
-        return baseMcpHandler.fetch(request, env, ctx);
-    }
-};
-
-// Create OAuth provider with session handler
+// Create OAuth provider for OAuth flow endpoints only
 const oauthProvider = new OAuthProvider({
-    apiHandler: oauthSessionHandler as any,
-    apiRoute: "/sse",
+    // No apiHandler or apiRoute - we'll handle SSE authentication ourselves
     authorizeEndpoint: "/authorize",
     tokenEndpoint: "/token",
     clientRegistrationEndpoint: "/register",
@@ -573,12 +533,10 @@ const oauthProvider = new OAuthProvider({
     },
 
     // Token exchange callback to handle ABsmartly OAuth
-    tokenExchangeCallback: async (request: Request, env: any, context: any) => {
+    tokenExchangeCallback: async (params: { code: string; state: string }, env: any, context: any) => {
         console.log("🔄 Token exchange callback triggered");
 
-        const url = new URL(request.url);
-        const authorizationCode = url.searchParams.get("code");
-        const state = url.searchParams.get("state");
+        const { code: authorizationCode, state } = params;
 
         if (!authorizationCode || !state) {
             throw new Error("Missing authorization code or state");
@@ -601,13 +559,17 @@ const oauthProvider = new OAuthProvider({
 
         console.log("🔗 Using endpoint:", endpoint);
 
+        // Build the callback URL from the environment or use a default
+        const baseUrl = context?.request?.url ? new URL(context.request.url).origin : "https://mcp.absmartly.com";
+        const callbackUrl = `${baseUrl}/oauth/callback`;
+
         // Exchange the code for an access token with ABsmartly OAuth
         const tokenUrl = `${endpoint}/auth/oauth/token`;
         const requestBody = new URLSearchParams({
             grant_type: "authorization_code",
             client_id: env.ABSMARTLY_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID,
             code: authorizationCode,
-            redirect_uri: new URL("/oauth/callback", request.url).href,
+            redirect_uri: callbackUrl,
         });
 
         // Add client_secret if provided
@@ -616,6 +578,7 @@ const oauthProvider = new OAuthProvider({
         }
 
         console.log("🔗 Token exchange request to:", tokenUrl);
+        console.log("🔗 Callback URL:", callbackUrl);
 
         const tokenResponse = await fetch(tokenUrl, {
             method: "POST",
@@ -720,8 +683,9 @@ export default {
             });
         }
 
-        // For SSE endpoints, check for API key first
+        // For SSE endpoints, handle authentication ourselves
         if (url.pathname === "/sse" || url.pathname.startsWith("/sse/")) {
+            // First check for API key (including Bearer Api-Key format)
             const { apiKey, endpoint } = detectApiKey(request);
 
             if (apiKey && endpoint) {
@@ -811,10 +775,68 @@ export default {
                 // Route to MCP handler with modified request and enriched context
                 return baseMcpHandler.fetch(modifiedRequest, env, enrichedCtx);
             }
+
+            // No API key found, check for OAuth Bearer token
+            const authHeader = request.headers.get("Authorization");
+            if (authHeader?.startsWith("Bearer ") && !authHeader.includes("Api-Key")) {
+                const token = authHeader.substring(7);
+                console.log("🔐 OAuth Bearer token detected");
+
+                // Try to get token data from KV storage
+                if (env.OAUTH_KV) {
+                    const tokenData = await env.OAUTH_KV.get(`token:${token}`);
+                    if (tokenData) {
+                        try {
+                            const parsed = JSON.parse(tokenData);
+                            console.log("✅ Valid OAuth token found");
+
+                            // Extract props from token data
+                            const props = parsed.props || {};
+
+                            // Generate session ID for OAuth user
+                            const userIdentity = `${props.user_id}:${props.absmartly_endpoint}`;
+                            const encoder = new TextEncoder();
+                            const data = encoder.encode(userIdentity);
+                            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+                            const hashArray = Array.from(new Uint8Array(hashBuffer));
+                            const sessionId = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+                            console.log(`📱 OAuth session ID: ${sessionId.substring(0, 8)}... (user ${props.user_id})`);
+
+                            // Add sessionId to URL
+                            const modifiedUrl = new URL(request.url);
+                            modifiedUrl.searchParams.set('sessionId', sessionId);
+
+                            // Create modified request and context
+                            const modifiedRequest = new Request(modifiedUrl.toString(), request);
+                            const enrichedCtx = { ...ctx, props };
+
+                            // Route to MCP handler
+                            return baseMcpHandler.fetch(modifiedRequest, env, enrichedCtx);
+                        } catch (error) {
+                            console.error("❌ Failed to parse token data:", error);
+                        }
+                    } else {
+                        console.warn("⚠️ Token not found in KV storage");
+                    }
+                }
+            }
+
+            // No valid authentication found - return 401 to trigger OAuth flow
+            console.log("🚫 No valid authentication found, returning 401");
+            return new Response("Unauthorized", {
+                status: 401,
+                headers: {
+                    "WWW-Authenticate": 'Bearer realm="OAuth"',
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
+                }
+            });
         }
 
-        // No API key found, use OAuth provider
-        console.log("🔄 No API key found, routing to OAuth provider");
+        // For non-SSE endpoints, use OAuth provider
+        console.log("🔄 Routing to OAuth provider for endpoint:", url.pathname);
         return oauthProvider.fetch(request, env, ctx);
     }
 };
