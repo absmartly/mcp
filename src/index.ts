@@ -11,7 +11,6 @@ import { z } from "zod";
 import { ABsmartlyAPIClient } from "./api-client";
 import { ABsmartlyResources } from "./resources";
 import { ABsmartlyOAuthHandler } from "./absmartly-oauth-handler";
-import { SessionProvider } from "./session-provider";
 import { Env } from "./types";
 
 // Props from OAuth authentication or API key detection
@@ -26,6 +25,9 @@ type ABsmartlyProps = {
 
 // Default ABsmartly API endpoint
 const DEFAULT_ABSMARTLY_ENDPOINT = "https://dev-1.absmartly.com/v1";
+
+// Default OAuth client ID
+const DEFAULT_OAUTH_CLIENT_ID = "mcp-absmartly-universal";
 
 // Cache TTL for entity data (5 minutes)
 const ENTITIES_CACHE_TTL = 5 * 60 * 1000; // 5 minutes in milliseconds
@@ -475,40 +477,28 @@ function detectApiKey(request: Request): { apiKey: string | null, endpoint: stri
 // Create single MCP handler to ensure session consistency
 const baseMcpHandler = ABsmartlyMCP.mount("/sse");
 
-// Create a wrapper that generates user-based session IDs for both API keys and OAuth tokens
-const userSessionMcpHandler = {
+// OAuth session handler that adds session ID for OAuth users
+const oauthSessionHandler = {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
         const url = new URL(request.url);
 
-        // Debug log to understand what's passed in context
-        console.log(`🔍 userSessionMcpHandler - ${request.method} ${url.pathname}`);
-        console.log(`🔍 Context props available:`, {
-            hasProps: !!ctx.props,
-            propsKeys: ctx.props ? Object.keys(ctx.props) : [],
-            propsData: ctx.props || {}
-        });
-
-        // Only apply user-based session logic to SSE endpoints
+        // Only process SSE endpoints
         if (url.pathname === "/sse" || url.pathname.startsWith("/sse/")) {
-            // Check if we already have a sessionId - if so, use the base handler
+            // If we already have a sessionId, use it
             if (url.searchParams.has('sessionId')) {
-                console.log(`📱 Using existing sessionId from URL`);
                 return baseMcpHandler.fetch(request, env, ctx);
             }
 
-            // Generate user-based session ID for OAuth users
+            // For OAuth users, generate session ID from props
             if (ctx.props && ctx.props.user_id && ctx.props.absmartly_endpoint) {
-                const userIdentity = ctx.props.oauth_jwt 
-                    ? `${ctx.props.oauth_jwt}:${ctx.props.absmartly_endpoint}`
-                    : `${ctx.props.user_id}:${ctx.props.absmartly_endpoint}`;
-
+                const userIdentity = `${ctx.props.user_id}:${ctx.props.absmartly_endpoint}`;
                 const encoder = new TextEncoder();
                 const data = encoder.encode(userIdentity);
                 const hashBuffer = await crypto.subtle.digest('SHA-256', data);
                 const hashArray = Array.from(new Uint8Array(hashBuffer));
                 const sessionId = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
-                console.log(`📱 OAuth user session ID: ${sessionId.substring(0, 8)}... (based on OAuth token + endpoint)`);
+                console.log(`📱 OAuth session ID: ${sessionId.substring(0, 8)}... (user ${ctx.props.user_id})`);
 
                 // Add sessionId to URL
                 const modifiedUrl = new URL(request.url);
@@ -518,34 +508,166 @@ const userSessionMcpHandler = {
                 const modifiedRequest = new Request(modifiedUrl.toString(), request);
 
                 return baseMcpHandler.fetch(modifiedRequest, env, ctx);
-            } else {
-                console.log(`⚠️ OAuth user session ID generation failed - missing required props:`, {
-                    hasProps: !!ctx.props,
-                    hasUserId: !!(ctx.props && ctx.props.user_id),
-                    hasEndpoint: !!(ctx.props && ctx.props.absmartly_endpoint)
-                });
             }
         }
 
-        // Default to base handler for other requests
+        // For non-SSE endpoints, pass through
         return baseMcpHandler.fetch(request, env, ctx);
     }
 };
 
-// Create session provider that uses the same handler
-const sessionProvider = new SessionProvider(baseMcpHandler);
-
-// Create OAuth provider that uses the user-session wrapper
+// Create OAuth provider with session handler
 const oauthProvider = new OAuthProvider({
-    apiHandler: userSessionMcpHandler as any,
+    apiHandler: oauthSessionHandler as any,
     apiRoute: "/sse",
-    defaultHandler: ABsmartlyOAuthHandler as any,
     authorizeEndpoint: "/authorize",
     tokenEndpoint: "/token",
     clientRegistrationEndpoint: "/register",
     accessTokenTTL: 3600,
     scopesSupported: ["api:read", "api:write"],
-    disallowPublicClientRegistration: false
+    disallowPublicClientRegistration: false,
+
+    // Default handler to redirect to ABsmartly OAuth
+    defaultHandler: {
+        async fetch(request: Request, env: any, context: any) {
+            const url = new URL(request.url);
+
+            // Store the ABsmartly endpoint from the resource parameter
+            const resourceParam = url.searchParams.get('resource');
+            if (resourceParam && env.OAUTH_KV) {
+                try {
+                    const resourceUrl = new URL(resourceParam);
+                    const absmartlyEndpoint = resourceUrl.searchParams.get('absmartly-endpoint');
+                    if (absmartlyEndpoint) {
+                        await env.OAUTH_KV.put("absmartly_endpoint_config", absmartlyEndpoint);
+                    }
+                } catch (e) {
+                    console.warn("Failed to parse resource parameter:", e);
+                }
+            }
+
+            // Get the endpoint from KV storage
+            let endpoint = "https://dev-1.absmartly.com"; // Default fallback
+            if (env.OAUTH_KV) {
+                const storedEndpoint = await env.OAUTH_KV.get("absmartly_endpoint_config");
+                if (storedEndpoint) {
+                    endpoint = storedEndpoint;
+                }
+            }
+
+            // Redirect to ABsmartly OAuth
+            const absmartlyOAuthUrl = new URL(`${endpoint}/auth/oauth/authorize`);
+            absmartlyOAuthUrl.searchParams.set("client_id", env.ABSMARTLY_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID);
+            absmartlyOAuthUrl.searchParams.set("redirect_uri", new URL("/oauth/callback", request.url).href);
+            absmartlyOAuthUrl.searchParams.set("scope", "api:read api:write");
+            absmartlyOAuthUrl.searchParams.set("response_type", "code");
+
+            // Pass through the state parameter
+            const state = url.searchParams.get("state");
+            if (state) {
+                absmartlyOAuthUrl.searchParams.set("state", state);
+            }
+
+            return Response.redirect(absmartlyOAuthUrl.toString());
+        }
+    },
+
+    // Token exchange callback to handle ABsmartly OAuth
+    tokenExchangeCallback: async (request: Request, env: any, context: any) => {
+        console.log("🔄 Token exchange callback triggered");
+
+        const url = new URL(request.url);
+        const authorizationCode = url.searchParams.get("code");
+        const state = url.searchParams.get("state");
+
+        if (!authorizationCode || !state) {
+            throw new Error("Missing authorization code or state");
+        }
+
+        console.log("📋 Authorization code received:", authorizationCode.substring(0, 10) + "...");
+
+        // Parse the state to get the original OAuth request info
+        const oauthReqInfo = JSON.parse(atob(state));
+        console.log("📋 OAuth request info:", oauthReqInfo);
+
+        // Get the endpoint from KV storage
+        let endpoint = "https://dev-1.absmartly.com"; // Default fallback
+        if (env.OAUTH_KV) {
+            const storedEndpoint = await env.OAUTH_KV.get("absmartly_endpoint_config");
+            if (storedEndpoint) {
+                endpoint = storedEndpoint;
+            }
+        }
+
+        console.log("🔗 Using endpoint:", endpoint);
+
+        // Exchange the code for an access token with ABsmartly OAuth
+        const tokenUrl = `${endpoint}/auth/oauth/token`;
+        const requestBody = new URLSearchParams({
+            grant_type: "authorization_code",
+            client_id: env.ABSMARTLY_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID,
+            code: authorizationCode,
+            redirect_uri: new URL("/oauth/callback", request.url).href,
+        });
+
+        // Add client_secret if provided
+        if (env.ABSMARTLY_OAUTH_CLIENT_SECRET) {
+            requestBody.set("client_secret", env.ABSMARTLY_OAUTH_CLIENT_SECRET);
+        }
+
+        console.log("🔗 Token exchange request to:", tokenUrl);
+
+        const tokenResponse = await fetch(tokenUrl, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "User-Agent": "ABsmartly-MCP-OAuth/1.0",
+                "Accept": "application/json",
+                "ngrok-skip-browser-warning": "true",
+            },
+            body: requestBody,
+        });
+
+        if (!tokenResponse.ok) {
+            const errorText = await tokenResponse.text();
+            console.error("❌ Token exchange failed:", errorText);
+            throw new Error(`Token exchange failed: ${errorText}`);
+        }
+
+        const tokenData = JSON.parse(await tokenResponse.text());
+        console.log("✅ Token exchange successful");
+
+        // Decode the JWT to extract user information
+        let userInfo: any = {};
+        try {
+            const jwtParts = tokenData.access_token.split('.');
+            if (jwtParts.length === 3) {
+                const payload = atob(jwtParts[1]);
+                userInfo = JSON.parse(payload);
+            }
+        } catch (error) {
+            console.warn("⚠️ Failed to decode JWT:", error);
+        }
+
+        // Extract user information
+        const email = userInfo?.email || userInfo?.sub || "unknown@example.com";
+        const name = userInfo?.name || userInfo?.given_name || email;
+        const userId = userInfo?.sub || userInfo?.absmartly_user_id?.toString() || email;
+
+        // Prepare endpoint for API client
+        const cleanEndpoint = endpoint.replace(/\/+$/, '');
+        const absmartlyEndpoint = cleanEndpoint.endsWith('/v1') ? cleanEndpoint : `${cleanEndpoint}/v1`;
+
+        // Return props for the MCP session
+        return {
+            email,
+            name,
+            absmartly_endpoint: absmartlyEndpoint,
+            oauth_jwt: tokenData.access_token,
+            user_id: userId,
+            absmartly_api_key: tokenData.api_key || tokenData.absmartly_api_key || undefined
+        };
+    }
 });
 
 // Main fetch handler with API key bypass
@@ -603,18 +725,68 @@ export default {
             const { apiKey, endpoint } = detectApiKey(request);
 
             if (apiKey && endpoint) {
-                console.log("🔑 API key detected, creating user-based session");
+                console.log("🔑 API key detected, fetching user info");
 
-                // Create deterministic session ID based on user identity (API key + endpoint)
-                // This ensures the same user always gets the same session, providing persistence
-                const userIdentity = `${apiKey}:${endpoint}`;
+                // Check if we have cached user info for this API key
+                const userCacheKey = `user:${apiKey}`;
+                let userInfo: any = null;
+
+                try {
+                    const cachedUserData = await env.OAUTH_KV?.get(userCacheKey);
+                    if (cachedUserData) {
+                        userInfo = JSON.parse(cachedUserData);
+                        console.log("📦 Using cached user info");
+                    }
+                } catch (error) {
+                    console.log("📦 Error reading cached user info:", error);
+                }
+
+                // If no cached user info, fetch from API
+                if (!userInfo) {
+                    try {
+                        console.log("🔍 Fetching user info from API");
+                        // Create temporary API client to fetch user
+                        const tempClient = new ABsmartlyAPIClient(apiKey, endpoint, 'api-key');
+                        const userResponse = await tempClient.getCurrentUser();
+
+                        if (userResponse.ok && userResponse.data) {
+                            userInfo = userResponse.data;
+                            // Cache for 1 hour
+                            await env.OAUTH_KV?.put(userCacheKey, JSON.stringify(userInfo), { 
+                                expirationTtl: 3600 
+                            });
+                            console.log("✅ User info fetched and cached");
+                        } else {
+                            console.error("❌ Failed to fetch user info:", userResponse.errors);
+                            // Fall back to using API key as identifier
+                            userInfo = {
+                                id: apiKey,
+                                email: 'api-key-user@example.com',
+                                first_name: 'API Key',
+                                last_name: 'User'
+                            };
+                        }
+                    } catch (error) {
+                        console.error("❌ Error fetching user info:", error);
+                        // Fall back to using API key as identifier
+                        userInfo = {
+                            id: apiKey,
+                            email: 'api-key-user@example.com',
+                            first_name: 'API Key',
+                            last_name: 'User'
+                        };
+                    }
+                }
+
+                // Create deterministic session ID based on real user ID + endpoint
+                const userIdentity = `${userInfo.id}:${endpoint}`;
                 const encoder = new TextEncoder();
                 const data = encoder.encode(userIdentity);
                 const hashBuffer = await crypto.subtle.digest('SHA-256', data);
                 const hashArray = Array.from(new Uint8Array(hashBuffer));
                 const sessionId = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
-                console.log(`📱 User-based session ID: ${sessionId.substring(0, 8)}... (based on API key + endpoint)`);
+                console.log(`📱 User session ID: ${sessionId.substring(0, 8)}... (user ${userInfo.id})`);
 
                 // Add sessionId to URL if not present (for deterministic session creation)
                 const modifiedUrl = new URL(request.url);
@@ -625,13 +797,13 @@ export default {
                 // Create modified request with sessionId
                 const modifiedRequest = new Request(modifiedUrl.toString(), request);
 
-                // Set props in context BEFORE routing to MCP handler (required for Durable Object initialization)
+                // Set props in context with real user info
                 const apiKeyProps = {
-                    email: 'api-key-user@example.com',
-                    name: 'API Key User',
+                    email: userInfo.email || 'api-key-user@example.com',
+                    name: `${userInfo.first_name || 'API'} ${userInfo.last_name || 'User'}`.trim(),
                     absmartly_endpoint: endpoint,
                     absmartly_api_key: apiKey,
-                    user_id: `api-key-${sessionId.substring(0, 8)}` // Use session ID prefix as user ID
+                    user_id: userInfo.id.toString()
                 };
 
                 const enrichedCtx = { ...ctx, props: apiKeyProps };

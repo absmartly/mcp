@@ -232,6 +232,9 @@ export class ABsmartlyAPIClient {
   async getUser(id: number): Promise<ABsmartlyResponse> {
     return this.makeRequest(`/users/${id}`);
   }
+  async getCurrentUser(): Promise<ABsmartlyResponse> {
+    return this.makeRequest('/auth/current-user');
+  }
   async createUser(data: any): Promise<ABsmartlyResponse> {
     return this.makeRequest('/users', {
       method: 'POST',
