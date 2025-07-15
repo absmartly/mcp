@@ -26,7 +26,7 @@ const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>();
 app.get("/authorize", async (c) => {
 	// Debug log collection
 	const debugLogs: string[] = [];
-	
+
 	// Helper to log debug messages
 	const debug = (message: string, data?: any): void => {
 		const timestamp = new Date().toISOString();
@@ -36,18 +36,18 @@ app.get("/authorize", async (c) => {
 		debugLogs.push(logEntry);
 		console.log(logEntry);
 	};
-	
+
 	debug('=== Worker OAuth Authorize Debug ===');
 	debug('URL', c.req.url);
 	debug('Query params', c.req.query());
-	
+
 	// Dump all headers for client identification
 	const headers: Record<string, string> = {};
 	for (const [key, value] of c.req.raw.headers.entries()) {
 		headers[key] = value;
 	}
 	debug('Request headers', headers);
-	
+
 	// Dump request body if present
 	if (c.req.raw.method === 'POST' && c.req.raw.body) {
 		try {
@@ -58,7 +58,7 @@ app.get("/authorize", async (c) => {
 			debug('Could not read request body', error);
 		}
 	}
-	
+
 	// Extract and store ABsmartly endpoint from resource parameter
 	const resourceParam = c.req.query('resource');
 	debug('Resource parameter', resourceParam);
@@ -84,7 +84,7 @@ app.get("/authorize", async (c) => {
 			hasOAuthKV: !!c.env.OAUTH_KV
 		});
 	}
-	
+
 	debug('About to parse OAuth request');
 	let oauthReqInfo;
 	try {
@@ -98,13 +98,13 @@ app.get("/authorize", async (c) => {
 		debug('Error stack', errorStack);
 		return c.text(`OAuth request parsing failed: ${errorMessage}\n\nDebug Logs:\n${debugLogs.join('\n')}`, 400);
 	}
-	
+
 	const { clientId } = oauthReqInfo;
 	if (!clientId) {
 		debug('No client ID found, returning error');
 		return c.text(`Invalid request\n\nDebug Logs:\n${debugLogs.join('\n')}`, 400);
 	}
-	
+
 	debug('Client ID found', clientId);
 
 	// Debug: check what the client lookup returns
@@ -125,12 +125,12 @@ app.get("/authorize", async (c) => {
 		debug('Checking if client is already approved', oauthReqInfo.clientId);
 		const isApproved = await clientIdAlreadyApproved(c.req.raw, oauthReqInfo.clientId, c.env.COOKIE_ENCRYPTION_KEY || "default-key");
 		debug('Client approval check result', isApproved);
-		
+
 		if (isApproved) {
 			// Double-check that the client actually exists
 			const clientExists = await c.env.OAUTH_PROVIDER.lookupClient(clientId);
 			debug('Client exists check', !!clientExists);
-			
+
 			if (clientExists) {
 				debug('Client is already approved and exists, redirecting to OAuth');
 				return redirectToAbsmartlyOAuth(c, c.req.raw, oauthReqInfo, {}, debugLogs);
@@ -145,10 +145,10 @@ app.get("/authorize", async (c) => {
 					tokenEndpointAuthMethod: 'none' // Public client
 					// No clientSecret for public clients
 				};
-				
+
 				await c.env.OAUTH_KV.put(`client:${clientId}`, JSON.stringify(newClientData));
 				debug('Auto-registered new public client', newClientData);
-				
+
 				// Now redirect to OAuth with the newly registered client
 				return redirectToAbsmartlyOAuth(c, c.req.raw, oauthReqInfo, {}, debugLogs);
 			}
@@ -165,7 +165,7 @@ app.get("/authorize", async (c) => {
 	// Show approval dialog
 	const clientInfo = await c.env.OAUTH_PROVIDER.lookupClient(clientId);
 	debug('Client info for approval dialog', clientInfo);
-	
+
 	// Try to extract client name from recent request body if available
 	let inferredClientName = null;
 	if (c.env.OAUTH_KV) {
@@ -183,7 +183,7 @@ app.get("/authorize", async (c) => {
 			debug('Error reading inferred client info', e);
 		}
 	}
-	
+
 	// Create enhanced client info with inferred name if available
 	const enhancedClientInfo = clientInfo ? clientInfo : {
 		clientId: clientId,
@@ -191,7 +191,7 @@ app.get("/authorize", async (c) => {
 		redirectUris: [oauthReqInfo.redirectUri],
 		tokenEndpointAuthMethod: 'none' as const
 	};
-	
+
 	return renderApprovalDialog(c.req.raw, {
 		client: enhancedClientInfo,
 		server: {
@@ -229,7 +229,7 @@ async function redirectToAbsmartlyOAuth(
 		debugLogs.push(logEntry);
 		console.log(logEntry);
 	};
-	
+
 	// Get the endpoint from KV storage (stored from headers)
 	let endpoint = null;
 	if (c.env.OAUTH_KV) {
@@ -244,15 +244,15 @@ async function redirectToAbsmartlyOAuth(
 	} else {
 		debug('No OAUTH_KV available');
 	}
-	
+
 	// If we still don't have an endpoint, try to use a reasonable default
 	if (!endpoint) {
 		debug('No endpoint available, using default');
 		endpoint = "https://sandbox.absmartly.com";
 	}
-	
+
 	debug('Final endpoint to use', endpoint);
-	
+
 	// Redirect to our SAML → OAuth bridge (at /auth/oauth/authorize)
 	const absmartlyOAuthUrl = new URL(`${endpoint}/auth/oauth/authorize`);
 	absmartlyOAuthUrl.searchParams.set("client_id", c.env.ABSMARTLY_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID);
@@ -260,7 +260,7 @@ async function redirectToAbsmartlyOAuth(
 	absmartlyOAuthUrl.searchParams.set("scope", "api:read api:write");
 	absmartlyOAuthUrl.searchParams.set("response_type", "code");
 	absmartlyOAuthUrl.searchParams.set("state", btoa(JSON.stringify(oauthReqInfo)));
-	
+
 	// Add ngrok bypass header as query param if using ngrok
 	if (endpoint && endpoint.includes("ngrok")) {
 		absmartlyOAuthUrl.searchParams.set("ngrok-skip-browser-warning", "true");
@@ -286,7 +286,7 @@ async function redirectToAbsmartlyOAuth(
 app.get("/oauth/callback", async (c) => {
 	// Debug log collection
 	const debugLogs: string[] = [];
-	
+
 	// Helper to log debug messages
 	const debug = (message: string, data?: any): void => {
 		const timestamp = new Date().toISOString();
@@ -296,18 +296,18 @@ app.get("/oauth/callback", async (c) => {
 		debugLogs.push(logEntry);
 		console.log(logEntry);
 	};
-	
+
 	debug('=== OAuth Callback Debug ===');
 	debug('URL', c.req.url);
 	debug('Query params', c.req.query());
-	
+
 	// Get the oauthReqInfo out of the state parameter
 	const stateParam = c.req.query("state");
 	debug('State parameter', stateParam);
-	
+
 	const oauthReqInfo = JSON.parse(atob(stateParam as string)) as AuthRequest;
 	debug('Parsed OAuth request info', oauthReqInfo);
-	
+
 	if (!oauthReqInfo.clientId) {
 		debug('No client ID in state, returning error');
 		return c.text(`Invalid state\n\nDebug Logs:\n${debugLogs.join('\n')}`, 400);
@@ -315,7 +315,7 @@ app.get("/oauth/callback", async (c) => {
 
 	const code = c.req.query("code");
 	debug('Authorization code', code);
-	
+
 	if (!code) {
 		debug('No authorization code provided');
 		return c.text(`Authorization code not provided\n\nDebug Logs:\n${debugLogs.join('\n')}`, 400);
@@ -330,7 +330,7 @@ app.get("/oauth/callback", async (c) => {
 				endpoint = storedEndpoint;
 			}
 		}
-		
+
 		// Exchange the code for an access token with our SAML → OAuth bridge (at /auth/oauth/token)
 		const tokenUrl = `${endpoint}/auth/oauth/token`;
 		const requestBody = new URLSearchParams({
@@ -339,15 +339,15 @@ app.get("/oauth/callback", async (c) => {
 			code: code,
 			redirect_uri: new URL("/oauth/callback", c.req.url).href,
 		});
-		
+
 		// Add client_secret if provided in environment
 		if (c.env.ABSMARTLY_OAUTH_CLIENT_SECRET) {
 			requestBody.set("client_secret", c.env.ABSMARTLY_OAUTH_CLIENT_SECRET);
 		}
-		
+
 		debug('Token exchange request URL', tokenUrl);
 		debug('Token exchange request body', Object.fromEntries(requestBody.entries()));
-		
+
 		const tokenResponse = await fetch(tokenUrl, {
 			method: "POST",
 			headers: {
@@ -373,7 +373,7 @@ app.get("/oauth/callback", async (c) => {
 		const tokenData = JSON.parse(responseText);
 		debug('Parsed token data', tokenData);
 		debug('Token data keys', Object.keys(tokenData));
-		
+
 		const { access_token } = tokenData;
 
 		// Decode the JWT to extract user information
@@ -395,30 +395,30 @@ app.get("/oauth/callback", async (c) => {
 		const email = userInfo?.email || userInfo?.sub || "unknown@example.com";
 		const name = userInfo?.name || userInfo?.given_name || email;
 		const userId = userInfo?.sub || userInfo?.absmartly_user_id?.toString() || email;
-		
+
 		debug('Extracted user information', { email, name, userId, userInfo });
 
 		// The access token from our bridge should contain the ABsmartly API key
 		// Use the endpoint from configuration, removing any trailing slashes
 		const cleanEndpoint = endpoint.replace(/\/+$/, '');
 		const absmartlyEndpoint = cleanEndpoint.endsWith('/v1') ? cleanEndpoint : `${cleanEndpoint}/v1`;
-		
+
 		// Check if the token response has an api_key field
 		// The OAuth JWT is NOT a valid API key - we need to get the user's API key separately
 		const absmartlyApiKey = tokenData.api_key || tokenData.absmartly_api_key || null;
-		
+
 		debug('Token response analysis:', {
 			hasApiKey: !!absmartlyApiKey,
 			accessTokenIsJWT: access_token?.includes('.') && access_token.split('.').length === 3,
 			tokenDataKeys: Object.keys(tokenData)
 		});
-		
+
 		if (!absmartlyApiKey) {
 			debug('No API key found in token response. Will use OAuth JWT for authentication.');
 		} else {
 			debug('API key found in token response:', absmartlyApiKey?.substring(0, 10) + '...');
 		}
-		
+
 		debug('ABsmartly configuration', { 
 			absmartlyEndpoint, 
 			hasApiKey: !!absmartlyApiKey,
@@ -433,7 +433,7 @@ app.get("/oauth/callback", async (c) => {
 			user_id: userId,
 			oauth_jwt: access_token, // Store the original OAuth JWT
 		};
-		
+
 		// Only include absmartly_api_key if we actually have one
 		if (absmartlyApiKey) {
 			props.absmartly_api_key = absmartlyApiKey;
@@ -453,8 +453,35 @@ app.get("/oauth/callback", async (c) => {
 			scope: oauthReqInfo.scope,
 			userId: userId,
 		});
-		
+
 		debug('OAuth authorization completed successfully', { redirectTo });
+
+		// Debug: Extract the access token from the redirect URL to see what's being generated
+		try {
+			const redirectUrl = new URL(redirectTo);
+			const accessToken = redirectUrl.searchParams.get('code');
+			debug('Generated access token for Claude Desktop', { 
+				accessToken: accessToken ? accessToken.substring(0, 20) + '...' : null,
+				fullRedirectUrl: redirectTo 
+			});
+
+			// Check if this token will be stored in KV
+			if (accessToken && c.env.OAUTH_KV) {
+				setTimeout(async () => {
+					try {
+						const tokenData = await c.env.OAUTH_KV.get(`token:${accessToken}`);
+						debug('Token storage check', { 
+							tokenExists: !!tokenData,
+							tokenPreview: tokenData ? tokenData.substring(0, 100) + '...' : null
+						});
+					} catch (error) {
+						debug('Token storage check failed', error);
+					}
+				}, 1000); // Check after 1 second
+			}
+		} catch (error) {
+			debug('Failed to parse redirect URL', error);
+		}
 
 		return Response.redirect(redirectTo);
 	} catch (error) {

@@ -10,6 +10,15 @@
 - **Use descriptive constant names with ALL_CAPS naming convention**
 - **Group related constants together**
 
+### Understanding Dependencies Before Changes
+
+**NEVER make code changes without understanding the underlying implementation**
+
+- **Always read source code in node_modules to understand how dependencies work**
+- **Understand the differences between similar methods before switching between them**
+- **Research function behavior, parameters, and return values before using them**
+- **Never guess or assume how third-party code works**
+
 ### Whitespace and Formatting
 
 **NEVER create lines containing only whitespace characters**

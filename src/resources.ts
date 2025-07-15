@@ -4,54 +4,55 @@
  * This file contains all the documentation resources that are exposed via MCP.
  * Each resource provides detailed documentation for specific API endpoint groups.
  */
-
 import type { ABsmartlyMCP } from './index';
-import { readFileSync } from 'fs';
-import { join } from 'path';
-
 export class ABsmartlyResources {
+    private resourcesRegistered: boolean = false;
     constructor(private mcpServer: ABsmartlyMCP) {}
-
     /**
-     * Read markdown file from public/docs/api directory
+     * Read markdown file from assets binding
      */
-    private readMarkdownFile(filename: string): string {
+    private async readMarkdownFile(filename: string): Promise<string> {
         try {
-            const filePath = join(process.cwd(), 'public', 'docs', 'api', filename);
-            return readFileSync(filePath, 'utf-8');
+            const filePath = `/docs/api/${filename}`;
+            const asset = await (this.mcpServer as any).env.ASSETS.fetch(new Request(`https://placeholder.local${filePath}`));
+            if (!asset.ok) {
+                throw new Error(`Asset not found: ${filePath}`);
+            }
+            return await asset.text();
         } catch (error) {
             console.error(`Error reading markdown file ${filename}:`, error);
             return `# Error\n\nCould not load documentation for ${filename}`;
         }
     }
-
     /**
      * Register all documentation resources
      */
-    setupResources() {
+    async setupResources() {
+        if (this.resourcesRegistered) {
+            console.log("📚 Resources already registered, skipping setup");
+            return;
+        }
         console.log("📚 Setting up documentation resources");
-        this.setupGeneralApiDocs();
-        this.setupExperimentsApiDocs();
-        this.setupGoalsApiDocs();
-        this.setupMetricsApiDocs();
-        this.setupApplicationsApiDocs();
-        this.setupUsersTeamsApiDocs();
-        this.setupAnalyticsApiDocs();
-        this.setupSegmentsApiDocs();
-        this.setupTemplatesAndExamples();
+        await this.setupGeneralApiDocs();
+        await this.setupExperimentsApiDocs();
+        await this.setupGoalsApiDocs();
+        await this.setupMetricsApiDocs();
+        await this.setupApplicationsApiDocs();
+        await this.setupUsersTeamsApiDocs();
+        await this.setupAnalyticsApiDocs();
+        await this.setupSegmentsApiDocs();
+        await this.setupTemplatesAndExamples();
+        this.resourcesRegistered = true;
     }
-
-    private setupGeneralApiDocs() {
+    private async setupGeneralApiDocs() {
         this.mcpServer.server.resource(
+            "ABsmartly API Documentation",
             "absmartly://docs/api",
-            "text/markdown",
             {
-                name: "ABsmartly API Documentation",
                 description: "General API documentation and authentication guide"
             },
             async () => {
-                let content = this.readMarkdownFile('general.md');
-                
+                let content = await this.readMarkdownFile('general.md');
                 // Replace placeholder URL with actual endpoint if available
                 if (this.mcpServer.props?.absmartly_endpoint) {
                     content = content.replace(
@@ -59,7 +60,6 @@ export class ABsmartlyResources {
                         this.mcpServer.props.absmartly_endpoint
                     );
                 }
-                
                 // Add custom fields information if available
                 if (this.mcpServer.customFields?.length) {
                     const customFieldsInfo = `\n\n### Available Custom Fields\n${this.mcpServer.customFields.map(f => `- **${f.name}** (${f.type}): ${f.description || 'No description'}`).join('\n')}`;
@@ -68,7 +68,6 @@ export class ABsmartlyResources {
                         `Custom fields can be configured per organization to extend experiment metadata and provide additional context for analysis.${customFieldsInfo}`
                     );
                 }
-                
                 return {
                     contents: [{
                         uri: "absmartly://docs/api",
@@ -79,18 +78,15 @@ export class ABsmartlyResources {
             }
         );
     }
-
-    private setupExperimentsApiDocs() {
+    private async setupExperimentsApiDocs() {
         this.mcpServer.server.resource(
+            "Experiments API Documentation",
             "absmartly://docs/experiments",
-            "text/markdown", 
             {
-                name: "Experiments API Documentation",
                 description: "Complete documentation for experiment management endpoints"
             },
             async () => {
-                let content = this.readMarkdownFile('experiments.md');
-                
+                let content = await this.readMarkdownFile('experiments.md');
                 // Add custom fields information if available
                 if (this.mcpServer.customFields?.length) {
                     const customFieldsInfo = `\n\n### Available Custom Fields\n${this.mcpServer.customFields.map(f => `- **${f.name}** (${f.type}): ${f.description || 'No description'}`).join('\n')}`;
@@ -99,7 +95,6 @@ export class ABsmartlyResources {
                         `Experiments support custom fields defined in your organization for additional metadata and context.${customFieldsInfo}`
                     );
                 }
-                
                 return {
                     contents: [{
                         uri: "absmartly://docs/experiments",
@@ -110,13 +105,11 @@ export class ABsmartlyResources {
             }
         );
     }
-
-    private setupGoalsApiDocs() {
+    private async setupGoalsApiDocs() {
         this.mcpServer.server.resource(
+            "Goals API Documentation",
             "absmartly://docs/goals",
-            "text/markdown",
             {
-                name: "Goals API Documentation", 
                 description: "Documentation for goal definition and management"
             },
             async () => {
@@ -124,19 +117,17 @@ export class ABsmartlyResources {
                     contents: [{
                         uri: "absmartly://docs/goals",
                         mimeType: "text/markdown",
-                        text: this.readMarkdownFile('goals.md')
+                        text: await this.readMarkdownFile('goals.md')
                     }]
                 };
             }
         );
     }
-
-    private setupMetricsApiDocs() {
+    private async setupMetricsApiDocs() {
         this.mcpServer.server.resource(
+            "Metrics API Documentation",
             "absmartly://docs/metrics",
-            "text/markdown",
             {
-                name: "Metrics API Documentation",
                 description: "Documentation for custom metrics and measurement"
             },
             async () => {
@@ -144,19 +135,17 @@ export class ABsmartlyResources {
                     contents: [{
                         uri: "absmartly://docs/metrics",
                         mimeType: "text/markdown",
-                        text: this.readMarkdownFile('metrics.md')
+                        text: await this.readMarkdownFile('metrics.md')
                     }]
                 };
             }
         );
     }
-
-    private setupApplicationsApiDocs() {
+    private async setupApplicationsApiDocs() {
         this.mcpServer.server.resource(
+            "Applications API Documentation",
             "absmartly://docs/applications",
-            "text/markdown",
             {
-                name: "Applications API Documentation",
                 description: "Documentation for application and environment management"
             },
             async () => {
@@ -164,19 +153,17 @@ export class ABsmartlyResources {
                     contents: [{
                         uri: "absmartly://docs/applications",
                         mimeType: "text/markdown",
-                        text: this.readMarkdownFile('applications.md')
+                        text: await this.readMarkdownFile('applications.md')
                     }]
                 };
             }
         );
     }
-
-    private setupUsersTeamsApiDocs() {
+    private async setupUsersTeamsApiDocs() {
         this.mcpServer.server.resource(
+            "Users & Teams API Documentation",
             "absmartly://docs/users-teams",
-            "text/markdown",
             {
-                name: "Users & Teams API Documentation",
                 description: "Documentation for user management and team collaboration"
             },
             async () => {
@@ -184,19 +171,17 @@ export class ABsmartlyResources {
                     contents: [{
                         uri: "absmartly://docs/users-teams",
                         mimeType: "text/markdown",
-                        text: this.readMarkdownFile('users-teams.md')
+                        text: await this.readMarkdownFile('users-teams.md')
                     }]
                 };
             }
         );
     }
-
-    private setupAnalyticsApiDocs() {
+    private async setupAnalyticsApiDocs() {
         this.mcpServer.server.resource(
+            "Analytics API Documentation",
             "absmartly://docs/analytics",
-            "text/markdown",
             {
-                name: "Analytics API Documentation", 
                 description: "Documentation for experiment analytics and reporting"
             },
             async () => {
@@ -204,19 +189,17 @@ export class ABsmartlyResources {
                     contents: [{
                         uri: "absmartly://docs/analytics",
                         mimeType: "text/markdown",
-                        text: this.readMarkdownFile('analytics.md')
+                        text: await this.readMarkdownFile('analytics.md')
                     }]
                 };
             }
         );
     }
-
-    private setupSegmentsApiDocs() {
+    private async setupSegmentsApiDocs() {
         this.mcpServer.server.resource(
+            "Segments API Documentation",
             "absmartly://docs/segments",
-            "text/markdown",
             {
-                name: "Segments API Documentation",
                 description: "Documentation for audience segmentation and targeting"
             },
             async () => {
@@ -224,125 +207,23 @@ export class ABsmartlyResources {
                     contents: [{
                         uri: "absmartly://docs/segments",
                         mimeType: "text/markdown",
-                        text: this.readMarkdownFile('segments.md')
+                        text: await this.readMarkdownFile('segments.md')
                     }]
                 };
             }
         );
     }
-
-    private setupTemplatesAndExamples() {
+    private async setupTemplatesAndExamples() {
+        // Template resources are now handled by the main ABsmartlyMCP class
+        // to ensure they use dynamic entity data instead of static IDs
         this.mcpServer.server.resource(
-            "absmartly://templates/experiment",
-            "application/json",
-            {
-                name: "Experiment Template",
-                description: "Template for creating new experiments with custom fields"
-            },
-            async () => {
-                const template = {
-                    state: "ready",
-                    name: "my_new_experiment",
-                    display_name: "My New Experiment",
-                    iteration: 1,
-                    percentage_of_traffic: 100,
-                    unit_type: {
-                        unit_type_id: 1
-                    },
-                    nr_variants: 2,
-                    percentages: "50/50",
-                    audience: '{"filter":[{"and":[]}]}',
-                    audience_strict: true,
-                    owners: [
-                        { user_id: 3 }
-                    ],
-                    teams: [],
-                    experiment_tags: [],
-                    applications: [
-                        {
-                            application_id: 1,
-                            application_version: "0"
-                        }
-                    ],
-                    primary_metric: {
-                        metric_id: 4
-                    },
-                    secondary_metrics: [],
-                    custom_fields: this.mcpServer.customFields?.reduce((acc, field) => {
-                        acc[field.name] = field.type === 'boolean' ? false : '';
-                        return acc;
-                    }, {} as any) || {}
-                };
-                
-                return {
-                    contents: [{
-                        uri: "absmartly://templates/experiment",
-                        mimeType: "application/json",
-                        text: JSON.stringify(template, null, 2)
-                    }]
-                };
-            }
-        );
-
-        this.mcpServer.server.resource(
-            "absmartly://templates/feature-flag",
-            "application/json", 
-            {
-                name: "Feature Flag Template",
-                description: "Template for creating feature flags"
-            },
-            async () => {
-                const template = {
-                    state: "ready",
-                    name: "my_new_feature_flag",
-                    display_name: "My New Feature Flag",
-                    iteration: 1,
-                    type: "feature",
-                    percentage_of_traffic: 100,
-                    unit_type: {
-                        unit_type_id: 1
-                    },
-                    nr_variants: 2,
-                    percentages: "90/10",
-                    audience: '{"filter":[{"and":[]}]}',
-                    audience_strict: true,
-                    owners: [
-                        { user_id: 3 }
-                    ],
-                    teams: [],
-                    experiment_tags: [],
-                    applications: [
-                        {
-                            application_id: 1,
-                            application_version: "0"
-                        }
-                    ],
-                    primary_metric: {
-                        metric_id: 4
-                    },
-                    secondary_metrics: []
-                };
-                
-                return {
-                    contents: [{
-                        uri: "absmartly://templates/feature-flag",
-                        mimeType: "application/json",
-                        text: JSON.stringify(template, null, 2)
-                    }]
-                };
-            }
-        );
-
-        this.mcpServer.server.resource(
+            "API Request Examples",
             "absmartly://examples/api-requests",
-            "text/markdown",
             {
-                name: "API Request Examples",
                 description: "Common API request examples and patterns"
             },
             async () => {
-                let content = this.readMarkdownFile('examples.md');
-                
+                let content = await this.readMarkdownFile('examples.md');
                 // Replace placeholder URL with actual endpoint if available
                 if (this.mcpServer.props?.absmartly_endpoint) {
                     content = content.replace(
@@ -350,7 +231,6 @@ export class ABsmartlyResources {
                         this.mcpServer.props.absmartly_endpoint
                     );
                 }
-                
                 return {
                     contents: [{
                         uri: "absmartly://examples/api-requests",

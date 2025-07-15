@@ -5,11 +5,9 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { ABsmartlyAPIClient } from './api-client';
-
 export class SimpleMCPServer {
   private server: Server;
   private apiClient: ABsmartlyAPIClient;
-
   constructor(apiKey: string) {
     this.apiClient = new ABsmartlyAPIClient(apiKey);
     this.server = new Server(
@@ -23,10 +21,8 @@ export class SimpleMCPServer {
         },
       }
     );
-
     this.setupHandlers();
   }
-
   private setupHandlers() {
     // List tools
     this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -93,11 +89,9 @@ export class SimpleMCPServer {
         },
       ],
     }));
-
     // Handle tool calls
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
-
       try {
         switch (name) {
           case 'list_experiments':
@@ -110,7 +104,6 @@ export class SimpleMCPServer {
                 },
               ],
             };
-
           case 'get_experiment':
             const expResponse = await this.apiClient.getExperiment((args as any).id);
             return {
@@ -121,7 +114,6 @@ export class SimpleMCPServer {
                 },
               ],
             };
-
           case 'create_feature_flag':
             const flagData = this.createFeatureFlagData(args as any);
             const createResponse = await this.apiClient.createExperiment(flagData);
@@ -133,7 +125,6 @@ export class SimpleMCPServer {
                 },
               ],
             };
-
           case 'start_experiment':
             const startResponse = await this.apiClient.startExperiment((args as any).id);
             return {
@@ -144,7 +135,6 @@ export class SimpleMCPServer {
                 },
               ],
             };
-
           case 'stop_experiment':
             const stopResponse = await this.apiClient.stopExperiment((args as any).id);
             return {
@@ -155,7 +145,6 @@ export class SimpleMCPServer {
                 },
               ],
             };
-
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -172,7 +161,6 @@ export class SimpleMCPServer {
       }
     });
   }
-
   private createFeatureFlagData(args: any) {
     return {
       name: args.name,
@@ -203,7 +191,6 @@ export class SimpleMCPServer {
       ],
     };
   }
-
   async run() {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);

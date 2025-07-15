@@ -26,7 +26,7 @@
     "test:dynamic": "node test-dynamic-fields-complete.js",
     "test:dynamic:full": "./run-dynamic-fields-test.sh",
     "precommit": "npm run test",
-    "clean-whitespace": "find src -name '*.ts' -exec sed -i '' '/^[[:space:]]*$/d' {} +",
+    "clean-whitespace": "find src -name '*.ts' -exec sed -i '' 's/^[[:space:]]*$//' {} +",
     "build:dxt": "dxt pack",
     "upload:dxt": "./scripts/build-dxt.sh",
     "install:dxt": "npm install -g @anthropic-ai/dxt"
@@ -41,7 +41,6 @@
   "author": "ABsmartly",
   "license": "MIT",
   "dependencies": {
-    "@cloudflare/workers-oauth-provider": "^0.0.5",
     "@modelcontextprotocol/sdk": "^1.13.0",
     "agents": "^0.0.95",
     "dotenv": "^17.0.0",
