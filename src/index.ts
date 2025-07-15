@@ -479,13 +479,55 @@ const baseMcpHandler = ABsmartlyMCP.mount("/sse");
 
 // Create OAuth provider for OAuth flow endpoints only
 const oauthProvider = new OAuthProvider({
-    // No apiHandler or apiRoute - we'll handle SSE authentication ourselves
+    // Empty apiHandlers to satisfy OAuth provider requirements
+    apiHandlers: {},
     authorizeEndpoint: "/authorize",
     tokenEndpoint: "/token",
     clientRegistrationEndpoint: "/register",
     accessTokenTTL: 3600,
     scopesSupported: ["api:read", "api:write"],
     disallowPublicClientRegistration: false,
+
+    // Client lookup function
+    async clientLookup(clientId: string, env: any) {
+        // Check if client exists in KV storage
+        if (env.OAUTH_KV) {
+            const clientData = await env.OAUTH_KV.get(`client:${clientId}`);
+            if (clientData) {
+                const client = JSON.parse(clientData);
+                return {
+                    clientId: client.clientId,
+                    clientSecret: client.clientSecret,
+                    redirectUris: client.redirectUris,
+                    clientName: client.clientName,
+                    tokenEndpointAuthMethod: client.tokenEndpointAuthMethod || 'client_secret_basic'
+                };
+            }
+        }
+
+        // Auto-register Claude Desktop clients as public clients
+        if (clientId.startsWith("claude-mcp-") || clientId.startsWith("C0")) {
+            console.log("Auto-registering public client:", clientId);
+            const newClient = {
+                clientId: clientId,
+                redirectUris: ["https://claude.ai/api/mcp/auth_callback"],
+                clientName: "Claude Desktop",
+                tokenEndpointAuthMethod: 'none' // Public client
+            };
+
+            // Store in KV for future lookups
+            if (env.OAUTH_KV) {
+                await env.OAUTH_KV.put(`client:${clientId}`, JSON.stringify({
+                    ...newClient,
+                    registrationDate: Date.now()
+                }));
+            }
+
+            return newClient;
+        }
+
+        return null;
+    },
 
     // Default handler to redirect to ABsmartly OAuth
     defaultHandler: {
@@ -835,7 +877,18 @@ export default {
             });
         }
 
-        // For non-SSE endpoints, use OAuth provider
+        // For OAuth authorization endpoints, use our custom handler
+        if (url.pathname === "/authorize" || url.pathname === "/oauth/callback") {
+            console.log("🔄 Routing to ABsmartly OAuth handler for:", url.pathname);
+            // Pass OAUTH_PROVIDER in environment for the handler to use
+            const enrichedEnv = {
+                ...env,
+                OAUTH_PROVIDER: oauthProvider
+            };
+            return ABsmartlyOAuthHandler.fetch(request, enrichedEnv, ctx);
+        }
+
+        // For other OAuth endpoints, use OAuth provider
         console.log("🔄 Routing to OAuth provider for endpoint:", url.pathname);
         return oauthProvider.fetch(request, env, ctx);
     }
