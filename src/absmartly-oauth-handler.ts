@@ -30,6 +30,25 @@ export class ABsmartlyOAuthHandler extends Hono {
       const env = c.env;
       const url = new URL(c.req.url);
       
+      // Check for resource parameter that might contain the endpoint
+      const resourceParam = url.searchParams.get('resource');
+      console.log('📍 Resource parameter:', resourceParam);
+      
+      if (resourceParam && env.OAUTH_KV) {
+        try {
+          const resourceUrl = new URL(resourceParam);
+          console.log('📍 Parsed resource URL:', resourceUrl.href);
+          const absmartlyEndpoint = resourceUrl.searchParams.get('absmartly-endpoint');
+          console.log('📍 Extracted ABsmartly endpoint from resource:', absmartlyEndpoint);
+          if (absmartlyEndpoint) {
+            console.log('📍 Storing ABsmartly endpoint from resource param:', absmartlyEndpoint);
+            await env.OAUTH_KV.put("absmartly_endpoint_config", absmartlyEndpoint);
+          }
+        } catch (e) {
+          console.log('📍 Failed to parse resource parameter:', e);
+        }
+      }
+      
       // Parse OAuth request using the helper
       const authRequest = await env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw);
       
@@ -232,19 +251,69 @@ export class ABsmartlyOAuthHandler extends Hono {
       // Decode the JWT to extract user information
       let userInfo: any = {};
       try {
+        console.log('🔍 JWT analysis - token type:', typeof tokenData.access_token);
+        console.log('🔍 JWT analysis - token preview:', tokenData.access_token?.substring(0, 50) + '...');
+        
         const jwtParts = tokenData.access_token.split('.');
+        console.log('🔍 JWT analysis - parts count:', jwtParts.length);
+        
         if (jwtParts.length === 3) {
           const payload = atob(jwtParts[1]);
+          console.log('🔍 JWT payload raw:', payload);
           userInfo = JSON.parse(payload);
+          console.log('🔍 JWT decoded user info:', userInfo);
+        } else {
+          console.warn('🔍 JWT does not have 3 parts, cannot decode');
         }
       } catch (error) {
         console.warn('Failed to decode JWT:', error);
+        console.log('🔍 Token data received:', tokenData);
       }
       
-      // Extract user information
-      const email = userInfo?.email || userInfo?.sub || 'unknown@example.com';
-      const name = userInfo?.name || userInfo?.given_name || email;
-      const userId = userInfo?.sub || userInfo?.absmartly_user_id?.toString() || email;
+      // Check if this is a reference token (only contains token, iat, exp)
+      const isReferenceToken = userInfo?.token && !userInfo?.email && !userInfo?.sub;
+      
+      if (isReferenceToken) {
+        console.log('🔍 Detected reference token system - JWT contains token reference, not user info');
+        console.log('🔍 Reference token:', userInfo.token?.substring(0, 20) + '...');
+        
+        // For reference tokens, we'll get user info from API calls later
+        // Use the token reference as a unique identifier
+        const tokenId = userInfo.token;
+        const email = `token-user-${tokenId.substring(0, 8)}@oauth.local`;
+        const name = 'OAuth User';
+        const userId = tokenId;
+        
+        console.log('🔍 Using reference token approach:', { email, name, userId: userId.substring(0, 20) + '...' });
+        
+        // Store token for later API calls
+        var finalEmail = email;
+        var finalName = name;
+        var finalUserId = userId;
+      } else {
+        console.log('🔍 Extracting user info from JWT payload:', {
+          email: userInfo?.email,
+          sub: userInfo?.sub,
+          name: userInfo?.name,
+          given_name: userInfo?.given_name,
+          absmartly_user_id: userInfo?.absmartly_user_id,
+          allKeys: Object.keys(userInfo || {})
+        });
+        
+        finalEmail = userInfo?.email || userInfo?.sub;
+        finalName = userInfo?.name || userInfo?.given_name || finalEmail;
+        finalUserId = userInfo?.sub || userInfo?.absmartly_user_id?.toString() || finalEmail;
+        
+        if (!finalEmail) {
+          console.error('❌ No email found in JWT payload! Using fallback.');
+          console.log('🔍 Full userInfo object:', userInfo);
+          finalEmail = 'jwt-user@oauth.local';
+          finalName = 'JWT User';
+          finalUserId = 'jwt-' + Date.now();
+        }
+        
+        console.log('🔍 Extracted user details:', { email: finalEmail, name: finalName, userId: finalUserId });
+      }
       
       // Use the clean endpoint without /v1 for auth endpoints
       
@@ -254,15 +323,15 @@ export class ABsmartlyOAuthHandler extends Hono {
       // Complete the authorization with user props
       const result = await env.OAUTH_PROVIDER.completeAuthorization({
         request: oauthReqInfo.authRequest,
-        userId: userId,
+        userId: finalUserId,
         metadata: {},
         scope: oauthReqInfo.authRequest.scope,
         props: {
-          email,
-          name,
+          email: finalEmail,
+          name: finalName,
           absmartly_endpoint: apiEndpoint,
           oauth_jwt: tokenData.access_token,
-          user_id: userId,
+          user_id: finalUserId,
           absmartly_api_key: tokenData.api_key || tokenData.absmartly_api_key || undefined
         }
       });
@@ -276,22 +345,31 @@ export class ABsmartlyOAuthHandler extends Hono {
     const url = new URL(c.req.url);
     const env = c.env;
     
-    // Get ABsmartly endpoint from query parameter, header, KV storage, or default
+    // Get ABsmartly endpoint from query parameter, header, or KV storage
     let absmartlyEndpoint = url.searchParams.get('absmartly-endpoint') || 
                            c.req.header('x-absmartly-endpoint');
     
-    // If not found, try to retrieve from KV storage using client fingerprint
+    // If not found, try to retrieve from KV storage
     if (!absmartlyEndpoint && env.OAUTH_KV) {
-      const clientFingerprint = `${c.req.header('CF-Connecting-IP') || 'unknown'}-${c.req.header('User-Agent') || 'unknown'}`;
-      const storedEndpoint = await env.OAUTH_KV.get(`oauth_endpoint:${clientFingerprint}`);
-      if (storedEndpoint) {
-        console.log(`📍 Retrieved stored endpoint from KV: ${storedEndpoint}`);
-        absmartlyEndpoint = storedEndpoint;
+      // First try the stored endpoint from resource parameter
+      const storedFromResource = await env.OAUTH_KV.get("absmartly_endpoint_config");
+      if (storedFromResource) {
+        console.log(`📍 Retrieved stored endpoint from resource param: ${storedFromResource}`);
+        absmartlyEndpoint = storedFromResource;
+      } else {
+        // Try client fingerprint method
+        const clientFingerprint = `${c.req.header('CF-Connecting-IP') || 'unknown'}-${c.req.header('User-Agent') || 'unknown'}`;
+        const storedEndpoint = await env.OAUTH_KV.get(`oauth_endpoint:${clientFingerprint}`);
+        if (storedEndpoint) {
+          console.log(`📍 Retrieved stored endpoint from fingerprint: ${storedEndpoint}`);
+          absmartlyEndpoint = storedEndpoint;
+        }
       }
     }
     
     // Fallback to default
     absmartlyEndpoint = absmartlyEndpoint || 'https://dev-1.absmartly.com';
+    console.log(`📍 Final ABsmartly endpoint for OAuth redirect: ${absmartlyEndpoint}`);
     
     // Clean up endpoint (remove trailing slashes)
     const cleanEndpoint = absmartlyEndpoint.replace(/\/+$/, '');

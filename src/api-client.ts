@@ -4,9 +4,13 @@ export class ABsmartlyAPIClient {
   private authType: 'jwt' | 'api-key';
   private baseUrl: string;
   constructor(authToken: string, baseUrl: string = 'https://sandbox.absmartly.com/v1', authType?: 'jwt' | 'api-key') {
-    // Ensure baseUrl ends with /v1 if it doesn't already
+    // Clean trailing slashes
+    baseUrl = baseUrl.replace(/\/$/, '');
+    
+    // Only add /v1 for API endpoints if not already present
+    // Note: /auth endpoints don't use /v1, only API endpoints do
     if (!baseUrl.endsWith('/v1')) {
-      baseUrl = baseUrl.replace(/\/$/, '') + '/v1';
+      baseUrl = baseUrl + '/v1';
     }
     console.log('🔧 ABsmartlyAPIClient constructor:', {
       tokenLength: authToken?.length,

@@ -438,9 +438,16 @@ function detectApiKey(request: Request): { apiKey: string | null, endpoint: stri
         return { apiKey: apiKeyFromQuery, endpoint };
     }
 
-    // Check Authorization header
+    // Check Authorization header - but only for API key formats, not OAuth Bearer tokens
     if (authHeader) {
         const parts = authHeader.trim().split(/\s+/);
+        
+        // Skip OAuth Bearer tokens - these should go through the OAuth provider
+        if (parts[0] === "Bearer" && parts.length === 2) {
+            // This is likely an OAuth Bearer token, not an API key
+            return { apiKey: null, endpoint: null };
+        }
+        
         let apiKey = "";
         let absmartlyEndpoint = url.searchParams.get("absmartly-endpoint") || 
                                 request.headers.get("x-absmartly-endpoint") || 
@@ -554,7 +561,11 @@ export default {
         const url = new URL(request.url);
         
         // Handle API key detection and session tracking
+        const authHeader = request.headers.get("Authorization");
+        console.log(`🔍 Raw Authorization header: ${authHeader ? authHeader.substring(0, 100) + '...' : 'null'}`);
+        
         const { apiKey, endpoint } = detectApiKey(request);
+        console.log(`🔍 detectApiKey result: apiKey=${apiKey ? apiKey.substring(0, 30) + '...' : 'null'}, endpoint=${endpoint}`);
         
         // Create client fingerprint for session tracking
         const clientFingerprint = `${request.headers.get('CF-Connecting-IP') || 'unknown'}-${request.headers.get('User-Agent') || 'unknown'}`;
@@ -615,9 +626,14 @@ export default {
                     const userId = user.id?.toString() || user.email;
                     
                     // Create props from user data
+                    if (!user.email) {
+                        console.error('❌ No email found in API response for API key authentication!');
+                        console.log('🔍 Full user object:', user);
+                    }
+                    
                     const props: ABsmartlyProps = {
-                        email: user.email || "unknown@example.com",
-                        name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email,
+                        email: user.email || "api-key-user",
+                        name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email || "API Key User",
                         absmartly_endpoint: endpoint || DEFAULT_ABSMARTLY_ENDPOINT,
                         absmartly_api_key: apiKey,
                         user_id: userId
