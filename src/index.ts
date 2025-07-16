@@ -621,19 +621,19 @@ export default {
                         });
                     }
                     
-                    // Extract user information
-                    const user = userResponse.data;
-                    const userId = user.id?.toString() || user.email;
+                    // Extract user information - handle nested user object
+                    const userData = userResponse.data.user || userResponse.data;
+                    const userId = userData.id?.toString() || userData.email;
                     
                     // Create props from user data
-                    if (!user.email) {
+                    if (!userData.email) {
                         console.error('❌ No email found in API response for API key authentication!');
-                        console.log('🔍 Full user object:', user);
+                        console.log('🔍 Full user data:', userData);
                     }
                     
                     const props: ABsmartlyProps = {
-                        email: user.email || "api-key-user",
-                        name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email || "API Key User",
+                        email: userData.email || "api-key-user",
+                        name: `${userData.first_name || ''} ${userData.last_name || ''}`.trim() || userData.email || "API Key User",
                         absmartly_endpoint: endpoint || DEFAULT_ABSMARTLY_ENDPOINT,
                         absmartly_api_key: apiKey,
                         user_id: userId
@@ -660,7 +660,7 @@ export default {
                     
                     // Pass props to MCP handler
                     ctx.props = props;
-                    return await baseMcpHandler(request, env, ctx);
+                    return await baseMcpHandler.fetch(request, env, ctx);
                     
                 } catch (error) {
                     console.error("Error during API key authentication:", error);
