@@ -312,7 +312,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
         // List experiments tool
         this.server.tool(
             "list_experiments",
-            "List experiments with optional search and pagination",
+            "List experiments with optional filtering. To filter by owner name: 1) First use list_users to find the user ID, 2) Then use the owners parameter with that ID",
             {
                 // Basic query parameters
                 search: z.string().optional().describe("Search experiments by name or description"),
@@ -323,7 +323,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 // Filter by experiment attributes (comma-separated lists)
                 state: z.string().optional().describe("Filter by state (comma-separated: created,ready,running,development,full_on,running_not_full_on,stopped,archived,scheduled)"),
                 significance: z.string().optional().describe("Filter by significance results (comma-separated: positive,negative,neutral,inconclusive)"),
-                owners: z.string().optional().describe("Filter by owner user IDs (comma-separated numbers, e.g.: 3,5,7). Use the list_users tool to find user IDs by name"),
+                owners: z.string().optional().describe("Filter by owner user IDs (comma-separated numbers, e.g.: 3,5,7). To find a user's ID, use list_users with their full name (e.g., list_users({search: 'Cal Courtney'}))"),
                 teams: z.string().optional().describe("Filter by team IDs (comma-separated numbers, e.g.: 1,2,3). Use the list_teams tool to find team IDs by name"),
                 tags: z.string().optional().describe("Filter by tag IDs (comma-separated numbers, e.g.: 2,4,6). Use the list_tags tool to find tag IDs by name"),
                 templates: z.string().optional().describe("Filter by template IDs (comma-separated numbers, e.g.: 238,240). Note: This expects numeric template IDs"),
@@ -453,27 +453,50 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
         // List users tool
         this.server.tool(
             "list_users",
-            "List all users (cached from initialization)",
+            "List all users (cached from initialization). Returns id, name, and email for each user.",
             {
-                search: z.string().optional().describe("Optional search term to filter users by name or email")
+                search: z.string().optional().describe("Search term to filter users. Searches in full name and email. Use the complete name for best results (e.g., 'Cal Courtney' not just 'Cal')")
             },
             async (params) => {
                 let users = this.users || [];
                 
                 if (params.search) {
-                    const searchTerm = params.search.toLowerCase();
-                    users = users.filter(user => 
-                        user.name.toLowerCase().includes(searchTerm) ||
-                        user.email.toLowerCase().includes(searchTerm)
-                    );
+                    const searchTerm = params.search.toLowerCase().trim();
+                    const searchWords = searchTerm.split(/\s+/);
+                    
+                    users = users.filter(user => {
+                        const userName = user.name.toLowerCase();
+                        const userEmail = (user.description || '').toLowerCase();
+                        
+                        // Check if the search term matches the full name or email
+                        if (userName.includes(searchTerm) || userEmail.includes(searchTerm)) {
+                            return true;
+                        }
+                        
+                        // Check if all search words are found in the name (for split searches like "cal" + "courtney")
+                        if (searchWords.length > 1) {
+                            return searchWords.every(word => userName.includes(word));
+                        }
+                        
+                        // For single word searches, also check first/last name separately
+                        const nameParts = userName.split(/\s+/);
+                        return nameParts.some((part: string) => part.startsWith(searchTerm));
+                    });
                 }
+                
+                // Format the response with clear field names
+                const formattedUsers = users.map(user => ({
+                    id: user.id,
+                    name: user.name,
+                    email: user.description
+                }));
                 
                 return {
                     content: [{
                         type: "text",
                         text: JSON.stringify({
-                            total: users.length,
-                            users: users
+                            total: formattedUsers.length,
+                            users: formattedUsers
                         }, null, 2)
                     }]
                 };

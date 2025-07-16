@@ -45,7 +45,7 @@ export class SimpleMCPServer {
               // Filter by experiment attributes (comma-separated lists)
               state: { type: 'string', description: 'Filter by state (comma-separated: created,ready,running,development,full_on,running_not_full_on,stopped,archived,scheduled)' },
               significance: { type: 'string', description: 'Filter by significance results (comma-separated: positive,negative,neutral,inconclusive)' },
-              owners: { type: 'string', description: 'Filter by owner user IDs (comma-separated numbers, e.g.: 3,5,7). Use the list_users tool to find user IDs by name' },
+              owners: { type: 'string', description: 'Filter by owner user IDs (comma-separated numbers, e.g.: 3,5,7). To find a user\'s ID, use list_users with their full name (e.g., list_users({search: \'Cal Courtney\'}))' },
               teams: { type: 'string', description: 'Filter by team IDs (comma-separated numbers, e.g.: 1,2,3). Use the list_teams tool to find team IDs by name' },
               tags: { type: 'string', description: 'Filter by tag IDs (comma-separated numbers, e.g.: 2,4,6). Use the list_tags tool to find tag IDs by name' },
               templates: { type: 'string', description: 'Filter by template IDs (comma-separated numbers, e.g.: 238,240). Note: This expects numeric template IDs' },
