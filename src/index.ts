@@ -289,6 +289,91 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
         this.goals = [];
     }
 
+    private formatExperimentAsMarkdown(exp: any, baseUrl: string): string {
+        const link = `${baseUrl}/experiments/${exp.id}`;
+        const state = exp.state.toUpperCase();
+        const stateEmoji: Record<string, string> = {
+            'CREATED': '🆕',
+            'READY': '🟡',
+            'RUNNING': '🟢',
+            'STOPPED': '🔴',
+            'ARCHIVED': '📦',
+            'DEVELOPMENT': '🔧',
+            'FULL_ON': '🚀',
+            'SCHEDULED': '📅'
+        };
+        const emoji = stateEmoji[state] || '❓';
+        
+        // Extract key custom fields
+        const hypothesis = exp.custom_section_field_values?.find((f: any) => 
+            f.custom_section_field?.title === 'Hypothesis')?.value || '';
+        const purpose = exp.custom_section_field_values?.find((f: any) => 
+            f.custom_section_field?.title === 'Purpose')?.value || '';
+        
+        let md = `## ${emoji} [${exp.display_name || exp.name}](${link})\n\n`;
+        md += `**ID:** ${exp.id} | **State:** ${state} | **Type:** ${exp.type || 'test'}\n`;
+        md += `**Created:** ${new Date(exp.created_at).toLocaleDateString()} by ${exp.created_by?.first_name || 'Unknown'} ${exp.created_by?.last_name || ''}\n`;
+        
+        if (exp.owners?.length > 0) {
+            const owners = exp.owners.map((o: any) => 
+                `${o.user?.first_name || ''} ${o.user?.last_name || ''}`.trim()
+            ).filter(Boolean).join(', ');
+            if (owners) md += `**Owners:** ${owners}\n`;
+        }
+        
+        if (exp.primary_metric) {
+            md += `**Primary Metric:** ${exp.primary_metric.name}`;
+            if (exp.minimum_detectable_effect) {
+                md += ` (MDE: ${exp.minimum_detectable_effect}%)`;
+            }
+            md += '\n';
+        }
+        
+        if (exp.percentages) {
+            md += `**Traffic Split:** ${exp.percentages} (${exp.percentage_of_traffic}% of traffic)\n`;
+        }
+        
+        if (hypothesis) {
+            md += `\n**Hypothesis:** ${hypothesis}\n`;
+        }
+        
+        if (purpose) {
+            md += `\n**Purpose:** ${purpose}\n`;
+        }
+        
+        // Variants section
+        if (exp.variants && exp.variants.length > 0) {
+            md += '\n### Variants\n';
+            exp.variants.forEach((variant: any) => {
+                const variantName = variant.name || `Variant ${variant.variant}`;
+                md += `- **${variantName}** (${variant.variant === 0 ? 'Control' : 'Treatment'})\n`;
+                
+                // Check for screenshots
+                const screenshot = exp.variant_screenshots?.find((s: any) => 
+                    s.variant === variant.variant
+                );
+                if (screenshot?.screenshot_url) {
+                    md += `  ![${variantName} Screenshot](${screenshot.screenshot_url})\n`;
+                }
+                
+                if (variant.config) {
+                    md += `  Config: \`${variant.config}\`\n`;
+                }
+            });
+        }
+        
+        // Tags
+        if (exp.experiment_tags?.length > 0) {
+            const tags = exp.experiment_tags.map((t: any) => t.tag?.name || t.name).filter(Boolean);
+            if (tags.length > 0) {
+                md += `\n**Tags:** ${tags.map((t: string) => `\`${t}\``).join(', ')}\n`;
+            }
+        }
+        
+        md += '\n---\n';
+        return md;
+    }
+
     private setupTools() {
         // Authentication status tool
         this.server.tool(
@@ -352,7 +437,10 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 type: z.string().optional().describe("Filter by experiment type (e.g., test, feature)"),
                 
                 // Number filters
-                iterations: z.number().optional().describe("Filter by number of iterations")
+                iterations: z.number().optional().describe("Filter by number of iterations"),
+                
+                // Output format
+                format: z.enum(['json', 'md']).optional().describe("Output format: 'json' for full data or 'md' for formatted markdown (default: md)")
             },
             async (params) => {
                 if (!this.apiClient) {
@@ -417,28 +505,60 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                     }
 
                     const experiments = response.data?.experiments || [];
+                    const format = params.format || 'md';
                     
                     // Get the base URL without /v1 suffix for generating links
                     const baseUrl = this.props.absmartly_endpoint.replace(/\/v1\/?$/, '');
                     
-                    // Add link field to each experiment
-                    const experimentsWithLinks = experiments.map((exp: any) => ({
-                        ...exp,
-                        link: `${baseUrl}/experiments/${exp.id}`
-                    }));
-                    
-                    // Format the response with full experiment data including links
-                    return {
-                        content: [{
-                            type: "text",
-                            text: JSON.stringify({
-                                total: response.data?.total || experiments.length,
-                                page: response.data?.page || 1,
-                                items: response.data?.items || experiments.length,
-                                experiments: experimentsWithLinks
-                            }, null, 2)
-                        }]
-                    };
+                    if (format === 'json') {
+                        // Add link field to each experiment
+                        const experimentsWithLinks = experiments.map((exp: any) => ({
+                            ...exp,
+                            link: `${baseUrl}/experiments/${exp.id}`
+                        }));
+                        
+                        // Format the response with full experiment data including links
+                        return {
+                            content: [{
+                                type: "text",
+                                text: JSON.stringify({
+                                    total: response.data?.total || experiments.length,
+                                    page: response.data?.page || 1,
+                                    items: response.data?.items || experiments.length,
+                                    experiments: experimentsWithLinks
+                                }, null, 2)
+                            }]
+                        };
+                    } else {
+                        // Format as markdown
+                        let markdown = `# Experiments (${experiments.length} of ${response.data?.total || experiments.length})\n\n`;
+                        
+                        if (experiments.length === 0) {
+                            markdown += '*No experiments found matching your criteria.*\n';
+                        } else {
+                            markdown += experiments.map((exp: any) => 
+                                this.formatExperimentAsMarkdown(exp, baseUrl)
+                            ).join('\n');
+                        }
+                        
+                        // Add pagination info if there are more pages
+                        const currentPage = response.data?.page || 1;
+                        const totalPages = Math.ceil((response.data?.total || experiments.length) / (params.items || 10));
+                        
+                        if (totalPages > 1) {
+                            markdown += `\n\n📄 Page ${currentPage} of ${totalPages}`;
+                            if (currentPage < totalPages) {
+                                markdown += ` (use \`page: ${currentPage + 1}\` to see more)`;
+                            }
+                        }
+                        
+                        return {
+                            content: [{
+                                type: "text",
+                                text: markdown
+                            }]
+                        };
+                    }
                 } catch (error) {
                     return {
                         content: [{

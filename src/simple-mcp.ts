@@ -26,6 +26,32 @@ export class SimpleMCPServer {
     );
     this.setupHandlers();
   }
+
+  private formatExperimentAsMarkdown(exp: any, baseUrl: string): string {
+    const link = `${baseUrl}/experiments/${exp.id}`;
+    const state = exp.state.toUpperCase();
+    const stateEmoji: Record<string, string> = {
+      'CREATED': '🆕',
+      'READY': '🟡',
+      'RUNNING': '🟢',
+      'STOPPED': '🔴',
+      'ARCHIVED': '📦',
+      'DEVELOPMENT': '🔧',
+      'FULL_ON': '🚀',
+      'SCHEDULED': '📅'
+    };
+    
+    let md = `## ${stateEmoji[state] || '❓'} [${exp.display_name || exp.name}](${link})\n\n`;
+    md += `**ID:** ${exp.id} | **State:** ${state} | **Type:** ${exp.type || 'test'}\n`;
+    md += `**Created:** ${new Date(exp.created_at).toLocaleDateString()}\n`;
+    
+    if (exp.percentages) {
+      md += `**Traffic Split:** ${exp.percentages}\n`;
+    }
+    
+    md += '\n---\n';
+    return md;
+  }
   private setupHandlers() {
     // List tools
     this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -74,7 +100,10 @@ export class SimpleMCPServer {
               type: { type: 'string', description: 'Filter by experiment type (e.g., test, feature)' },
               
               // Number filters
-              iterations: { type: 'number', description: 'Filter by number of iterations' }
+              iterations: { type: 'number', description: 'Filter by number of iterations' },
+              
+              // Output format
+              format: { type: 'string', enum: ['json', 'md'], description: 'Output format: \'json\' for full data or \'md\' for formatted markdown (default: md)' }
             },
           },
         },
@@ -147,30 +176,64 @@ export class SimpleMCPServer {
             }
             
             const experiments = response.data?.experiments || [];
+            const format = (args as any).format || 'md';
             
             // Get the base URL without /v1 suffix for generating links
             const baseUrl = this.endpoint.replace(/\/v1\/?$/, '');
             
-            // Add link field to each experiment
-            const experimentsWithLinks = experiments.map((exp: any) => ({
-              ...exp,
-              link: `${baseUrl}/experiments/${exp.id}`
-            }));
-            
-            // Format the response with full experiment data including links
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify({
-                    total: response.data?.total || experiments.length,
-                    page: response.data?.page || 1,
-                    items: response.data?.items || experiments.length,
-                    experiments: experimentsWithLinks
-                  }, null, 2),
-                },
-              ],
-            };
+            if (format === 'json') {
+              // Add link field to each experiment
+              const experimentsWithLinks = experiments.map((exp: any) => ({
+                ...exp,
+                link: `${baseUrl}/experiments/${exp.id}`
+              }));
+              
+              // Format the response with full experiment data including links
+              return {
+                content: [
+                  {
+                    type: 'text',
+                    text: JSON.stringify({
+                      total: response.data?.total || experiments.length,
+                      page: response.data?.page || 1,
+                      items: response.data?.items || experiments.length,
+                      experiments: experimentsWithLinks
+                    }, null, 2),
+                  },
+                ],
+              };
+            } else {
+              // Format as markdown
+              let markdown = `# Experiments (${experiments.length} of ${response.data?.total || experiments.length})\n\n`;
+              
+              if (experiments.length === 0) {
+                markdown += '*No experiments found matching your criteria.*\n';
+              } else {
+                markdown += experiments.map((exp: any) => 
+                  this.formatExperimentAsMarkdown(exp, baseUrl)
+                ).join('\n');
+              }
+              
+              // Add pagination info if there are more pages
+              const currentPage = response.data?.page || 1;
+              const totalPages = Math.ceil((response.data?.total || experiments.length) / ((args as any).items || 10));
+              
+              if (totalPages > 1) {
+                markdown += `\n\n📄 Page ${currentPage} of ${totalPages}`;
+                if (currentPage < totalPages) {
+                  markdown += ` (use \`page: ${currentPage + 1}\` to see more)`;
+                }
+              }
+              
+              return {
+                content: [
+                  {
+                    type: 'text',
+                    text: markdown,
+                  },
+                ],
+              };
+            }
           case 'get_experiment':
             const expResponse = await this.apiClient.getExperiment((args as any).id);
             return {
