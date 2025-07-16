@@ -1,44 +1,38 @@
 import { ABsmartlyResponse, ListExperimentsParams } from './types';
+import { debug } from './config';
 export class ABsmartlyAPIClient {
   private authToken: string;
   private authType: 'jwt' | 'api-key';
   private baseUrl: string;
-  private debug: boolean = false;
-  constructor(authToken: string, baseUrl: string = 'https://sandbox.absmartly.com', authType?: 'jwt' | 'api-key', debug: boolean = false) {
-    this.debug = debug;
+  constructor(authToken: string, baseUrl: string = 'https://sandbox.absmartly.com', authType?: 'jwt' | 'api-key', debugFlag: boolean = false) {
+    // debugFlag parameter kept for compatibility but not used - we use global debug
     // Clean trailing slashes and remove /v1 suffix if present
     baseUrl = baseUrl.replace(/\/$/, '');
     if (baseUrl.endsWith('/v1')) {
       baseUrl = baseUrl.substring(0, baseUrl.length - 3);
     }
-    if (this.debug) {
-      console.log('🔧 ABsmartlyAPIClient constructor:', {
-        tokenLength: authToken?.length,
-        tokenPreview: authToken?.substring(0, 20) + '...',
-        baseUrl,
-        authType
-      });
-    }
+    debug('🔧 ABsmartlyAPIClient constructor:', {
+      tokenLength: authToken?.length,
+      tokenPreview: authToken?.substring(0, 20) + '...',
+      baseUrl,
+      authType
+    });
     this.authToken = authToken;
     this.baseUrl = baseUrl;
     // Auto-detect auth type if not specified
     if (authType) {
       this.authType = authType;
-      if (this.debug) {
-        console.log('🔧 Using provided auth type:', authType);
-      }
+      debug('🔧 Using provided auth type:', authType);
     } else {
       // JWT tokens have 3 parts separated by dots
       this.authType = authToken.includes('.') && authToken.split('.').length === 3 ? 'jwt' : 'api-key';
-      if (this.debug) {
-        console.log('🔧 Auto-detected auth type:', this.authType);
-      }
+      debug('🔧 Auto-detected auth type:', this.authType);
     }
     // If JWT, try to decode and inspect
-    if (this.authType === 'jwt' && this.debug) {
+    if (this.authType === 'jwt') {
       try {
         const parts = authToken.split('.');
-        console.log('🔍 JWT analysis:', {
+        debug('🔍 JWT analysis:', {
           parts: parts.length,
           header: parts[0]?.substring(0, 20) + '...',
           payload: parts[1]?.substring(0, 20) + '...',
@@ -46,8 +40,8 @@ export class ABsmartlyAPIClient {
         });
         if (parts.length === 3) {
           const payload = JSON.parse(atob(parts[1]));
-          console.log('🔍 JWT payload keys:', Object.keys(payload));
-          console.log('🔍 JWT payload preview:', {
+          debug('🔍 JWT payload keys:', Object.keys(payload));
+          debug('🔍 JWT payload preview:', {
             iss: payload.iss,
             sub: payload.sub,
             aud: payload.aud,
@@ -79,9 +73,7 @@ export class ABsmartlyAPIClient {
       'User-Agent': 'ABsmartly-MCP-Server/1.0.0',
       ...options.headers,
     };
-    if (this.debug) {
-      console.log(`🔗 ABsmartly API Request: [Auth: ${this.authType === 'jwt' ? 'JWT' : 'Api-Key'}] ${options.method || 'GET'} ${url}`);
-    }
+    debug(`🔗 ABsmartly API Request: [Auth: ${this.authType === 'jwt' ? 'JWT' : 'Api-Key'}] ${options.method || 'GET'} ${url}`);
     try {
       const response = await fetch(url, {
         ...options,
@@ -93,25 +85,19 @@ export class ABsmartlyAPIClient {
         data = await response.json();
       } else {
         const text = await response.text();
-        if (this.debug) {
-          console.log('📄 Non-JSON response:', {
-            status: response.status,
-            statusText: response.statusText,
-            contentType,
-            bodyPreview: text.slice(0, 500)
-          });
-        }
+        debug('📄 Non-JSON response:', {
+          status: response.status,
+          statusText: response.statusText,
+          contentType,
+          bodyPreview: text.slice(0, 500)
+        });
         data = { message: text };
       }
       if (response.ok) {
-        if (this.debug) {
-          console.log(`📡 ABsmartly API Response: ${response.status} ${response.ok ? 'OK' : 'ERROR'} ${url} ${JSON.stringify(data).slice(0, 200)}`);
-        }
+        debug(`📡 ABsmartly API Response: ${response.status} ${response.ok ? 'OK' : 'ERROR'} ${url} ${JSON.stringify(data).slice(0, 200)}`);
       } else {
         const errorMessage = data.errors ? data.errors.join(', ') : data.error || response.statusText;
-        if (this.debug) {
-          console.error(`❌ ABsmartly API Error: ${response.status} ${url} "${errorMessage}" - ${JSON.stringify(data).slice(0, 200)}`);
-        }
+        debug(`❌ ABsmartly API Error: ${response.status} ${url} "${errorMessage}" - ${JSON.stringify(data).slice(0, 200)}`);
       }
       if (!response.ok) {
         // Enhanced error details for debugging
@@ -133,7 +119,7 @@ export class ABsmartlyAPIClient {
         data,
       };
     } catch (error) {
-      console.error('💥 ABsmartly API Error:', error);
+      debug('💥 ABsmartly API Error:', error);
       return {
         ok: false,
         errors: [`Network error: ${error instanceof Error ? error.message : 'Unknown error'}`],

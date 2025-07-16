@@ -1,9 +1,3 @@
-/**
- * ABsmartly MCP Server - Correct Architecture
- * 
- * Following Cloudflare AI demos pattern with API key bypass
- */
-
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -12,8 +6,9 @@ import { ABsmartlyAPIClient } from "./api-client";
 import { ABsmartlyResources } from "./resources";
 import { ABsmartlyOAuthHandler } from "./absmartly-oauth-handler";
 import { Env } from "./types";
+import { debug } from "./config";
 
-// Props from OAuth authentication or API key detection
+// Props from OAuth/Api\Key authentication
 type ABsmartlyProps = {
     email: string;
     name: string;
@@ -23,13 +18,8 @@ type ABsmartlyProps = {
     user_id: string;
 };
 
-// Default ABsmartly API endpoint
 const DEFAULT_ABSMARTLY_ENDPOINT = "https://dev-1.absmartly.com/v1";
-
-// Default OAuth client ID
 const DEFAULT_OAUTH_CLIENT_ID = "mcp-absmartly-universal";
-
-// Cache TTL for entity data (5 minutes)
 const ENTITIES_CACHE_TTL = 5 * 60 * 1000; // 5 minutes in milliseconds
 
 export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartlyProps> {
@@ -54,15 +44,12 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
     private metrics: any[] = [];
     private goals: any[] = [];
 
-    // Getter for customFields to be accessible from resources
     get customFields() {
         return this._customFields;
     }
 
-    // Access to environment for caching (inherited from McpAgent)
     // this.env is available from the McpAgent base class
 
-    // Load entities from cache
     private loadEntitiesFromCache(entities: any) {
         this._customFields = entities.customFields || [];
         this.users = entities.users || [];
@@ -78,21 +65,11 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
         console.log("🚀 ABsmartly MCP initialization START");
 
         try {
-            // Initialize API client with props from OAuth/API key
             await this.initializeAPIClient();
-
-            // Fetch all entities in background
             await this.fetchAllEntities();
-
-            // Setup tools
             this.setupTools();
-
-            // Setup resources
             await this.setupResources();
-
-            // Setup prompts
             this.setupPrompts();
-
             console.log("✅ ABsmartly MCP initialization completed successfully");
         } catch (error) {
             console.error("❌ ABsmartly MCP initialization failed:", error);
@@ -125,22 +102,19 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             throw new Error("No valid authentication token available");
         }
 
-        // Initialize API client
         this.apiClient = new ABsmartlyAPIClient(
             authToken,
             this.props.absmartly_endpoint,
             authType,
-            this.env?.DEBUG === 'true'
+            false // debug flag is now global
         );
 
-        if (this.env?.DEBUG === 'true') {
-            console.log("✅ API client initialized successfully");
-        }
+        debug("✅ API client initialized successfully");
     }
 
     private async fetchAllEntities(): Promise<void> {
         if (!this.apiClient) {
-            console.log("📦 No API client - setting empty arrays");
+            debug("📦 No API client - setting empty arrays");
             this.setEmptyEntities();
             return;
         }
@@ -158,22 +132,22 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                     const cacheAge = Date.now() - parsed.timestamp;
 
                     if (cacheAge < ENTITIES_CACHE_TTL) {
-                        console.log(`📦 Using cached entities (age: ${Math.round(cacheAge / 1000)}s)`);
+                        debug(`📦 Using cached entities (age: ${Math.round(cacheAge / 1000)}s)`);
                         this.loadEntitiesFromCache(parsed.entities);
                         return;
                     } else {
-                        console.log(`📦 Cache expired (age: ${Math.round(cacheAge / 1000)}s), fetching fresh data`);
+                        debug(`📦 Cache expired (age: ${Math.round(cacheAge / 1000)}s), fetching fresh data`);
                     }
                 }
             } catch (error) {
-                console.log(`📦 Cache lookup failed: ${error}, fetching fresh data`);
+                debug(`📦 Cache lookup failed: ${error}, fetching fresh data`);
             }
         } else {
-            console.log("📦 No OAUTH_KV available, skipping cache");
+            debug("📦 No OAUTH_KV available, skipping cache");
         }
 
         try {
-            console.log("📦 Fetching all entities from API");
+            debug("📦 Fetching all entities from API");
 
             // Fetch all entities in parallel
             const [
@@ -231,13 +205,13 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                         expirationTtl: Math.floor(ENTITIES_CACHE_TTL / 1000) + 60 // Extra 60s buffer
                     });
 
-                    console.log("📦 Cached entities successfully");
+                    debug("📦 Cached entities successfully");
                 } catch (error) {
-                    console.log(`📦 Failed to cache entities: ${error}`);
+                    debug(`📦 Failed to cache entities: ${error}`);
                 }
             }
 
-            console.log("✅ All entities fetched successfully");
+            debug("✅ All entities fetched successfully");
         } catch (error) {
             console.error("❌ Error fetching entities:", error);
             this.setEmptyEntities();
@@ -493,14 +467,9 @@ const oauthHandler = new ABsmartlyOAuthHandler();
 // Wrap the OAuth handler to add debugging
 const debugOAuthHandler = {
     fetch: async (request: Request, env: any, ctx: any) => {
-        const debug = env.DEBUG === 'true';
-        if (debug) {
-            console.log(`🔍 debugOAuthHandler: ${request.method} ${new URL(request.url).pathname}`);
-        }
+        debug(`🔍 debugOAuthHandler: ${request.method} ${new URL(request.url).pathname}`);
         const response = await oauthHandler.fetch(request, env, ctx);
-        if (debug) {
-            console.log(`📍 debugOAuthHandler response status: ${response.status}`);
-        }
+        debug(`📍 debugOAuthHandler response status: ${response.status}`);
         return response;
     }
 };
@@ -537,9 +506,7 @@ const oauthProvider = new OAuthProvider({
 
         // Auto-register Claude Desktop clients as public clients
         if (clientId.startsWith("claude-mcp-") || clientId.startsWith("C0")) {
-            if (env.DEBUG === 'true') {
-                console.log("Auto-registering public client:", clientId);
-            }
+            debug("Auto-registering public client:", clientId);
             const newClient = {
                 clientId: clientId,
                 redirectUris: ["https://claude.ai/api/mcp/auth_callback"],
@@ -569,18 +536,13 @@ const oauthProvider = new OAuthProvider({
 export default {
     async fetch(request: Request, env: any, ctx: any): Promise<Response> {
         const url = new URL(request.url);
-        const debug = env.DEBUG === 'true';
         
         // Handle API key detection and session tracking
         const authHeader = request.headers.get("Authorization");
-        if (debug) {
-            console.log(`🔍 Raw Authorization header: ${authHeader ? authHeader.substring(0, 100) + '...' : 'null'}`);
-        }
+        debug(`🔍 Raw Authorization header: ${authHeader ? authHeader.substring(0, 100) + '...' : 'null'}`);
         
         const { apiKey, endpoint } = detectApiKey(request);
-        if (debug) {
-            console.log(`🔍 detectApiKey result: apiKey=${apiKey ? apiKey.substring(0, 30) + '...' : 'null'}, endpoint=${endpoint}`);
-        }
+        debug(`🔍 detectApiKey result: apiKey=${apiKey ? apiKey.substring(0, 30) + '...' : 'null'}, endpoint=${endpoint}`);
         
         // Create client fingerprint for session tracking
         const clientFingerprint = `${request.headers.get('CF-Connecting-IP') || 'unknown'}-${request.headers.get('User-Agent') || 'unknown'}`;
@@ -612,9 +574,7 @@ export default {
         if (url.pathname.startsWith("/sse")) {
             // Check if API key is detected
             if (apiKey) {
-                if (debug) {
-                    console.log("🔑 API key detected, bypassing OAuth flow");
-                }
+                debug("🔑 API key detected, bypassing OAuth flow");
                 
                 try {
                     // Create API client and fetch current user
@@ -622,7 +582,7 @@ export default {
                         apiKey,
                         endpoint || DEFAULT_ABSMARTLY_ENDPOINT,
                         'api-key',
-                        debug
+                        false // debug flag is now global
                     );
                     
                     const userResponse = await apiClient.getCurrentUser();
@@ -698,16 +658,12 @@ export default {
             
             // Manual 401 response for SSE endpoints without valid auth to trigger OAuth flow
             if (!authHeader || !authHeader.startsWith("Bearer ")) {
-                if (debug) {
-                    console.log("⚠️ No valid Authorization header, returning 401 to trigger OAuth flow");
-                }
+                debug("⚠️ No valid Authorization header, returning 401 to trigger OAuth flow");
                 
                 // Store the requested endpoint in KV for the OAuth flow
                 const requestedEndpoint = url.searchParams.get('absmartly-endpoint') || endpoint;
                 if (requestedEndpoint && env.OAUTH_KV) {
-                    if (debug) {
-                        console.log(`📍 Storing requested endpoint for OAuth flow: ${requestedEndpoint}`);
-                    }
+                    debug(`📍 Storing requested endpoint for OAuth flow: ${requestedEndpoint}`);
                     await env.OAUTH_KV.put(
                         `oauth_endpoint:${clientFingerprint}`,
                         requestedEndpoint,
@@ -732,13 +688,9 @@ export default {
         }
         
         // Route all other requests to OAuth provider (only for non-API key requests)
-        if (debug) {
-            console.log(`🔍 Routing non-SSE request to OAuth provider: ${request.method} ${url.pathname}`);
-        }
+        debug(`🔍 Routing non-SSE request to OAuth provider: ${request.method} ${url.pathname}`);
         const oauthResponse = await oauthProvider.fetch(request, env, ctx);
-        if (debug) {
-            console.log(`📍 OAuth provider response status: ${oauthResponse.status}`);
-        }
+        debug(`📍 OAuth provider response status: ${oauthResponse.status}`);
         return oauthResponse;
     }
 };

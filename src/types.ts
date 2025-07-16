@@ -23,8 +23,6 @@ export interface Env {
   // Default ABsmartly Configuration
   DEFAULT_ABSMARTLY_API_KEY?: string;
   DEFAULT_ABSMARTLY_ENDPOINT?: string;
-  // Debug flag for verbose logging
-  DEBUG?: string;
 }
 // State interface for Durable Objects sessions
 export interface ABsmartlyState {
