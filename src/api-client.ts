@@ -4,9 +4,7 @@ export class ABsmartlyAPIClient {
   private authToken: string;
   private authType: 'jwt' | 'api-key';
   private baseUrl: string;
-  constructor(authToken: string, baseUrl: string = 'https://sandbox.absmartly.com', authType?: 'jwt' | 'api-key', debugFlag: boolean = false) {
-    // debugFlag parameter kept for compatibility but not used - we use global debug
-    // Clean trailing slashes and remove /v1 suffix if present
+  constructor(authToken: string, baseUrl: string = 'https://sandbox.absmartly.com', authType?: 'jwt' | 'api-key') {
     baseUrl = baseUrl.replace(/\/$/, '');
     if (baseUrl.endsWith('/v1')) {
       baseUrl = baseUrl.substring(0, baseUrl.length - 3);
@@ -19,16 +17,13 @@ export class ABsmartlyAPIClient {
     });
     this.authToken = authToken;
     this.baseUrl = baseUrl;
-    // Auto-detect auth type if not specified
     if (authType) {
       this.authType = authType;
       debug('🔧 Using provided auth type:', authType);
     } else {
-      // JWT tokens have 3 parts separated by dots
       this.authType = authToken.includes('.') && authToken.split('.').length === 3 ? 'jwt' : 'api-key';
       debug('🔧 Auto-detected auth type:', this.authType);
     }
-    // If JWT, try to decode and inspect
     if (this.authType === 'jwt') {
       try {
         const parts = authToken.split('.');
@@ -65,7 +60,6 @@ export class ABsmartlyAPIClient {
     options: RequestInit = {}
   ): Promise<ABsmartlyResponse<T>> {
     const url = `${this.baseUrl}${endpoint}`;
-    // Use appropriate authentication header based on token type
     const authHeader = this.authType === 'jwt' ? `JWT ${this.authToken}` : `Api-Key ${this.authToken}`;
     const headers = {
       'Authorization': authHeader,
@@ -100,7 +94,6 @@ export class ABsmartlyAPIClient {
         debug(`❌ ABsmartly API Error: ${response.status} ${url} "${errorMessage}" - ${JSON.stringify(data).slice(0, 200)}`);
       }
       if (!response.ok) {
-        // Enhanced error details for debugging
         const errorDetails = {
           status: response.status,
           statusText: response.statusText,
@@ -126,7 +119,6 @@ export class ABsmartlyAPIClient {
       };
     }
   }
-  // Experiments API
   async listExperiments(params?: ListExperimentsParams): Promise<ABsmartlyResponse> {
     const searchParams = new URLSearchParams();
     if (params) {
@@ -181,7 +173,6 @@ export class ABsmartlyAPIClient {
       method: 'PUT',
     });
   }
-  // Goals API
   async listGoals(): Promise<ABsmartlyResponse> {
     return this.makeRequest('/v1/goals');
   }
@@ -200,7 +191,6 @@ export class ABsmartlyAPIClient {
       body: JSON.stringify(data),
     });
   }
-  // Metrics API
   async listMetrics(params?: any): Promise<ABsmartlyResponse> {
     const searchParams = new URLSearchParams();
     if (params) {
@@ -228,7 +218,6 @@ export class ABsmartlyAPIClient {
       body: JSON.stringify(data),
     });
   }
-  // Users API
   async listUsers(): Promise<ABsmartlyResponse> {
     return this.makeRequest('/v1/users');
   }
@@ -250,7 +239,6 @@ export class ABsmartlyAPIClient {
       body: JSON.stringify(data),
     });
   }
-  // Teams API
   async listTeams(): Promise<ABsmartlyResponse> {
     return this.makeRequest('/v1/teams');
   }
@@ -269,7 +257,6 @@ export class ABsmartlyAPIClient {
       body: JSON.stringify(data),
     });
   }
-  // Experiment Analytics API
   async getExperimentMetrics(experimentId: number, metricId: number, params?: any): Promise<ABsmartlyResponse> {
     return this.makeRequest(`/v1/experiments/${experimentId}/metrics/${metricId}`, {
       method: 'POST',
@@ -297,7 +284,6 @@ export class ABsmartlyAPIClient {
       body: JSON.stringify(data),
     });
   }
-  // Experiment Management API
   async archiveExperiment(experimentId: number): Promise<ABsmartlyResponse> {
     return this.makeRequest(`/v1/experiments/${experimentId}/archive`, {
       method: 'PUT',
@@ -308,7 +294,6 @@ export class ABsmartlyAPIClient {
       method: 'PUT',
     });
   }
-  // Applications API
   async listApplications(params?: any): Promise<ABsmartlyResponse> {
     const searchParams = new URLSearchParams();
     if (params) {
@@ -336,7 +321,6 @@ export class ABsmartlyAPIClient {
       body: JSON.stringify(data),
     });
   }
-  // Unit Types API
   async listUnitTypes(params?: any): Promise<ABsmartlyResponse> {
     const searchParams = new URLSearchParams();
     if (params) {
@@ -364,7 +348,6 @@ export class ABsmartlyAPIClient {
       body: JSON.stringify(data),
     });
   }
-  // Environments API  
   async listEnvironments(params?: any): Promise<ABsmartlyResponse> {
     const searchParams = new URLSearchParams();
     if (params) {
@@ -380,7 +363,6 @@ export class ABsmartlyAPIClient {
   async getEnvironment(id: number): Promise<ABsmartlyResponse> {
     return this.makeRequest(`/v1/environments/${id}`);
   }
-  // Insights API
   async getInsightsSummary(params?: any): Promise<ABsmartlyResponse> {
     const searchParams = new URLSearchParams();
     if (params) {
@@ -429,7 +411,6 @@ export class ABsmartlyAPIClient {
     const endpoint = `/v1/insights/decisions/history${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
     return this.makeRequest(endpoint);
   }
-  // Segments API
   async listSegments(params?: any): Promise<ABsmartlyResponse> {
     const searchParams = new URLSearchParams();
     if (params) {
@@ -457,7 +438,6 @@ export class ABsmartlyAPIClient {
       body: JSON.stringify(data),
     });
   }
-  // Experiment Custom Section Fields API
   async listExperimentCustomSectionFields(params?: any): Promise<ABsmartlyResponse> {
     const searchParams = new URLSearchParams();
     if (params) {
@@ -473,7 +453,6 @@ export class ABsmartlyAPIClient {
   async getExperimentCustomSectionField(id: number): Promise<ABsmartlyResponse> {
     return this.makeRequest(`/v1/experiment_custom_section_fields/${id}`);
   }
-  // File Upload API for variant screenshots
   async uploadVariantScreenshot(data: {
     data: string;
     file_name: string;
@@ -506,7 +485,6 @@ export class ABsmartlyAPIClient {
       body: JSON.stringify(payload),
     });
   }
-  // Experiment Tags API
   async listExperimentTags(params?: any): Promise<ABsmartlyResponse> {
     const searchParams = new URLSearchParams();
     if (params) {
@@ -534,7 +512,6 @@ export class ABsmartlyAPIClient {
       body: JSON.stringify(data),
     });
   }
-  // Generic API method for any endpoint
   async request(endpoint: string, options: RequestInit = {}): Promise<ABsmartlyResponse> {
     return this.makeRequest(endpoint, options);
   }

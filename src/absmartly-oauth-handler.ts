@@ -1,37 +1,25 @@
-/**
- * ABsmartly OAuth Handler
- * 
- * Handles OAuth authorization flow by integrating with ABsmartly's OAuth system
- */
-
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import { debug } from './config';
 
-// Default OAuth client ID
 const DEFAULT_OAUTH_CLIENT_ID = "mcp-absmartly-universal";
-
-// Cookie settings
 const COOKIE_NAME = 'absmartly-oauth-approvals';
-const COOKIE_SECRET = 'absmartly-oauth-secret-key'; // Should be from env in production
+const COOKIE_SECRET = 'absmartly-oauth-secret-key';
 
 export class ABsmartlyOAuthHandler extends Hono {
   constructor() {
     super();
     
-    // Add middleware to log all requests
     this.use('*', async (c, next) => {
       debug(`🔍 ABsmartlyOAuthHandler: ${c.req.method} ${c.req.url}`);
       await next();
     });
 
-    // Handle OAuth authorization page
     this.get('/authorize', async (c) => {
       debug('📍 ABsmartlyOAuthHandler: Hit /authorize endpoint');
       const env = c.env;
       const url = new URL(c.req.url);
       
-      // Check for resource parameter that might contain the endpoint
       const resourceParam = url.searchParams.get('resource');
       debug('📍 Resource parameter:', resourceParam);
       
@@ -50,26 +38,20 @@ export class ABsmartlyOAuthHandler extends Hono {
         }
       }
       
-      // Parse OAuth request using the helper
       const authRequest = await env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw);
-      
-      // Get client info
       const clientInfo = await env.OAUTH_PROVIDER.lookupClient(authRequest.clientId);
       if (!clientInfo) {
         return c.text('Client not found', 400);
       }
       
-      // Check if client is already approved via signed cookie
       const approvedClients = await this.getApprovedClients(c);
       const isApproved = approvedClients.includes(authRequest.clientId);
       
       if (isApproved) {
-        // Client is pre-approved, redirect to ABsmartly OAuth
         debug('Client is pre-approved, redirecting to ABsmartly OAuth');
         return this.redirectToAbsmartlyOAuth(c, authRequest);
       }
       
-      // Show consent page
       return c.html(`
         <!DOCTYPE html>
         <html>
@@ -154,7 +136,6 @@ export class ABsmartlyOAuthHandler extends Hono {
       `);
     });
 
-    // Handle authorization form submission
     this.post('/authorize', async (c) => {
       const formData = await c.req.formData();
       const action = formData.get('action');
@@ -165,7 +146,6 @@ export class ABsmartlyOAuthHandler extends Hono {
         return c.redirect(`${redirectUri}?error=access_denied&state=${state}`);
       }
       
-      // Reconstruct auth request from form data
       const authRequest = {
         clientId: formData.get('client_id') as string,
         redirectUri: formData.get('redirect_uri') as string,
@@ -176,14 +156,10 @@ export class ABsmartlyOAuthHandler extends Hono {
         codeChallengeMethod: formData.get('code_challenge_method') as string,
       };
       
-      // Add to approved clients
       await this.addApprovedClient(c, authRequest.clientId);
-      
-      // Redirect to ABsmartly OAuth
       return this.redirectToAbsmartlyOAuth(c, authRequest);
     });
 
-    // Handle OAuth callback from ABsmartly
     this.get('/oauth/callback', async (c) => {
       const env = c.env;
       const url = new URL(c.req.url);
@@ -201,7 +177,6 @@ export class ABsmartlyOAuthHandler extends Hono {
         return c.text('Missing code or state parameter', 400);
       }
       
-      // Parse the state to get the original OAuth request info
       let oauthReqInfo;
       try {
         oauthReqInfo = JSON.parse(atob(state));
@@ -210,13 +185,8 @@ export class ABsmartlyOAuthHandler extends Hono {
         return c.text('Invalid state parameter', 400);
       }
       
-      // Get the ABsmartly endpoint from the original request
       let absmartlyEndpoint = oauthReqInfo.absmartlyEndpoint || 'https://dev-1.absmartly.com';
-      
-      // Clean up endpoint (remove trailing slashes)
       const cleanEndpoint = absmartlyEndpoint.replace(/\/+$/, '');
-      
-      // Exchange the code with ABsmartly for an access token - /auth endpoints don't use /v1 prefix
       const tokenUrl = `${cleanEndpoint}/auth/oauth/token`;
       const tokenBody = new URLSearchParams({
         grant_type: 'authorization_code',
@@ -249,7 +219,6 @@ export class ABsmartlyOAuthHandler extends Hono {
       const tokenData = await tokenResponse.json();
       debug('Token exchange successful');
       
-      // Decode the JWT to extract user information
       let userInfo: any = {};
       try {
         debug('🔍 JWT analysis - token type:', typeof tokenData.access_token);
@@ -278,8 +247,6 @@ export class ABsmartlyOAuthHandler extends Hono {
         debug('🔍 Detected reference token system - JWT contains token reference, not user info');
         debug('🔍 Reference token:', userInfo.token?.substring(0, 20) + '...');
         
-        // For reference tokens, we'll get user info from API calls later
-        // Use the token reference as a unique identifier
         const tokenId = userInfo.token;
         const email = `token-user-${tokenId.substring(0, 8)}@oauth.local`;
         const name = 'OAuth User';
@@ -287,7 +254,6 @@ export class ABsmartlyOAuthHandler extends Hono {
         
         debug('🔍 Using reference token approach:', { email, name, userId: userId.substring(0, 20) + '...' });
         
-        // Store token for later API calls
         var finalEmail = email;
         var finalName = name;
         var finalUserId = userId;
@@ -316,12 +282,7 @@ export class ABsmartlyOAuthHandler extends Hono {
         debug('🔍 Extracted user details:', { email: finalEmail, name: finalName, userId: finalUserId });
       }
       
-      // Use the clean endpoint without /v1 for auth endpoints
-      
-      // For API calls, ensure endpoint has /v1 suffix
       const apiEndpoint = cleanEndpoint.endsWith('/v1') ? cleanEndpoint : `${cleanEndpoint}/v1`;
-      
-      // Complete the authorization with user props
       const result = await env.OAUTH_PROVIDER.completeAuthorization({
         request: oauthReqInfo.authRequest,
         userId: finalUserId,
@@ -337,7 +298,6 @@ export class ABsmartlyOAuthHandler extends Hono {
         }
       });
       
-      // Redirect back to the client with the authorization code
       return c.redirect(result.redirectTo);
     });
   }
@@ -346,19 +306,15 @@ export class ABsmartlyOAuthHandler extends Hono {
     const url = new URL(c.req.url);
     const env = c.env;
     
-    // Get ABsmartly endpoint from query parameter, header, or KV storage
     let absmartlyEndpoint = url.searchParams.get('absmartly-endpoint') || 
                            c.req.header('x-absmartly-endpoint');
     
-    // If not found, try to retrieve from KV storage
     if (!absmartlyEndpoint && env.OAUTH_KV) {
-      // First try the stored endpoint from resource parameter
       const storedFromResource = await env.OAUTH_KV.get("absmartly_endpoint_config");
       if (storedFromResource) {
         debug(`📍 Retrieved stored endpoint from resource param: ${storedFromResource}`);
         absmartlyEndpoint = storedFromResource;
       } else {
-        // Try client fingerprint method
         const clientFingerprint = `${c.req.header('CF-Connecting-IP') || 'unknown'}-${c.req.header('User-Agent') || 'unknown'}`;
         const storedEndpoint = await env.OAUTH_KV.get(`oauth_endpoint:${clientFingerprint}`);
         if (storedEndpoint) {
@@ -368,21 +324,16 @@ export class ABsmartlyOAuthHandler extends Hono {
       }
     }
     
-    // Fallback to default
     absmartlyEndpoint = absmartlyEndpoint || 'https://dev-1.absmartly.com';
     debug(`📍 Final ABsmartly endpoint for OAuth redirect: ${absmartlyEndpoint}`);
     
-    // Clean up endpoint (remove trailing slashes)
     const cleanEndpoint = absmartlyEndpoint.replace(/\/+$/, '');
-    
-    // Create state parameter with original OAuth request info
     const stateData = {
       authRequest,
-      absmartlyEndpoint: cleanEndpoint  // Store clean endpoint without /v1 for consistency
+      absmartlyEndpoint: cleanEndpoint
     };
     const state = btoa(JSON.stringify(stateData));
     
-    // Build ABsmartly OAuth URL - /auth endpoints don't use /v1 prefix
     const absmartlyOAuthUrl = new URL(`${cleanEndpoint}/auth/oauth/authorize`);
     absmartlyOAuthUrl.searchParams.set('client_id', env.ABSMARTLY_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID);
     absmartlyOAuthUrl.searchParams.set('redirect_uri', `${url.origin}/oauth/callback`);
@@ -406,7 +357,6 @@ export class ABsmartlyOAuthHandler extends Hono {
     if (!cookie) return [];
     
     try {
-      // In production, verify HMAC signature
       const decoded = JSON.parse(atob(cookie));
       return decoded.clients || [];
     } catch (e) {
@@ -420,14 +370,13 @@ export class ABsmartlyOAuthHandler extends Hono {
       approvedClients.push(clientId);
     }
     
-    // In production, add HMAC signature
     const cookie = btoa(JSON.stringify({ clients: approvedClients }));
     
     setCookie(c, COOKIE_NAME, cookie, {
       httpOnly: true,
       secure: true,
       sameSite: 'Lax',
-      maxAge: 30 * 24 * 60 * 60 // 30 days
+      maxAge: 30 * 24 * 60 * 60
     });
   }
 }

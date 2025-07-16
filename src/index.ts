@@ -8,7 +8,6 @@ import { ABsmartlyOAuthHandler } from "./absmartly-oauth-handler";
 import { Env } from "./types";
 import { debug } from "./config";
 
-// Props from OAuth/Api\Key authentication
 type ABsmartlyProps = {
     email: string;
     name: string;
@@ -20,7 +19,7 @@ type ABsmartlyProps = {
 
 const DEFAULT_ABSMARTLY_ENDPOINT = "https://dev-1.absmartly.com/v1";
 const DEFAULT_OAUTH_CLIENT_ID = "mcp-absmartly-universal";
-const ENTITIES_CACHE_TTL = 5 * 60 * 1000; // 5 minutes in milliseconds
+const ENTITIES_CACHE_TTL = 5 * 60 * 1000;
 
 export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartlyProps> {
     server = new McpServer({
@@ -82,7 +81,6 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             throw new Error("Missing required ABsmartly credentials");
         }
 
-        // Determine auth token and type
         let authToken: string;
         let authType: 'api-key' | 'jwt';
 
@@ -105,8 +103,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
         this.apiClient = new ABsmartlyAPIClient(
             authToken,
             this.props.absmartly_endpoint,
-            authType,
-            false // debug flag is now global
+            authType
         );
 
         debug("✅ API client initialized successfully");
@@ -577,12 +574,10 @@ export default {
                 debug("🔑 API key detected, bypassing OAuth flow");
                 
                 try {
-                    // Create API client and fetch current user
                     const apiClient = new ABsmartlyAPIClient(
                         apiKey,
                         endpoint || DEFAULT_ABSMARTLY_ENDPOINT,
-                        'api-key',
-                        false // debug flag is now global
+                        'api-key'
                     );
                     
                     const userResponse = await apiClient.getCurrentUser();
