@@ -129,10 +129,13 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
         this.apiClient = new ABsmartlyAPIClient(
             authToken,
             this.props.absmartly_endpoint,
-            authType
+            authType,
+            this.env?.DEBUG === 'true'
         );
 
-        console.log("✅ API client initialized successfully");
+        if (this.env?.DEBUG === 'true') {
+            console.log("✅ API client initialized successfully");
+        }
     }
 
     private async fetchAllEntities(): Promise<void> {
@@ -490,9 +493,14 @@ const oauthHandler = new ABsmartlyOAuthHandler();
 // Wrap the OAuth handler to add debugging
 const debugOAuthHandler = {
     fetch: async (request: Request, env: any, ctx: any) => {
-        console.log(`🔍 debugOAuthHandler: ${request.method} ${new URL(request.url).pathname}`);
+        const debug = env.DEBUG === 'true';
+        if (debug) {
+            console.log(`🔍 debugOAuthHandler: ${request.method} ${new URL(request.url).pathname}`);
+        }
         const response = await oauthHandler.fetch(request, env, ctx);
-        console.log(`📍 debugOAuthHandler response status: ${response.status}`);
+        if (debug) {
+            console.log(`📍 debugOAuthHandler response status: ${response.status}`);
+        }
         return response;
     }
 };
@@ -529,7 +537,9 @@ const oauthProvider = new OAuthProvider({
 
         // Auto-register Claude Desktop clients as public clients
         if (clientId.startsWith("claude-mcp-") || clientId.startsWith("C0")) {
-            console.log("Auto-registering public client:", clientId);
+            if (env.DEBUG === 'true') {
+                console.log("Auto-registering public client:", clientId);
+            }
             const newClient = {
                 clientId: clientId,
                 redirectUris: ["https://claude.ai/api/mcp/auth_callback"],
@@ -559,13 +569,18 @@ const oauthProvider = new OAuthProvider({
 export default {
     async fetch(request: Request, env: any, ctx: any): Promise<Response> {
         const url = new URL(request.url);
+        const debug = env.DEBUG === 'true';
         
         // Handle API key detection and session tracking
         const authHeader = request.headers.get("Authorization");
-        console.log(`🔍 Raw Authorization header: ${authHeader ? authHeader.substring(0, 100) + '...' : 'null'}`);
+        if (debug) {
+            console.log(`🔍 Raw Authorization header: ${authHeader ? authHeader.substring(0, 100) + '...' : 'null'}`);
+        }
         
         const { apiKey, endpoint } = detectApiKey(request);
-        console.log(`🔍 detectApiKey result: apiKey=${apiKey ? apiKey.substring(0, 30) + '...' : 'null'}, endpoint=${endpoint}`);
+        if (debug) {
+            console.log(`🔍 detectApiKey result: apiKey=${apiKey ? apiKey.substring(0, 30) + '...' : 'null'}, endpoint=${endpoint}`);
+        }
         
         // Create client fingerprint for session tracking
         const clientFingerprint = `${request.headers.get('CF-Connecting-IP') || 'unknown'}-${request.headers.get('User-Agent') || 'unknown'}`;
@@ -597,14 +612,17 @@ export default {
         if (url.pathname.startsWith("/sse")) {
             // Check if API key is detected
             if (apiKey) {
-                console.log("🔑 API key detected, bypassing OAuth flow");
+                if (debug) {
+                    console.log("🔑 API key detected, bypassing OAuth flow");
+                }
                 
                 try {
                     // Create API client and fetch current user
                     const apiClient = new ABsmartlyAPIClient(
                         apiKey,
                         endpoint || DEFAULT_ABSMARTLY_ENDPOINT,
-                        'api-key'
+                        'api-key',
+                        debug
                     );
                     
                     const userResponse = await apiClient.getCurrentUser();
@@ -639,7 +657,7 @@ export default {
                         user_id: userId
                     };
                     
-                    console.log(`✅ API key authenticated for user: ${props.email} (ID: ${props.user_id})`);
+                    console.log(`✅ API key authenticated for user: ${props.email}`);
                     
                     // Store session in KV if available
                     if (env.OAUTH_KV) {
@@ -680,12 +698,16 @@ export default {
             
             // Manual 401 response for SSE endpoints without valid auth to trigger OAuth flow
             if (!authHeader || !authHeader.startsWith("Bearer ")) {
-                console.log("⚠️ No valid Authorization header, returning 401 to trigger OAuth flow");
+                if (debug) {
+                    console.log("⚠️ No valid Authorization header, returning 401 to trigger OAuth flow");
+                }
                 
                 // Store the requested endpoint in KV for the OAuth flow
                 const requestedEndpoint = url.searchParams.get('absmartly-endpoint') || endpoint;
                 if (requestedEndpoint && env.OAUTH_KV) {
-                    console.log(`📍 Storing requested endpoint for OAuth flow: ${requestedEndpoint}`);
+                    if (debug) {
+                        console.log(`📍 Storing requested endpoint for OAuth flow: ${requestedEndpoint}`);
+                    }
                     await env.OAUTH_KV.put(
                         `oauth_endpoint:${clientFingerprint}`,
                         requestedEndpoint,
@@ -710,9 +732,13 @@ export default {
         }
         
         // Route all other requests to OAuth provider (only for non-API key requests)
-        console.log(`🔍 Routing non-SSE request to OAuth provider: ${request.method} ${url.pathname}`);
+        if (debug) {
+            console.log(`🔍 Routing non-SSE request to OAuth provider: ${request.method} ${url.pathname}`);
+        }
         const oauthResponse = await oauthProvider.fetch(request, env, ctx);
-        console.log(`📍 OAuth provider response status: ${oauthResponse.status}`);
+        if (debug) {
+            console.log(`📍 OAuth provider response status: ${oauthResponse.status}`);
+        }
         return oauthResponse;
     }
 };
