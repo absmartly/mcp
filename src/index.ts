@@ -314,10 +314,45 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             "list_experiments",
             "List experiments with optional search and pagination",
             {
+                // Basic query parameters
                 search: z.string().optional().describe("Search experiments by name or description"),
-                sort: z.string().optional().describe("Sort field"),
-                page: z.number().optional().describe("Page number"),
-                items: z.number().optional().describe("Items per page")
+                sort: z.string().optional().describe("Sort field (e.g., created_at, updated_at)"),
+                page: z.number().optional().describe("Page number (default: 1)"),
+                items: z.number().optional().describe("Items per page (default: 10)"),
+                
+                // Filter by experiment attributes (comma-separated lists)
+                state: z.string().optional().describe("Filter by state (comma-separated: created,ready,running,development,full_on,running_not_full_on,stopped,archived,scheduled)"),
+                significance: z.string().optional().describe("Filter by significance results (comma-separated: positive,negative,neutral,inconclusive)"),
+                owners: z.string().optional().describe("Filter by owner user IDs (comma-separated numbers, e.g.: 3,5,7). Use the list_users tool to find user IDs by name"),
+                teams: z.string().optional().describe("Filter by team IDs (comma-separated numbers, e.g.: 1,2,3). Use the list_teams tool to find team IDs by name"),
+                tags: z.string().optional().describe("Filter by tag IDs (comma-separated numbers, e.g.: 2,4,6). Use the list_tags tool to find tag IDs by name"),
+                templates: z.string().optional().describe("Filter by template IDs (comma-separated numbers, e.g.: 238,240). Note: This expects numeric template IDs"),
+                applications: z.string().optional().describe("Filter by application IDs (comma-separated numbers, e.g.: 39,3). Use the list_applications tool to find application IDs by name"),
+                unit_types: z.string().optional().describe("Filter by unit type IDs (comma-separated numbers, e.g.: 42,75). Use the list_unit_types tool to find unit type IDs by name"),
+                
+                // Range filters (comma-separated min,max)
+                impact: z.string().optional().describe("Filter by impact range (min,max: 1,5)"),
+                created_at: z.string().optional().describe("Filter by creation date range (start,end) in milliseconds since epoch"),
+                updated_at: z.string().optional().describe("Filter by update date range (start,end) in milliseconds since epoch"),
+                full_on_at: z.string().optional().describe("Filter by full_on date range (start,end) in milliseconds since epoch"),
+                
+                // Boolean filters (0 or 1)
+                sample_ratio_mismatch: z.union([z.literal(0), z.literal(1)]).optional().describe("Filter experiments with sample ratio mismatch"),
+                cleanup_needed: z.union([z.literal(0), z.literal(1)]).optional().describe("Filter experiments that need cleanup"),
+                audience_mismatch: z.union([z.literal(0), z.literal(1)]).optional().describe("Filter experiments with audience mismatch"),
+                sample_size_reached: z.union([z.literal(0), z.literal(1)]).optional().describe("Filter experiments that reached sample size"),
+                experiments_interact: z.union([z.literal(0), z.literal(1)]).optional().describe("Filter experiments that interact with other experiments"),
+                group_sequential_updated: z.union([z.literal(0), z.literal(1)]).optional().describe("Filter experiments with updated group sequential analysis"),
+                assignment_conflict: z.union([z.literal(0), z.literal(1)]).optional().describe("Filter experiments with assignment conflicts"),
+                metric_threshold_reached: z.union([z.literal(0), z.literal(1)]).optional().describe("Filter experiments that reached metric threshold"),
+                previews: z.union([z.literal(0), z.literal(1)]).optional().describe("Include experiment preview data"),
+                
+                // String filters
+                analysis_type: z.string().optional().describe("Filter by analysis type (e.g., group_sequential,fixed_horizon)"),
+                type: z.string().optional().describe("Filter by experiment type (e.g., test, feature)"),
+                
+                // Number filters
+                iterations: z.number().optional().describe("Filter by number of iterations")
             },
             async (params) => {
                 if (!this.apiClient) {
@@ -331,10 +366,45 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
 
                 try {
                     const response = await this.apiClient.listExperiments({
+                        // Basic query parameters
                         search: params.search,
                         sort: params.sort,
                         page: params.page,
-                        items: params.items || 10
+                        items: params.items || 10,
+                        
+                        // Filter parameters
+                        state: params.state,
+                        significance: params.significance,
+                        owners: params.owners,
+                        teams: params.teams,
+                        tags: params.tags,
+                        templates: params.templates,
+                        applications: params.applications,
+                        unit_types: params.unit_types,
+                        
+                        // Range filters
+                        impact: params.impact,
+                        created_at: params.created_at,
+                        updated_at: params.updated_at,
+                        full_on_at: params.full_on_at,
+                        
+                        // Boolean filters
+                        sample_ratio_mismatch: params.sample_ratio_mismatch,
+                        cleanup_needed: params.cleanup_needed,
+                        audience_mismatch: params.audience_mismatch,
+                        sample_size_reached: params.sample_size_reached,
+                        experiments_interact: params.experiments_interact,
+                        group_sequential_updated: params.group_sequential_updated,
+                        assignment_conflict: params.assignment_conflict,
+                        metric_threshold_reached: params.metric_threshold_reached,
+                        previews: params.previews,
+                        
+                        // String filters
+                        analysis_type: params.analysis_type,
+                        type: params.type,
+                        
+                        // Number filters
+                        iterations: params.iterations
                     });
 
                     if (!response.ok) {
@@ -347,14 +417,26 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                     }
 
                     const experiments = response.data?.experiments || [];
-                    const experimentsList = experiments.map((exp: any) => 
-                        `• **${exp.display_name || exp.name}** (${exp.state}) - ID: ${exp.id}`
-                    ).join('\n');
-
+                    
+                    // Get the base URL without /v1 suffix for generating links
+                    const baseUrl = this.props.absmartly_endpoint.replace(/\/v1\/?$/, '');
+                    
+                    // Add link field to each experiment
+                    const experimentsWithLinks = experiments.map((exp: any) => ({
+                        ...exp,
+                        link: `${baseUrl}/experiments/${exp.id}`
+                    }));
+                    
+                    // Format the response with full experiment data including links
                     return {
                         content: [{
                             type: "text",
-                            text: `Found ${experiments.length} experiments\n\n${experimentsList || 'No experiments found'}`
+                            text: JSON.stringify({
+                                total: response.data?.total || experiments.length,
+                                page: response.data?.page || 1,
+                                items: response.data?.items || experiments.length,
+                                experiments: experimentsWithLinks
+                            }, null, 2)
                         }]
                     };
                 } catch (error) {
@@ -365,6 +447,152 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                         }]
                     };
                 }
+            }
+        );
+
+        // List users tool
+        this.server.tool(
+            "list_users",
+            "List all users (cached from initialization)",
+            {
+                search: z.string().optional().describe("Optional search term to filter users by name or email")
+            },
+            async (params) => {
+                let users = this.users || [];
+                
+                if (params.search) {
+                    const searchTerm = params.search.toLowerCase();
+                    users = users.filter(user => 
+                        user.name.toLowerCase().includes(searchTerm) ||
+                        user.email.toLowerCase().includes(searchTerm)
+                    );
+                }
+                
+                return {
+                    content: [{
+                        type: "text",
+                        text: JSON.stringify({
+                            total: users.length,
+                            users: users
+                        }, null, 2)
+                    }]
+                };
+            }
+        );
+
+        // List teams tool
+        this.server.tool(
+            "list_teams",
+            "List all teams (cached from initialization)",
+            {
+                search: z.string().optional().describe("Optional search term to filter teams by name")
+            },
+            async (params) => {
+                let teams = this.teams || [];
+                
+                if (params.search) {
+                    const searchTerm = params.search.toLowerCase();
+                    teams = teams.filter(team => 
+                        team.name.toLowerCase().includes(searchTerm)
+                    );
+                }
+                
+                return {
+                    content: [{
+                        type: "text",
+                        text: JSON.stringify({
+                            total: teams.length,
+                            teams: teams
+                        }, null, 2)
+                    }]
+                };
+            }
+        );
+
+        // List applications tool
+        this.server.tool(
+            "list_applications",
+            "List all applications (cached from initialization)",
+            {
+                search: z.string().optional().describe("Optional search term to filter applications by name")
+            },
+            async (params) => {
+                let applications = this.applications || [];
+                
+                if (params.search) {
+                    const searchTerm = params.search.toLowerCase();
+                    applications = applications.filter(app => 
+                        app.name.toLowerCase().includes(searchTerm)
+                    );
+                }
+                
+                return {
+                    content: [{
+                        type: "text",
+                        text: JSON.stringify({
+                            total: applications.length,
+                            applications: applications
+                        }, null, 2)
+                    }]
+                };
+            }
+        );
+
+        // List unit types tool
+        this.server.tool(
+            "list_unit_types",
+            "List all unit types (cached from initialization)",
+            {
+                search: z.string().optional().describe("Optional search term to filter unit types by name")
+            },
+            async (params) => {
+                let unitTypes = this.unitTypes || [];
+                
+                if (params.search) {
+                    const searchTerm = params.search.toLowerCase();
+                    unitTypes = unitTypes.filter(unitType => 
+                        unitType.name.toLowerCase().includes(searchTerm)
+                    );
+                }
+                
+                return {
+                    content: [{
+                        type: "text",
+                        text: JSON.stringify({
+                            total: unitTypes.length,
+                            unit_types: unitTypes
+                        }, null, 2)
+                    }]
+                };
+            }
+        );
+
+        // List tags tool
+        this.server.tool(
+            "list_tags",
+            "List all experiment tags (cached from initialization)",
+            {
+                search: z.string().optional().describe("Optional search term to filter tags by name")
+            },
+            async (params) => {
+                let tags = this.experimentTags || [];
+                
+                if (params.search) {
+                    const searchTerm = params.search.toLowerCase();
+                    tags = tags.filter(tag => 
+                        tag.name.toLowerCase().includes(searchTerm)
+                    );
+                }
+                
+                return {
+                    content: [{
+                        type: "text",
+                        text: JSON.stringify({
+                            total: tags.length,
+                            tags: tags
+                        }, null, 2)
+                    }]
+                };
             }
         );
 
