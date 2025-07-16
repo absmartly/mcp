@@ -293,14 +293,15 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
         const link = `${baseUrl}/experiments/${exp.id}`;
         const state = exp.state.toUpperCase();
         const stateEmoji: Record<string, string> = {
-            'CREATED': '🆕',
-            'READY': '🟡',
-            'RUNNING': '🟢',
-            'STOPPED': '🔴',
-            'ARCHIVED': '📦',
-            'DEVELOPMENT': '🔧',
-            'FULL_ON': '🚀',
-            'SCHEDULED': '📅'
+            'CREATED': '📝',        // Draft/Created state
+            'READY': '✅',          // Ready to start
+            'RUNNING': '▶️',        // Currently running
+            'STOPPED': '⏹️',        // Stopped
+            'ARCHIVED': '🗄️',      // Archived
+            'DEVELOPMENT': '🛠️',    // In development
+            'FULL_ON': '💯',        // Full on (100% to winning variant)
+            'SCHEDULED': '⏰',      // Scheduled to start
+            'RUNNING_NOT_FULL_ON': '🔄'  // Running but not full on
         };
         const emoji = stateEmoji[state] || '❓';
         
