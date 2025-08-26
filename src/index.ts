@@ -739,6 +739,568 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             }
         );
 
+        // Create experiment tool
+        this.server.tool(
+            "create_experiment",
+            "Create a new A/B test experiment with variants and configurations. Supports DOM changes for visual experiments like button styling, layout modifications, etc.",
+            {
+                name: z.string().describe("Experiment name"),
+                display_name: z.string().optional().describe("Display name (defaults to name)"),
+                description: z.string().optional().describe("Experiment description"),
+                type: z.enum(['test', 'feature']).optional().describe("Experiment type (default: test)"),
+                state: z.enum(['created', 'ready', 'running']).optional().describe("Initial state (default: ready)"),
+                unit_type_id: z.number().describe("Unit type ID (use list_unit_types to find IDs)"),
+                application_id: z.number().describe("Application ID (use list_applications to find IDs)"),
+                percentage_of_traffic: z.number().optional().describe("Percentage of traffic to include (0-100, default: 100)"),
+                variants: z.array(z.object({
+                    variant: z.number().describe("Variant index (0 for control, 1+ for treatments)"),
+                    name: z.string().describe("Variant name"),
+                    config: z.string().describe("JSON string with variant configuration. For DOM changes use: {\"dom_changes\":[{\"selector\":\"button\",\"css\":{\"border-radius\":\"8px\",\"background-color\":\"#007bff\"}}]}"),
+                    percentage: z.number().optional().describe("Traffic percentage for this variant")
+                })).describe("Array of experiment variants with DOM change configurations"),
+                tag_ids: z.array(z.number()).optional().describe("Tag IDs to assign (use list_tags to find IDs)"),
+                owner_user_id: z.number().optional().describe("Owner user ID (use list_users to find IDs)"),
+                team_id: z.number().optional().describe("Team ID (use list_teams to find IDs)")
+            },
+            async (params) => {
+                if (!this.apiClient) {
+                    return {
+                        content: [{
+                            type: "text",
+                            text: "Error: No API access available. Please ensure you're authenticated."
+                        }]
+                    };
+                }
+
+                try {
+                    // Calculate percentages string from variants if provided
+                    let percentages = params.variants.map(v => v.percentage || 50).join('/');
+                    if (!params.variants.some(v => v.percentage)) {
+                        // Default equal split
+                        const perVariant = Math.floor(100 / params.variants.length);
+                        const remainder = 100 - (perVariant * params.variants.length);
+                        percentages = params.variants.map((v, i) => 
+                            i === 0 ? perVariant + remainder : perVariant
+                        ).join('/');
+                    }
+
+                    // Add required custom fields based on the API response errors
+                    const customFieldValues = [
+                        {
+                            experiment_custom_section_field_id: 1, // Hypothesis
+                            type: 'text',
+                            value: params.description || `Testing that ${params.name} will improve user experience and engagement`
+                        },
+                        {
+                            experiment_custom_section_field_id: 2, // Purpose
+                            type: 'text',
+                            value: `The purpose of this experiment is to test ${params.name} and measure its impact on user behavior`
+                        },
+                        {
+                            experiment_custom_section_field_id: 3, // Prediction
+                            type: 'text',
+                            value: `We predict that ${params.name} will result in a measurable improvement in key metrics`
+                        },
+                        {
+                            experiment_custom_section_field_id: 4, // Implementation Details
+                            type: 'text',
+                            value: `Implementation of ${params.name} experiment with variant configurations`
+                        },
+                        {
+                            experiment_custom_section_field_id: 7, // Availability Rules (JSON)
+                            type: 'json',
+                            value: '{"enabled": true, "allowed_environments": ["production"]}'
+                        }
+                    ];
+
+                    const experimentData = {
+                        name: params.name,
+                        display_name: params.display_name || params.name,
+                        iteration: 1,
+                        type: params.type || 'test',
+                        state: params.state || 'ready',
+                        feature_state: null,
+                        development_at: null,
+                        start_at: null,
+                        stop_at: null,
+                        full_on_at: null,
+                        full_on_variant: null,
+                        feature_on_at: null,
+                        feature_off_at: null,
+                        last_seen_in_code_at: null,
+                        nr_variants: params.variants.length,
+                        percentages: percentages,
+                        percentage_of_traffic: params.percentage_of_traffic || 100,
+                        seed: null,
+                        traffic_seed: null,
+                        unit_type: {
+                            unit_type_id: params.unit_type_id
+                        },
+                        primary_metric: {
+                            metric_id: 4
+                        },
+                        audience: '{"filter":[{"and":[]}]}',
+                        audience_strict: true,
+                        minimum_detectable_effect: null,
+                        analysis_type: 'group_sequential',
+                        baseline_primary_metric_mean: '79',
+                        baseline_primary_metric_stdev: '30',
+                        baseline_participants_per_day: '1428',
+                        required_alpha: '0.1',
+                        required_power: '0.8',
+                        group_sequential_futility_type: 'binding',
+                        group_sequential_analysis_count: null,
+                        group_sequential_min_analysis_interval: '1d',
+                        group_sequential_first_analysis_interval: '7d',
+                        group_sequential_max_duration_interval: '4w',
+                        template_iteration: null,
+                        template_description: null,
+                        parent_experiment_id: 238,
+                        parent_experiment_iteration: 2,
+                        applications: [{
+                            application_id: params.application_id,
+                            application_version: '0'
+                        }],
+                        variants: params.variants,
+                        variant_screenshots: [],
+                        owners: [{
+                            user_id: 3
+                        }],
+                        secondary_metrics: [],
+                        teams: [],
+                        experiment_tags: [],
+                        custom_section_field_values: customFieldValues
+                    };
+
+                    console.log('🚀 Creating experiment with data:', JSON.stringify(experimentData, null, 2));
+                    
+                    const response = await this.apiClient.createExperiment(experimentData);
+                    console.log('📝 API response:', JSON.stringify(response, null, 2));
+                    
+                    if (!response.ok) {
+                        const errorDetails = {
+                            errors: response.errors,
+                            details: response.details,
+                            payload: experimentData
+                        };
+                        console.log('❌ Create experiment failed:', JSON.stringify(errorDetails, null, 2));
+                        throw new Error(response.errors?.join(', ') || 'Failed to create experiment');
+                    }
+
+                    return {
+                        content: [{
+                            type: "text",
+                            text: JSON.stringify(response.data, null, 2)
+                        }]
+                    };
+                } catch (error) {
+                    const errorMessage = error instanceof Error ? error.message : String(error);
+                    return {
+                        content: [{
+                            type: "text",
+                            text: `Error creating experiment: ${errorMessage}`
+                        }]
+                    };
+                }
+            }
+        );
+
+        // Create feature flag tool
+        this.server.tool(
+            "create_feature_flag",
+            "Create a feature flag (experiment with type='feature' and simple on/off variants)",
+            {
+                name: z.string().describe("Feature flag name"),
+                unit_type_id: z.number().describe("Unit type ID (use list_unit_types to find IDs)"),
+                application_id: z.number().describe("Application ID (use list_applications to find IDs)"),
+                feature_enabled_percentage: z.number().optional().describe("Percentage to enable feature (0-100, default: 50)"),
+                description: z.string().optional().describe("Feature flag description"),
+                tag_ids: z.array(z.number()).optional().describe("Tag IDs to assign (use list_tags to find IDs)"),
+                owner_user_id: z.number().optional().describe("Owner user ID (use list_users to find IDs)"),
+                team_id: z.number().optional().describe("Team ID (use list_teams to find IDs)")
+            },
+            async (params) => {
+                if (!this.apiClient) {
+                    return {
+                        content: [{
+                            type: "text",
+                            text: "Error: No API access available. Please ensure you're authenticated."
+                        }]
+                    };
+                }
+
+                try {
+                    const enabledPct = params.feature_enabled_percentage ?? 50;
+                    
+                    // Add required custom fields for feature flags
+                    const customFieldValues = [
+                        {
+                            experiment_custom_section_field_id: 75, // feature required field
+                            type: 'text',
+                            value: `Feature flag for ${params.name}`
+                        },
+                        {
+                            experiment_custom_section_field_id: 1, // Hypothesis
+                            type: 'text',
+                            value: `Feature flag test: ${params.name} will improve user experience with button styling`
+                        },
+                        {
+                            experiment_custom_section_field_id: 2, // Purpose
+                            type: 'text',
+                            value: `Testing the impact of rounded button corners on user engagement`
+                        },
+                        {
+                            experiment_custom_section_field_id: 3, // Prediction
+                            type: 'text',
+                            value: `Enabling ${params.name} will increase user engagement by improving visual appeal`
+                        }
+                    ];
+                    
+                    const experimentData = {
+                        name: params.name,
+                        display_name: params.name,
+                        iteration: 1,
+                        type: 'feature',
+                        state: 'ready',
+                        feature_state: null,
+                        development_at: null,
+                        start_at: null,
+                        stop_at: null,
+                        full_on_at: null,
+                        full_on_variant: null,
+                        feature_on_at: null,
+                        feature_off_at: null,
+                        last_seen_in_code_at: null,
+                        nr_variants: 2,
+                        percentages: `${100 - enabledPct}/${enabledPct}`,
+                        percentage_of_traffic: 100,
+                        seed: null,
+                        traffic_seed: null,
+                        unit_type: {
+                            unit_type_id: params.unit_type_id
+                        },
+                        primary_metric: {
+                            metric_id: 4
+                        },
+                        audience: '{"filter":[{"and":[]}]}',
+                        audience_strict: true,
+                        minimum_detectable_effect: null,
+                        analysis_type: 'group_sequential',
+                        baseline_primary_metric_mean: '79',
+                        baseline_primary_metric_stdev: '30',
+                        baseline_participants_per_day: '1428',
+                        required_alpha: '0.1',
+                        required_power: '0.8',
+                        group_sequential_futility_type: 'binding',
+                        group_sequential_analysis_count: null,
+                        group_sequential_min_analysis_interval: '1d',
+                        group_sequential_first_analysis_interval: '7d',
+                        group_sequential_max_duration_interval: '4w',
+                        template_iteration: null,
+                        template_description: null,
+                        parent_experiment_id: 238,
+                        parent_experiment_iteration: 2,
+                        applications: [{
+                            application_id: params.application_id,
+                            application_version: '0'
+                        }],
+                        variants: [
+                            {
+                                variant: 0,
+                                name: 'Control (Feature Off)',
+                                config: '{"feature_enabled": false}'
+                            },
+                            {
+                                variant: 1,
+                                name: 'Treatment (Feature On)',
+                                config: '{"feature_enabled": true, "dom_changes":[{"selector":"button","css":{"border-radius":"8px","background-color":"#007bff"}}]}'
+                            }
+                        ],
+                        variant_screenshots: [],
+                        owners: [{
+                            user_id: 3
+                        }],
+                        secondary_metrics: [],
+                        teams: [],
+                        experiment_tags: [],
+                        custom_section_field_values: customFieldValues
+                    };
+
+                    console.log('🚀 Creating feature flag with data:', JSON.stringify(experimentData, null, 2));
+                    
+                    const response = await this.apiClient.createExperiment(experimentData);
+                    console.log('📝 API response:', JSON.stringify(response, null, 2));
+                    
+                    if (!response.ok) {
+                        const errorDetails = {
+                            errors: response.errors,
+                            details: response.details,
+                            payload: experimentData
+                        };
+                        console.log('❌ Create experiment failed:', JSON.stringify(errorDetails, null, 2));
+                        throw new Error(`Failed to create feature flag: ${response.errors?.join(', ') || 'Unknown error'}`);
+                    }
+
+                    return {
+                        content: [{
+                            type: "text",
+                            text: JSON.stringify(response.data, null, 2)
+                        }]
+                    };
+                } catch (error) {
+                    const errorMessage = error instanceof Error ? error.message : String(error);
+                    return {
+                        content: [{
+                            type: "text",
+                            text: `Error creating feature flag: ${errorMessage}`
+                        }]
+                    };
+                }
+            }
+        );
+
+        // Update experiment tool
+        this.server.tool(
+            "update_experiment",
+            "Update experiment state or configuration (start, stop, archive, etc)",
+            {
+                id: z.number().describe("Experiment ID"),
+                action: z.enum(['start', 'stop', 'archive', 'ready', 'full_on']).optional().describe("State change action"),
+                name: z.string().optional().describe("Update experiment name"),
+                display_name: z.string().optional().describe("Update display name"),
+                description: z.string().optional().describe("Update description"),
+                percentage_of_traffic: z.number().optional().describe("Update traffic percentage (0-100)"),
+                tag_ids: z.array(z.number()).optional().describe("Update tag IDs"),
+                owner_user_id: z.number().optional().describe("Update owner user ID"),
+                team_id: z.number().optional().describe("Update team ID")
+            },
+            async (params) => {
+                if (!this.apiClient) {
+                    return {
+                        content: [{
+                            type: "text",
+                            text: "Error: No API access available. Please ensure you're authenticated."
+                        }]
+                    };
+                }
+
+                try {
+                    // Handle state change actions
+                    if (params.action) {
+                        let response;
+                        switch (params.action) {
+                            case 'start':
+                                response = await this.apiClient.startExperiment(params.id);
+                                break;
+                            case 'stop':
+                                response = await this.apiClient.stopExperiment(params.id);
+                                break;
+                            case 'archive':
+                                response = await this.apiClient.archiveExperiment(params.id);
+                                break;
+                            case 'ready':
+                                response = await this.apiClient.updateExperiment(params.id, { state: 'ready' });
+                                break;
+                            case 'full_on':
+                                response = await this.apiClient.setExperimentFullOn(params.id);
+                                break;
+                            default:
+                                throw new Error(`Unknown action: ${params.action}`);
+                        }
+                        
+                        if (!response.ok) {
+                            throw new Error(response.errors?.join(', ') || `Failed to ${params.action} experiment`);
+                        }
+                        
+                        return {
+                            content: [{
+                                type: "text",
+                                text: JSON.stringify({
+                                    message: `Successfully ${params.action === 'full_on' ? 'set to full on' : params.action + 'ed'} experiment ${params.id}`,
+                                    experiment: response.data
+                                }, null, 2)
+                            }]
+                        };
+                    }
+                    
+                    // Handle general updates
+                    const updateData: any = {};
+                    if (params.name !== undefined) updateData.name = params.name;
+                    if (params.display_name !== undefined) updateData.display_name = params.display_name;
+                    if (params.description !== undefined) updateData.description = params.description;
+                    if (params.percentage_of_traffic !== undefined) updateData.percentage_of_traffic = params.percentage_of_traffic;
+                    if (params.tag_ids !== undefined) updateData.tag_ids = params.tag_ids;
+                    if (params.owner_user_id !== undefined) updateData.owner_user_id = params.owner_user_id;
+                    if (params.team_id !== undefined) updateData.team_id = params.team_id;
+                    
+                    const response = await this.apiClient.updateExperiment(params.id, updateData);
+                    
+                    if (!response.ok) {
+                        throw new Error(response.errors?.join(', ') || 'Failed to update experiment');
+                    }
+
+                    return {
+                        content: [{
+                            type: "text",
+                            text: JSON.stringify(response.data, null, 2)
+                        }]
+                    };
+                } catch (error) {
+                    return {
+                        content: [{
+                            type: "text",
+                            text: `Error updating experiment: ${error instanceof Error ? error.message : String(error)}`
+                        }]
+                    };
+                }
+            }
+        );
+
+        // Create variant tool
+        this.server.tool(
+            "create_variant",
+            "Add a new variant to an existing experiment",
+            {
+                experiment_id: z.number().describe("Experiment ID"),
+                name: z.string().describe("Variant name"),
+                config: z.string().describe("JSON string with variant configuration"),
+                percentage: z.number().optional().describe("Traffic percentage for this variant")
+            },
+            async (params) => {
+                if (!this.apiClient) {
+                    return {
+                        content: [{
+                            type: "text",
+                            text: "Error: No API access available. Please ensure you're authenticated."
+                        }]
+                    };
+                }
+
+                try {
+                    // First get the experiment to see current variants
+                    const expResponse = await this.apiClient.getExperiment(params.experiment_id);
+                    if (!expResponse.ok) {
+                        throw new Error('Failed to fetch experiment');
+                    }
+                    
+                    const experiment = expResponse.data;
+                    const currentVariants = experiment.variants || [];
+                    const nextVariantIndex = currentVariants.length;
+                    
+                    // Add new variant
+                    const newVariant = {
+                        variant: nextVariantIndex,
+                        name: params.name,
+                        config: params.config
+                    };
+                    
+                    const updatedVariants = [...currentVariants, newVariant];
+                    
+                    // Update percentages if provided
+                    let percentages = experiment.percentages;
+                    if (params.percentage !== undefined) {
+                        // Recalculate all percentages
+                        const variantPercentages = currentVariants.map((v: any) => {
+                            const pctStr = experiment.percentages.split('/');
+                            return parseInt(pctStr[v.variant] || '0');
+                        });
+                        variantPercentages.push(params.percentage);
+                        
+                        // Normalize to 100%
+                        const total = variantPercentages.reduce((a, b) => a + b, 0);
+                        if (total !== 100) {
+                            const normalized = variantPercentages.map(p => Math.round((p / total) * 100));
+                            // Adjust for rounding errors
+                            const diff = 100 - normalized.reduce((a, b) => a + b, 0);
+                            normalized[0] += diff;
+                            percentages = normalized.join('/');
+                        } else {
+                            percentages = variantPercentages.join('/');
+                        }
+                    } else {
+                        // Equal split
+                        const perVariant = Math.floor(100 / updatedVariants.length);
+                        const remainder = 100 - (perVariant * updatedVariants.length);
+                        percentages = updatedVariants.map((v, i) => 
+                            i === 0 ? perVariant + remainder : perVariant
+                        ).join('/');
+                    }
+                    
+                    // Update experiment
+                    const updateData = {
+                        variants: updatedVariants,
+                        nr_variants: updatedVariants.length,
+                        percentages: percentages
+                    };
+                    
+                    const response = await this.apiClient.updateExperiment(params.experiment_id, updateData);
+                    
+                    if (!response.ok) {
+                        throw new Error(response.errors?.join(', ') || 'Failed to add variant');
+                    }
+
+                    return {
+                        content: [{
+                            type: "text",
+                            text: JSON.stringify({
+                                message: `Successfully added variant ${nextVariantIndex} to experiment ${params.experiment_id}`,
+                                variant: newVariant,
+                                experiment: response.data
+                            }, null, 2)
+                        }]
+                    };
+                } catch (error) {
+                    return {
+                        content: [{
+                            type: "text",
+                            text: `Error adding variant: ${error instanceof Error ? error.message : String(error)}`
+                        }]
+                    };
+                }
+            }
+        );
+
+        // Get experiment tool
+        this.server.tool(
+            "get_experiment",
+            "Get detailed information about a specific experiment",
+            {
+                id: z.number().describe("Experiment ID")
+            },
+            async (params) => {
+                if (!this.apiClient) {
+                    return {
+                        content: [{
+                            type: "text",
+                            text: "Error: No API access available. Please ensure you're authenticated."
+                        }]
+                    };
+                }
+
+                try {
+                    const response = await this.apiClient.getExperiment(params.id);
+                    
+                    if (!response.ok) {
+                        throw new Error(response.errors?.join(', ') || 'Failed to fetch experiment');
+                    }
+
+                    return {
+                        content: [{
+                            type: "text",
+                            text: JSON.stringify(response.data, null, 2)
+                        }]
+                    };
+                } catch (error) {
+                    return {
+                        content: [{
+                            type: "text",
+                            text: `Error fetching experiment: ${error instanceof Error ? error.message : String(error)}`
+                        }]
+                    };
+                }
+            }
+        );
+
         // Add more tools here as needed...
     }
 
