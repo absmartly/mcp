@@ -9,6 +9,15 @@
             "command": "echo '🚀 Deploying worker after edit...'; npx wrangler deploy --compatibility-date=2025-03-10"
           }
         ]
+      },
+      {
+        "matcher": "TodoWrite",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '📋 MCP: Task progress updated' && tmux send-keys -t orc:0 'MCP: Task progress updated' Enter 2>/dev/null || true"
+          }
+        ]
       }
     ]
   }
