@@ -51,5 +51,5 @@ openapi/
 openapi.json
 backend/
 shared/
-frontent-next-vue2/
+frontend-next-vue2/
 .git_old
