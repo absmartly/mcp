@@ -15,6 +15,9 @@ dist/
 .env.production
 .env.staging
 
+# MCP config files (may contain API keys)
+.claude_mcp_config.json
+
 # Wrangler files
 .wrangler/
 wrangler.toml.bak
