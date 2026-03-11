@@ -7,6 +7,7 @@ import { ABsmartlyResources } from "./resources";
 import { ABsmartlyOAuthHandler } from "./absmartly-oauth-handler";
 import { Env } from "./types";
 import { debug } from "./config";
+import { MCP_VERSION } from "./version";
 
 type ABsmartlyProps = {
     email: string;
@@ -20,11 +21,26 @@ type ABsmartlyProps = {
 const DEFAULT_ABSMARTLY_ENDPOINT = "https://dev-1.absmartly.com/v1";
 const DEFAULT_OAUTH_CLIENT_ID = "mcp-absmartly-universal";
 const ENTITIES_CACHE_TTL = 5 * 60 * 1000;
+const DEFAULT_ABSMARTLY_DOMAIN = "absmartly.com";
+
+const DEFAULT_BASELINE_METRIC_MEAN = '79';
+const DEFAULT_BASELINE_METRIC_STDEV = '30';
+const DEFAULT_BASELINE_PARTICIPANTS_PER_DAY = '1428';
+const DEFAULT_REQUIRED_ALPHA = '0.1';
+const DEFAULT_REQUIRED_POWER = '0.8';
+
+function extractEndpointFromPath(pathname: string, prefix: string): string | null {
+  if (!pathname.startsWith(prefix + '/')) return null;
+  const hostPart = pathname.slice(prefix.length + 1).replace(/\/+$/, '');
+  if (!hostPart) return null;
+  const host = hostPart.includes('.') ? hostPart : `${hostPart}.${DEFAULT_ABSMARTLY_DOMAIN}`;
+  return `https://${host}`;
+}
 
 export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartlyProps> {
     server = new McpServer({
         name: "ABsmartly MCP Server",
-        version: "1.0.0",
+        version: MCP_VERSION,
         capabilities: {
             tools: {},
             resources: {},
@@ -34,6 +50,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
 
     private apiClient: ABsmartlyAPIClient | null = null;
     private resourcesSetup: boolean = false;
+    private currentUserId: number | null = null;
     private _customFields: any[] = [];
     private users: any[] = [];
     private teams: any[] = [];
@@ -47,8 +64,6 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
         return this._customFields;
     }
 
-    // this.env is available from the McpAgent base class
-
     private loadEntitiesFromCache(entities: any) {
         this._customFields = entities.customFields || [];
         this.users = entities.users || [];
@@ -61,15 +76,18 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
     }
 
     async init() {
-        console.log("🚀 ABsmartly MCP initialization START");
+        debug("ABsmartly MCP initialization START");
 
         try {
             await this.initializeAPIClient();
-            await this.fetchAllEntities();
+            await Promise.all([
+                this.fetchAllEntities(),
+                this.fetchCurrentUser()
+            ]);
             this.setupTools();
             await this.setupResources();
             this.setupPrompts();
-            console.log("✅ ABsmartly MCP initialization completed successfully");
+            debug("ABsmartly MCP initialization completed successfully");
         } catch (error) {
             console.error("❌ ABsmartly MCP initialization failed:", error);
             throw error;
@@ -84,18 +102,16 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
         let authToken: string;
         let authType: 'api-key' | 'jwt';
 
-        if (this.props.absmartly_api_key && 
-            !this.props.absmartly_api_key.includes('@') && 
+        if (this.props.absmartly_api_key &&
+            !this.props.absmartly_api_key.includes('@') &&
             !this.props.absmartly_api_key.includes(':')) {
-            // Valid API key
             authToken = this.props.absmartly_api_key;
             authType = 'api-key';
-            console.log("🔑 Using ABsmartly API key for authentication");
+            debug("Using ABsmartly API key for authentication");
         } else if (this.props.oauth_jwt) {
-            // OAuth JWT
             authToken = this.props.oauth_jwt;
             authType = 'jwt';
-            console.log("🔑 Using OAuth JWT for authentication");
+            debug("Using OAuth JWT for authentication");
         } else {
             throw new Error("No valid authentication token available");
         }
@@ -106,7 +122,79 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             authType
         );
 
-        debug("✅ API client initialized successfully");
+        debug("API client initialized successfully");
+    }
+
+    private async fetchCurrentUser(): Promise<void> {
+        if (!this.apiClient) return;
+        try {
+            const response = await this.apiClient.getCurrentUser();
+            if (response.ok) {
+                const userData = response.data?.user || response.data;
+                this.currentUserId = userData?.id || null;
+                debug("Current user ID:", this.currentUserId);
+            }
+        } catch (e) {
+            debug("Failed to fetch current user:", e);
+        }
+    }
+
+    private customFieldKeyToTitle: Map<string, string> = new Map();
+
+    private toSnakeCase(title: string): string {
+        return title
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '_')
+            .replace(/^_+|_+$/g, '');
+    }
+
+    private buildCustomFieldZodSchema(): Record<string, z.ZodTypeAny> {
+        const schema: Record<string, z.ZodTypeAny> = {};
+        this.customFieldKeyToTitle.clear();
+
+        const activeFields = this._customFields.filter((f: any) => !f.archived);
+        for (const field of activeFields) {
+            const key = this.toSnakeCase(field.title);
+            this.customFieldKeyToTitle.set(key, field.title);
+
+            const desc = field.description
+                ? `${field.title} - ${field.description}`
+                : field.title;
+
+            switch (field.type) {
+                case 'boolean':
+                    schema[key] = z.boolean().optional().describe(desc);
+                    break;
+                case 'number':
+                    schema[key] = z.number().optional().describe(desc);
+                    break;
+                case 'json':
+                    schema[key] = z.string().optional().describe(`${desc} (JSON string)`);
+                    break;
+                default:
+                    schema[key] = z.string().optional().describe(desc);
+                    break;
+            }
+        }
+        return schema;
+    }
+
+    private buildCustomFieldValuesFromParams(params: Record<string, any>): any[] {
+        const values: any[] = [];
+        for (const [key, title] of this.customFieldKeyToTitle) {
+            const value = params[key];
+            if (value === undefined || value === null) continue;
+
+            const field = this._customFields.find((f: any) => f.title === title);
+            if (!field) continue;
+
+            values.push({
+                experiment_custom_section_field_id: field.id,
+                type: field.type,
+                value: typeof value === 'object' ? JSON.stringify(value) : String(value)
+            });
+        }
+        return values;
     }
 
     private async fetchAllEntities(): Promise<void> {
@@ -116,11 +204,9 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             return;
         }
 
-        // Create cache key based on endpoint and API key/auth type
         const authToken = this.props?.absmartly_api_key || this.props?.oauth_jwt || 'unknown';
         const cacheKey = `entities:${this.props?.absmartly_endpoint}:${authToken.substring(0, 8)}`;
 
-        // Try to get cached entities first
         if (this.env?.OAUTH_KV) {
             try {
                 const cachedData = await this.env.OAUTH_KV.get(cacheKey);
@@ -146,7 +232,6 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
         try {
             debug("📦 Fetching all entities from API");
 
-            // Fetch all entities in parallel
             const [
                 customFieldsResponse,
                 usersResponse,
@@ -167,7 +252,6 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 this.apiClient.listGoals()
             ]);
 
-            // Process responses
             this.processEntityResponses({
                 customFieldsResponse,
                 usersResponse,
@@ -179,7 +263,6 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 goalsResponse
             });
 
-            // Cache the processed entities
             if (this.env?.OAUTH_KV) {
                 try {
                     const entitiesToCache = {
@@ -216,14 +299,13 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
     }
 
     private processEntityResponses(responses: any) {
-        // Process custom fields
         if (responses.customFieldsResponse.status === 'fulfilled' && responses.customFieldsResponse.value.ok) {
             this._customFields = responses.customFieldsResponse.value.data?.experiment_custom_section_fields || [];
         } else {
+            this.logEntityFetchError('customFields', responses.customFieldsResponse);
             this._customFields = [];
         }
 
-        // Process users
         if (responses.usersResponse.status === 'fulfilled' && responses.usersResponse.value.ok) {
             const rawUsers = responses.usersResponse.value.data?.users || responses.usersResponse.value.data || [];
             this.users = rawUsers.map((user: any) => ({
@@ -232,10 +314,10 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 description: user.email || ''
             }));
         } else {
+            this.logEntityFetchError('users', responses.usersResponse);
             this.users = [];
         }
 
-        // Process teams
         if (responses.teamsResponse.status === 'fulfilled' && responses.teamsResponse.value.ok) {
             const rawTeams = responses.teamsResponse.value.data?.teams || responses.teamsResponse.value.data || [];
             this.teams = rawTeams.map((team: any) => ({
@@ -244,10 +326,10 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 description: team.description || `${team.member_count || 0} members`
             }));
         } else {
+            this.logEntityFetchError('teams', responses.teamsResponse);
             this.teams = [];
         }
 
-        // Process applications
         if (responses.applicationsResponse.status === 'fulfilled' && responses.applicationsResponse.value.ok) {
             const rawApplications = responses.applicationsResponse.value.data?.applications || responses.applicationsResponse.value.data || [];
             this.applications = rawApplications.map((app: any) => ({
@@ -256,14 +338,22 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 description: `Environment: ${app.environment || 'default'}`
             }));
         } else {
+            this.logEntityFetchError('applications', responses.applicationsResponse);
             this.applications = [];
         }
 
-        // Process other entities
         this.unitTypes = this.processSimpleEntity(responses.unitTypesResponse, 'unit_types');
         this.experimentTags = this.processSimpleEntity(responses.experimentTagsResponse, 'experiment_tags');
         this.metrics = this.processSimpleEntity(responses.metricsResponse, 'metrics');
         this.goals = this.processSimpleEntity(responses.goalsResponse, 'goals');
+    }
+
+    private logEntityFetchError(entityName: string, response: any) {
+        if (response.status === 'rejected') {
+            debug(`Failed to fetch ${entityName}: ${response.reason}`);
+        } else if (response.status === 'fulfilled' && !response.value.ok) {
+            debug(`Failed to fetch ${entityName}: ${response.value.errors?.join(', ') || 'Unknown error'}`);
+        }
     }
 
     private processSimpleEntity(response: any, entityKey: string): any[] {
@@ -275,6 +365,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 description: entity.description || `${entityKey.slice(0, -1)}: ${entity.name || entity.tag}`
             }));
         }
+        this.logEntityFetchError(entityKey, response);
         return [];
     }
 
@@ -297,30 +388,29 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             'READY': '🟡',
             'RUNNING': '🟢',
             'STOPPED': '🔴',
-            'ARCHIVED': '🗄️',      // Archived
+            'ARCHIVED': '🗄️',
             'DEVELOPMENT': '🔧',
-            'FULL_ON': '💯',        // Full on (100% to winning variant)
+            'FULL_ON': '💯',
             'SCHEDULED': '📅'
         };
         const emoji = stateEmoji[state] || '❓';
-        
-        // Extract key custom fields
+
         const hypothesis = exp.custom_section_field_values?.find((f: any) => 
             f.custom_section_field?.title === 'Hypothesis')?.value || '';
         const purpose = exp.custom_section_field_values?.find((f: any) => 
             f.custom_section_field?.title === 'Purpose')?.value || '';
-        
+
         let md = `## ${emoji} [${exp.display_name || exp.name}](${link})\n\n`;
         md += `**ID:** ${exp.id} | **State:** ${state} | **Type:** ${exp.type || 'test'}\n`;
         md += `**Created:** ${new Date(exp.created_at).toLocaleDateString()} by ${exp.created_by?.first_name || 'Unknown'} ${exp.created_by?.last_name || ''}\n`;
-        
+
         if (exp.owners?.length > 0) {
             const owners = exp.owners.map((o: any) => 
                 `${o.user?.first_name || ''} ${o.user?.last_name || ''}`.trim()
             ).filter(Boolean).join(', ');
             if (owners) md += `**Owners:** ${owners}\n`;
         }
-        
+
         if (exp.primary_metric) {
             md += `**Primary Metric:** ${exp.primary_metric.name}`;
             if (exp.minimum_detectable_effect) {
@@ -328,54 +418,50 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             }
             md += '\n';
         }
-        
+
         if (exp.percentages) {
             md += `**Traffic Split:** ${exp.percentages} (${exp.percentage_of_traffic}% of traffic)\n`;
         }
-        
+
         if (hypothesis) {
             md += `\n**Hypothesis:** ${hypothesis}\n`;
         }
-        
+
         if (purpose) {
             md += `\n**Purpose:** ${purpose}\n`;
         }
-        
-        // Variants section
+
         if (exp.variants && exp.variants.length > 0) {
             md += '\n### Variants\n';
-            exp.variants.forEach((variant: any) => {
+            for (const variant of exp.variants) {
                 const variantName = variant.name || `Variant ${variant.variant}`;
                 md += `- **${variantName}** (${variant.variant === 0 ? 'Control' : 'Treatment'})\n`;
-                
-                // Check for screenshots
-                const screenshot = exp.variant_screenshots?.find((s: any) => 
+
+                const screenshot = exp.variant_screenshots?.find((s: any) =>
                     s.variant === variant.variant
                 );
                 if (screenshot?.screenshot_url) {
                     md += `  ![${variantName} Screenshot](${screenshot.screenshot_url})\n`;
                 }
-                
+
                 if (variant.config) {
                     md += `  Config: \`${variant.config}\`\n`;
                 }
-            });
+            }
         }
-        
-        // Tags
+
         if (exp.experiment_tags?.length > 0) {
             const tags = exp.experiment_tags.map((t: any) => t.tag?.name || t.name).filter(Boolean);
             if (tags.length > 0) {
                 md += `\n**Tags:** ${tags.map((t: string) => `\`${t}\``).join(', ')}\n`;
             }
         }
-        
+
         md += '\n---\n';
         return md;
     }
 
     private setupTools() {
-        // Authentication status tool
         this.server.tool(
             "get_auth_status",
             "Get current authentication status and user information",
@@ -394,18 +480,14 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             }
         );
 
-        // List experiments tool
         this.server.tool(
             "list_experiments",
             "List experiments with optional filtering. To filter by owner name: 1) First use list_users to find the user ID, 2) Then use the owners parameter with that ID",
             {
-                // Basic query parameters
                 search: z.string().optional().describe("Search experiments by name or description"),
                 sort: z.string().optional().describe("Sort field (e.g., created_at, updated_at)"),
                 page: z.number().optional().describe("Page number (default: 1)"),
                 items: z.number().optional().describe("Items per page (default: 10)"),
-                
-                // Filter by experiment attributes (comma-separated lists)
                 state: z.string().optional().describe("Filter by state (comma-separated: created,ready,running,development,full_on,running_not_full_on,stopped,archived,scheduled)"),
                 significance: z.string().optional().describe("Filter by significance results (comma-separated: positive,negative,neutral,inconclusive)"),
                 owners: z.string().optional().describe("Filter by owner user IDs (comma-separated numbers, e.g.: 3,5,7). To find a user's ID, use list_users with their full name (e.g., list_users({search: 'Cal Courtney'}))"),
@@ -414,14 +496,10 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 templates: z.string().optional().describe("Filter by template IDs (comma-separated numbers, e.g.: 238,240). Note: This expects numeric template IDs"),
                 applications: z.string().optional().describe("Filter by application IDs (comma-separated numbers, e.g.: 39,3). Use the list_applications tool to find application IDs by name"),
                 unit_types: z.string().optional().describe("Filter by unit type IDs (comma-separated numbers, e.g.: 42,75). Use the list_unit_types tool to find unit type IDs by name"),
-                
-                // Range filters (comma-separated min,max)
                 impact: z.string().optional().describe("Filter by impact range (min,max: 1,5)"),
                 created_at: z.string().optional().describe("Filter by creation date range (start,end) in milliseconds since epoch"),
                 updated_at: z.string().optional().describe("Filter by update date range (start,end) in milliseconds since epoch"),
                 full_on_at: z.string().optional().describe("Filter by full_on date range (start,end) in milliseconds since epoch"),
-                
-                // Boolean filters (0 or 1)
                 sample_ratio_mismatch: z.union([z.literal(0), z.literal(1)]).optional().describe("Filter experiments with sample ratio mismatch"),
                 cleanup_needed: z.union([z.literal(0), z.literal(1)]).optional().describe("Filter experiments that need cleanup"),
                 audience_mismatch: z.union([z.literal(0), z.literal(1)]).optional().describe("Filter experiments with audience mismatch"),
@@ -431,15 +509,9 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 assignment_conflict: z.union([z.literal(0), z.literal(1)]).optional().describe("Filter experiments with assignment conflicts"),
                 metric_threshold_reached: z.union([z.literal(0), z.literal(1)]).optional().describe("Filter experiments that reached metric threshold"),
                 previews: z.union([z.literal(0), z.literal(1)]).optional().describe("Include experiment preview data"),
-                
-                // String filters
                 analysis_type: z.string().optional().describe("Filter by analysis type (e.g., group_sequential,fixed_horizon)"),
                 type: z.string().optional().describe("Filter by experiment type (e.g., test, feature)"),
-                
-                // Number filters
                 iterations: z.number().optional().describe("Filter by number of iterations"),
-                
-                // Output format
                 format: z.enum(['json', 'md']).optional().describe("Output format: 'json' for full data or 'md' for formatted markdown (default: md)")
             },
             async (params) => {
@@ -454,13 +526,10 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
 
                 try {
                     const response = await this.apiClient.listExperiments({
-                        // Basic query parameters
                         search: params.search,
                         sort: params.sort,
                         page: params.page,
                         items: params.items || 10,
-                        
-                        // Filter parameters
                         state: params.state,
                         significance: params.significance,
                         owners: params.owners,
@@ -469,14 +538,10 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                         templates: params.templates,
                         applications: params.applications,
                         unit_types: params.unit_types,
-                        
-                        // Range filters
                         impact: params.impact,
                         created_at: params.created_at,
                         updated_at: params.updated_at,
                         full_on_at: params.full_on_at,
-                        
-                        // Boolean filters
                         sample_ratio_mismatch: params.sample_ratio_mismatch,
                         cleanup_needed: params.cleanup_needed,
                         audience_mismatch: params.audience_mismatch,
@@ -486,12 +551,8 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                         assignment_conflict: params.assignment_conflict,
                         metric_threshold_reached: params.metric_threshold_reached,
                         previews: params.previews,
-                        
-                        // String filters
                         analysis_type: params.analysis_type,
                         type: params.type,
-                        
-                        // Number filters
                         iterations: params.iterations
                     });
 
@@ -499,25 +560,23 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                         return {
                             content: [{
                                 type: "text",
-                                text: `❌ API request failed: ${response.status} ${response.statusText}`
+                                text: `❌ API request failed: ${response.errors?.join(', ') || 'Unknown error'}`
                             }]
                         };
                     }
 
                     const experiments = response.data?.experiments || [];
                     const format = params.format || 'md';
-                    
-                    // Get the base URL without /v1 suffix for generating links
+
                     const baseUrl = this.props.absmartly_endpoint.replace(/\/v1\/?$/, '');
-                    
+
                     if (format === 'json') {
-                        // Add link field to each experiment
                         const experimentsWithLinks = experiments.map((exp: any) => ({
                             ...exp,
                             link: `${baseUrl}/experiments/${exp.id}`
                         }));
-                        
-                        // Format the response with full experiment data including links
+
+
                         return {
                             content: [{
                                 type: "text",
@@ -530,9 +589,8 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                             }]
                         };
                     } else {
-                        // Format as markdown
                         let markdown = `# Experiments (${experiments.length} of ${response.data?.total || experiments.length})\n\n`;
-                        
+
                         if (experiments.length === 0) {
                             markdown += '*No experiments found matching your criteria.*\n';
                         } else {
@@ -540,18 +598,17 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                                 this.formatExperimentAsMarkdown(exp, baseUrl)
                             ).join('\n');
                         }
-                        
-                        // Add pagination info if there are more pages
+
                         const currentPage = response.data?.page || 1;
                         const totalPages = Math.ceil((response.data?.total || experiments.length) / (params.items || 10));
-                        
+
                         if (totalPages > 1) {
                             markdown += `\n\n📄 Page ${currentPage} of ${totalPages}`;
                             if (currentPage < totalPages) {
                                 markdown += ` (use \`page: ${currentPage + 1}\` to see more)`;
                             }
                         }
-                        
+
                         return {
                             content: [{
                                 type: "text",
@@ -570,47 +627,60 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             }
         );
 
-        // List users tool
         this.server.tool(
             "list_users",
-            "List all users (cached from initialization). Returns id, name, and email for each user.",
+            "List users. Returns id, name, and email for each user.",
             {
-                search: z.string().optional().describe("Search term to filter users. Searches in full name and email. Use the complete name for best results (e.g., 'Cal Courtney' not just 'Cal')")
+                search: z.string().optional().describe("Search term to filter users. Searches in full name and email. Use the complete name for best results (e.g., 'Cal Courtney' not just 'Cal')"),
+                sort: z.string().optional().describe("Sort field (e.g., created_at)"),
+                items: z.number().optional().describe("Number of items per page (default: 1500)"),
+                page: z.number().optional().describe("Page number (default: 1)")
             },
             async (params) => {
+                if (params.items !== undefined || params.page !== undefined || params.sort !== undefined) {
+                    const apiParams: Record<string, unknown> = {};
+                    if (params.items !== undefined) apiParams.items = params.items;
+                    if (params.page !== undefined) apiParams.page = params.page;
+                    if (params.sort) apiParams.sort = params.sort;
+                    if (params.search) apiParams.search = params.search;
+                    const response = await this.apiClient!.listUsers(apiParams);
+                    if (!response.ok) {
+                        return { content: [{ type: "text", text: `Error: ${JSON.stringify(response.errors)}` }] };
+                    }
+                    const data = response.data as any;
+                    const users = (data.users || []).map((u: any) => ({ id: u.id, name: u.name, email: u.description || u.email }));
+                    return { content: [{ type: "text", text: JSON.stringify({ total: data.total || users.length, page: data.page, items: data.items, users }, null, 2) }] };
+                }
+
                 let users = this.users || [];
-                
+
                 if (params.search) {
                     const searchTerm = params.search.toLowerCase().trim();
                     const searchWords = searchTerm.split(/\s+/);
-                    
+
                     users = users.filter(user => {
                         const userName = user.name.toLowerCase();
                         const userEmail = (user.description || '').toLowerCase();
-                        
-                        // Check if the search term matches the full name or email
+
                         if (userName.includes(searchTerm) || userEmail.includes(searchTerm)) {
                             return true;
                         }
-                        
-                        // Check if all search words are found in the name (for split searches like "cal" + "courtney")
+
                         if (searchWords.length > 1) {
                             return searchWords.every(word => userName.includes(word));
                         }
-                        
-                        // For single word searches, also check first/last name separately
+
                         const nameParts = userName.split(/\s+/);
                         return nameParts.some((part: string) => part.startsWith(searchTerm));
                     });
                 }
-                
-                // Format the response with clear field names
+
                 const formattedUsers = users.map(user => ({
                     id: user.id,
                     name: user.name,
                     email: user.description
                 }));
-                
+
                 return {
                     content: [{
                         type: "text",
@@ -623,23 +693,40 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             }
         );
 
-        // List teams tool
         this.server.tool(
             "list_teams",
-            "List all teams (cached from initialization)",
+            "List teams",
             {
-                search: z.string().optional().describe("Optional search term to filter teams by name")
+                search: z.string().optional().describe("Optional search term to filter teams by name"),
+                sort: z.string().optional().describe("Sort field (e.g., created_at)"),
+                items: z.number().optional().describe("Number of items per page (default: 1500)"),
+                page: z.number().optional().describe("Page number (default: 1)")
             },
             async (params) => {
+                if (params.items !== undefined || params.page !== undefined || params.sort !== undefined) {
+                    const apiParams: Record<string, unknown> = {};
+                    if (params.items !== undefined) apiParams.items = params.items;
+                    if (params.page !== undefined) apiParams.page = params.page;
+                    if (params.sort) apiParams.sort = params.sort;
+                    if (params.search) apiParams.search = params.search;
+                    const response = await this.apiClient!.listTeams(apiParams);
+                    if (!response.ok) {
+                        return { content: [{ type: "text", text: `Error: ${JSON.stringify(response.errors)}` }] };
+                    }
+                    const data = response.data as any;
+                    const teams = data.teams || [];
+                    return { content: [{ type: "text", text: JSON.stringify({ total: data.total || teams.length, page: data.page, items: data.items, teams }, null, 2) }] };
+                }
+
                 let teams = this.teams || [];
-                
+
                 if (params.search) {
                     const searchTerm = params.search.toLowerCase();
-                    teams = teams.filter(team => 
+                    teams = teams.filter(team =>
                         team.name.toLowerCase().includes(searchTerm)
                     );
                 }
-                
+
                 return {
                     content: [{
                         type: "text",
@@ -652,23 +739,40 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             }
         );
 
-        // List applications tool
         this.server.tool(
             "list_applications",
-            "List all applications (cached from initialization)",
+            "List applications",
             {
-                search: z.string().optional().describe("Optional search term to filter applications by name")
+                search: z.string().optional().describe("Optional search term to filter applications by name"),
+                sort: z.string().optional().describe("Sort field (e.g., created_at)"),
+                items: z.number().optional().describe("Number of items per page (default: 1500)"),
+                page: z.number().optional().describe("Page number (default: 1)")
             },
             async (params) => {
+                if (params.items !== undefined || params.page !== undefined || params.sort !== undefined) {
+                    const apiParams: Record<string, unknown> = {};
+                    if (params.items !== undefined) apiParams.items = params.items;
+                    if (params.page !== undefined) apiParams.page = params.page;
+                    if (params.sort) apiParams.sort = params.sort;
+                    if (params.search) apiParams.search = params.search;
+                    const response = await this.apiClient!.listApplications(apiParams);
+                    if (!response.ok) {
+                        return { content: [{ type: "text", text: `Error: ${JSON.stringify(response.errors)}` }] };
+                    }
+                    const data = response.data as any;
+                    const applications = data.applications || [];
+                    return { content: [{ type: "text", text: JSON.stringify({ total: data.total || applications.length, page: data.page, items: data.items, applications }, null, 2) }] };
+                }
+
                 let applications = this.applications || [];
-                
+
                 if (params.search) {
                     const searchTerm = params.search.toLowerCase();
-                    applications = applications.filter(app => 
+                    applications = applications.filter(app =>
                         app.name.toLowerCase().includes(searchTerm)
                     );
                 }
-                
+
                 return {
                     content: [{
                         type: "text",
@@ -681,23 +785,40 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             }
         );
 
-        // List unit types tool
         this.server.tool(
             "list_unit_types",
-            "List all unit types (cached from initialization)",
+            "List unit types",
             {
-                search: z.string().optional().describe("Optional search term to filter unit types by name")
+                search: z.string().optional().describe("Optional search term to filter unit types by name"),
+                sort: z.string().optional().describe("Sort field (e.g., created_at)"),
+                items: z.number().optional().describe("Number of items per page (default: 1500)"),
+                page: z.number().optional().describe("Page number (default: 1)")
             },
             async (params) => {
+                if (params.items !== undefined || params.page !== undefined || params.sort !== undefined) {
+                    const apiParams: Record<string, unknown> = {};
+                    if (params.items !== undefined) apiParams.items = params.items;
+                    if (params.page !== undefined) apiParams.page = params.page;
+                    if (params.sort) apiParams.sort = params.sort;
+                    if (params.search) apiParams.search = params.search;
+                    const response = await this.apiClient!.listUnitTypes(apiParams);
+                    if (!response.ok) {
+                        return { content: [{ type: "text", text: `Error: ${JSON.stringify(response.errors)}` }] };
+                    }
+                    const data = response.data as any;
+                    const unit_types = data.unit_types || [];
+                    return { content: [{ type: "text", text: JSON.stringify({ total: data.total || unit_types.length, page: data.page, items: data.items, unit_types }, null, 2) }] };
+                }
+
                 let unitTypes = this.unitTypes || [];
-                
+
                 if (params.search) {
                     const searchTerm = params.search.toLowerCase();
-                    unitTypes = unitTypes.filter(unitType => 
+                    unitTypes = unitTypes.filter(unitType =>
                         unitType.name.toLowerCase().includes(searchTerm)
                     );
                 }
-                
+
                 return {
                     content: [{
                         type: "text",
@@ -710,23 +831,41 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             }
         );
 
-        // List tags tool
         this.server.tool(
             "list_tags",
-            "List all experiment tags (cached from initialization)",
+            "List experiment tags",
             {
-                search: z.string().optional().describe("Optional search term to filter tags by name")
+                search: z.string().optional().describe("Optional search term to filter tags by name"),
+                sort: z.string().optional().describe("Sort field (e.g., tag)"),
+                items: z.number().optional().describe("Number of items per page (default: 1500)"),
+                page: z.number().optional().describe("Page number (default: 1)")
             },
             async (params) => {
+                if (params.items !== undefined || params.page !== undefined || params.sort !== undefined) {
+                    const apiParams: Record<string, unknown> = {};
+                    if (params.items !== undefined) apiParams.items = params.items;
+                    if (params.page !== undefined) apiParams.page = params.page;
+                    if (params.sort) apiParams.sort = params.sort;
+                    if (params.search) apiParams.search = params.search;
+                    const response = await this.apiClient!.listExperimentTags(apiParams);
+                    if (!response.ok) {
+                        return { content: [{ type: "text", text: `Error: ${JSON.stringify(response.errors)}` }] };
+                    }
+                    const data = response.data as any;
+                    const tags = data.experiment_tags || data.items || [];
+                    const metadata = data.metadata || {};
+                    return { content: [{ type: "text", text: JSON.stringify({ total: metadata.total || tags.length, page: metadata.page, items: metadata.items, tags }, null, 2) }] };
+                }
+
                 let tags = this.experimentTags || [];
-                
+
                 if (params.search) {
                     const searchTerm = params.search.toLowerCase();
-                    tags = tags.filter(tag => 
+                    tags = tags.filter(tag =>
                         tag.name.toLowerCase().includes(searchTerm)
                     );
                 }
-                
+
                 return {
                     content: [{
                         type: "text",
@@ -739,7 +878,100 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             }
         );
 
-        // Create experiment tool
+        this.server.tool(
+            "list_metrics",
+            "List metrics. Use to find metric IDs for primary_metric_id when creating experiments.",
+            {
+                search: z.string().optional().describe("Optional search term to filter metrics by name"),
+                sort: z.string().optional().describe("Sort field (e.g., created_at)"),
+                items: z.number().optional().describe("Number of items per page (default: 1500)"),
+                page: z.number().optional().describe("Page number (default: 1)")
+            },
+            async (params) => {
+                if (params.items !== undefined || params.page !== undefined || params.sort !== undefined) {
+                    const apiParams: Record<string, unknown> = {};
+                    if (params.items !== undefined) apiParams.items = params.items;
+                    if (params.page !== undefined) apiParams.page = params.page;
+                    if (params.sort) apiParams.sort = params.sort;
+                    if (params.search) apiParams.search = params.search;
+                    const response = await this.apiClient!.listMetrics(apiParams);
+                    if (!response.ok) {
+                        return { content: [{ type: "text", text: `Error: ${JSON.stringify(response.errors)}` }] };
+                    }
+                    const data = response.data as any;
+                    const metrics = data.metrics || [];
+                    return { content: [{ type: "text", text: JSON.stringify({ total: data.total || metrics.length, page: data.page, items: data.items, metrics }, null, 2) }] };
+                }
+
+                let metrics = this.metrics || [];
+
+                if (params.search) {
+                    const searchTerm = params.search.toLowerCase();
+                    metrics = metrics.filter(m =>
+                        m.name.toLowerCase().includes(searchTerm)
+                    );
+                }
+
+                return {
+                    content: [{
+                        type: "text",
+                        text: JSON.stringify({
+                            total: metrics.length,
+                            metrics: metrics
+                        }, null, 2)
+                    }]
+                };
+            }
+        );
+
+        this.server.tool(
+            "list_goals",
+            "List goals",
+            {
+                search: z.string().optional().describe("Optional search term to filter goals by name"),
+                sort: z.string().optional().describe("Sort field (e.g., created_at)"),
+                items: z.number().optional().describe("Number of items per page (default: 1500)"),
+                page: z.number().optional().describe("Page number (default: 1)")
+            },
+            async (params) => {
+                if (params.items !== undefined || params.page !== undefined || params.sort !== undefined) {
+                    const apiParams: Record<string, unknown> = {};
+                    if (params.items !== undefined) apiParams.items = params.items;
+                    if (params.page !== undefined) apiParams.page = params.page;
+                    if (params.sort) apiParams.sort = params.sort;
+                    if (params.search) apiParams.search = params.search;
+                    const response = await this.apiClient!.listGoals(apiParams);
+                    if (!response.ok) {
+                        return { content: [{ type: "text", text: `Error: ${JSON.stringify(response.errors)}` }] };
+                    }
+                    const data = response.data as any;
+                    const goals = data.goals || [];
+                    return { content: [{ type: "text", text: JSON.stringify({ total: data.total || goals.length, page: data.page, items: data.items, goals }, null, 2) }] };
+                }
+
+                let goals = this.goals || [];
+
+                if (params.search) {
+                    const searchTerm = params.search.toLowerCase();
+                    goals = goals.filter(g =>
+                        g.name.toLowerCase().includes(searchTerm)
+                    );
+                }
+
+                return {
+                    content: [{
+                        type: "text",
+                        text: JSON.stringify({
+                            total: goals.length,
+                            goals: goals
+                        }, null, 2)
+                    }]
+                };
+            }
+        );
+
+        const customFieldSchema = this.buildCustomFieldZodSchema();
+
         this.server.tool(
             "create_experiment",
             "Create a new A/B test experiment with variants and configurations. Supports DOM changes for visual experiments like button styling, layout modifications, etc.",
@@ -758,9 +990,11 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                     config: z.string().describe("JSON string with variant configuration. For DOM changes use: {\"dom_changes\":[{\"selector\":\"button\",\"css\":{\"border-radius\":\"8px\",\"background-color\":\"#007bff\"}}]}"),
                     percentage: z.number().optional().describe("Traffic percentage for this variant")
                 })).describe("Array of experiment variants with DOM change configurations"),
+                primary_metric_id: z.number().optional().describe("Primary metric ID (use list_metrics to find IDs)"),
                 tag_ids: z.array(z.number()).optional().describe("Tag IDs to assign (use list_tags to find IDs)"),
-                owner_user_id: z.number().optional().describe("Owner user ID (use list_users to find IDs)"),
-                team_id: z.number().optional().describe("Team ID (use list_teams to find IDs)")
+                owner_user_id: z.number().optional().describe("Owner user ID (defaults to logged-in user, use list_users to find IDs)"),
+                team_id: z.number().optional().describe("Team ID (use list_teams to find IDs)"),
+                ...customFieldSchema
             },
             async (params) => {
                 if (!this.apiClient) {
@@ -773,47 +1007,19 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 }
 
                 try {
-                    // Calculate percentages string from variants if provided
                     let percentages = params.variants.map(v => v.percentage || 50).join('/');
                     if (!params.variants.some(v => v.percentage)) {
-                        // Default equal split
                         const perVariant = Math.floor(100 / params.variants.length);
                         const remainder = 100 - (perVariant * params.variants.length);
-                        percentages = params.variants.map((v, i) => 
+                        percentages = params.variants.map((_v, i) =>
                             i === 0 ? perVariant + remainder : perVariant
                         ).join('/');
                     }
 
-                    // Add required custom fields based on the API response errors
-                    const customFieldValues = [
-                        {
-                            experiment_custom_section_field_id: 1, // Hypothesis
-                            type: 'text',
-                            value: params.description || `Testing that ${params.name} will improve user experience and engagement`
-                        },
-                        {
-                            experiment_custom_section_field_id: 2, // Purpose
-                            type: 'text',
-                            value: `The purpose of this experiment is to test ${params.name} and measure its impact on user behavior`
-                        },
-                        {
-                            experiment_custom_section_field_id: 3, // Prediction
-                            type: 'text',
-                            value: `We predict that ${params.name} will result in a measurable improvement in key metrics`
-                        },
-                        {
-                            experiment_custom_section_field_id: 4, // Implementation Details
-                            type: 'text',
-                            value: `Implementation of ${params.name} experiment with variant configurations`
-                        },
-                        {
-                            experiment_custom_section_field_id: 7, // Availability Rules (JSON)
-                            type: 'json',
-                            value: '{"enabled": true, "allowed_environments": ["production"]}'
-                        }
-                    ];
+                    const customFieldValues = this.buildCustomFieldValuesFromParams(params);
+                    const ownerId = params.owner_user_id || this.currentUserId;
 
-                    const experimentData = {
+                    const experimentData: Record<string, any> = {
                         name: params.name,
                         display_name: params.display_name || params.name,
                         iteration: 1,
@@ -836,54 +1042,49 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                         unit_type: {
                             unit_type_id: params.unit_type_id
                         },
-                        primary_metric: {
-                            metric_id: 4
-                        },
                         audience: '{"filter":[{"and":[]}]}',
                         audience_strict: true,
                         minimum_detectable_effect: null,
                         analysis_type: 'group_sequential',
-                        baseline_primary_metric_mean: '79',
-                        baseline_primary_metric_stdev: '30',
-                        baseline_participants_per_day: '1428',
-                        required_alpha: '0.1',
-                        required_power: '0.8',
+                        baseline_primary_metric_mean: DEFAULT_BASELINE_METRIC_MEAN,
+                        baseline_primary_metric_stdev: DEFAULT_BASELINE_METRIC_STDEV,
+                        baseline_participants_per_day: DEFAULT_BASELINE_PARTICIPANTS_PER_DAY,
+                        required_alpha: DEFAULT_REQUIRED_ALPHA,
+                        required_power: DEFAULT_REQUIRED_POWER,
                         group_sequential_futility_type: 'binding',
                         group_sequential_analysis_count: null,
                         group_sequential_min_analysis_interval: '1d',
                         group_sequential_first_analysis_interval: '7d',
                         group_sequential_max_duration_interval: '4w',
-                        template_iteration: null,
-                        template_description: null,
-                        parent_experiment_id: 238,
-                        parent_experiment_iteration: 2,
                         applications: [{
                             application_id: params.application_id,
                             application_version: '0'
                         }],
                         variants: params.variants,
                         variant_screenshots: [],
-                        owners: [{
-                            user_id: 3
-                        }],
+                        owners: ownerId ? [{ user_id: ownerId }] : [],
                         secondary_metrics: [],
                         teams: [],
                         experiment_tags: [],
                         custom_section_field_values: customFieldValues
                     };
 
-                    console.log('🚀 Creating experiment with data:', JSON.stringify(experimentData, null, 2));
-                    
+                    if (params.primary_metric_id) {
+                        experimentData.primary_metric = { metric_id: params.primary_metric_id };
+                    }
+
+                    debug('Creating experiment with data:', JSON.stringify(experimentData, null, 2));
+
                     const response = await this.apiClient.createExperiment(experimentData);
-                    console.log('📝 API response:', JSON.stringify(response, null, 2));
-                    
+                    debug('API response:', JSON.stringify(response, null, 2));
+
                     if (!response.ok) {
                         const errorDetails = {
                             errors: response.errors,
                             details: response.details,
                             payload: experimentData
                         };
-                        console.log('❌ Create experiment failed:', JSON.stringify(errorDetails, null, 2));
+                        debug('Create experiment failed:', JSON.stringify(errorDetails, null, 2));
                         throw new Error(response.errors?.join(', ') || 'Failed to create experiment');
                     }
 
@@ -905,7 +1106,6 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             }
         );
 
-        // Create feature flag tool
         this.server.tool(
             "create_feature_flag",
             "Create a feature flag (experiment with type='feature' and simple on/off variants)",
@@ -915,9 +1115,11 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 application_id: z.number().describe("Application ID (use list_applications to find IDs)"),
                 feature_enabled_percentage: z.number().optional().describe("Percentage to enable feature (0-100, default: 50)"),
                 description: z.string().optional().describe("Feature flag description"),
+                primary_metric_id: z.number().optional().describe("Primary metric ID (use list_metrics to find IDs)"),
                 tag_ids: z.array(z.number()).optional().describe("Tag IDs to assign (use list_tags to find IDs)"),
-                owner_user_id: z.number().optional().describe("Owner user ID (use list_users to find IDs)"),
-                team_id: z.number().optional().describe("Team ID (use list_teams to find IDs)")
+                owner_user_id: z.number().optional().describe("Owner user ID (defaults to logged-in user, use list_users to find IDs)"),
+                team_id: z.number().optional().describe("Team ID (use list_teams to find IDs)"),
+                ...customFieldSchema
             },
             async (params) => {
                 if (!this.apiClient) {
@@ -931,32 +1133,10 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
 
                 try {
                     const enabledPct = params.feature_enabled_percentage ?? 50;
-                    
-                    // Add required custom fields for feature flags
-                    const customFieldValues = [
-                        {
-                            experiment_custom_section_field_id: 75, // feature required field
-                            type: 'text',
-                            value: `Feature flag for ${params.name}`
-                        },
-                        {
-                            experiment_custom_section_field_id: 1, // Hypothesis
-                            type: 'text',
-                            value: `Feature flag test: ${params.name} will improve user experience with button styling`
-                        },
-                        {
-                            experiment_custom_section_field_id: 2, // Purpose
-                            type: 'text',
-                            value: `Testing the impact of rounded button corners on user engagement`
-                        },
-                        {
-                            experiment_custom_section_field_id: 3, // Prediction
-                            type: 'text',
-                            value: `Enabling ${params.name} will increase user engagement by improving visual appeal`
-                        }
-                    ];
-                    
-                    const experimentData = {
+                    const customFieldValues = this.buildCustomFieldValuesFromParams(params);
+                    const ownerId = params.owner_user_id || this.currentUserId;
+
+                    const experimentData: Record<string, any> = {
                         name: params.name,
                         display_name: params.name,
                         iteration: 1,
@@ -979,27 +1159,20 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                         unit_type: {
                             unit_type_id: params.unit_type_id
                         },
-                        primary_metric: {
-                            metric_id: 4
-                        },
                         audience: '{"filter":[{"and":[]}]}',
                         audience_strict: true,
                         minimum_detectable_effect: null,
                         analysis_type: 'group_sequential',
-                        baseline_primary_metric_mean: '79',
-                        baseline_primary_metric_stdev: '30',
-                        baseline_participants_per_day: '1428',
-                        required_alpha: '0.1',
-                        required_power: '0.8',
+                        baseline_primary_metric_mean: DEFAULT_BASELINE_METRIC_MEAN,
+                        baseline_primary_metric_stdev: DEFAULT_BASELINE_METRIC_STDEV,
+                        baseline_participants_per_day: DEFAULT_BASELINE_PARTICIPANTS_PER_DAY,
+                        required_alpha: DEFAULT_REQUIRED_ALPHA,
+                        required_power: DEFAULT_REQUIRED_POWER,
                         group_sequential_futility_type: 'binding',
                         group_sequential_analysis_count: null,
                         group_sequential_min_analysis_interval: '1d',
                         group_sequential_first_analysis_interval: '7d',
                         group_sequential_max_duration_interval: '4w',
-                        template_iteration: null,
-                        template_description: null,
-                        parent_experiment_id: 238,
-                        parent_experiment_iteration: 2,
                         applications: [{
                             application_id: params.application_id,
                             application_version: '0'
@@ -1013,31 +1186,33 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                             {
                                 variant: 1,
                                 name: 'Treatment (Feature On)',
-                                config: '{"feature_enabled": true, "dom_changes":[{"selector":"button","css":{"border-radius":"8px","background-color":"#007bff"}}]}'
+                                config: '{"feature_enabled": true}'
                             }
                         ],
                         variant_screenshots: [],
-                        owners: [{
-                            user_id: 3
-                        }],
+                        owners: ownerId ? [{ user_id: ownerId }] : [],
                         secondary_metrics: [],
                         teams: [],
                         experiment_tags: [],
                         custom_section_field_values: customFieldValues
                     };
 
-                    console.log('🚀 Creating feature flag with data:', JSON.stringify(experimentData, null, 2));
-                    
+                    if (params.primary_metric_id) {
+                        experimentData.primary_metric = { metric_id: params.primary_metric_id };
+                    }
+
+                    debug('Creating feature flag with data:', JSON.stringify(experimentData, null, 2));
+
                     const response = await this.apiClient.createExperiment(experimentData);
-                    console.log('📝 API response:', JSON.stringify(response, null, 2));
-                    
+                    debug('API response:', JSON.stringify(response, null, 2));
+
                     if (!response.ok) {
                         const errorDetails = {
                             errors: response.errors,
                             details: response.details,
                             payload: experimentData
                         };
-                        console.log('❌ Create experiment failed:', JSON.stringify(errorDetails, null, 2));
+                        debug('Create feature flag failed:', JSON.stringify(errorDetails, null, 2));
                         throw new Error(`Failed to create feature flag: ${response.errors?.join(', ') || 'Unknown error'}`);
                     }
 
@@ -1059,13 +1234,13 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             }
         );
 
-        // Update experiment tool
         this.server.tool(
             "update_experiment",
             "Update experiment state or configuration (start, stop, archive, etc)",
             {
                 id: z.number().describe("Experiment ID"),
-                action: z.enum(['start', 'stop', 'archive', 'ready', 'full_on']).optional().describe("State change action"),
+                action: z.enum(['start', 'stop', 'archive', 'ready', 'full_on', 'development', 'restart']).optional().describe("State change action"),
+                full_on_variant: z.number().optional().describe("Variant number for full_on action (>= 1, required when action is full_on)"),
                 name: z.string().optional().describe("Update experiment name"),
                 display_name: z.string().optional().describe("Update display name"),
                 description: z.string().optional().describe("Update description"),
@@ -1085,7 +1260,6 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 }
 
                 try {
-                    // Handle state change actions
                     if (params.action) {
                         let response;
                         switch (params.action) {
@@ -1102,16 +1276,24 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                                 response = await this.apiClient.updateExperiment(params.id, { state: 'ready' });
                                 break;
                             case 'full_on':
-                                response = await this.apiClient.setExperimentFullOn(params.id);
+                                response = await this.apiClient.setExperimentFullOn(params.id, {
+                                    full_on_variant: params.full_on_variant || 1
+                                });
+                                break;
+                            case 'development':
+                                response = await this.apiClient.setExperimentToDevelopment(params.id);
+                                break;
+                            case 'restart':
+                                response = await this.apiClient.restartExperiment(params.id);
                                 break;
                             default:
                                 throw new Error(`Unknown action: ${params.action}`);
                         }
-                        
+
                         if (!response.ok) {
                             throw new Error(response.errors?.join(', ') || `Failed to ${params.action} experiment`);
                         }
-                        
+
                         return {
                             content: [{
                                 type: "text",
@@ -1122,8 +1304,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                             }]
                         };
                     }
-                    
-                    // Handle general updates
+
                     const updateData: any = {};
                     if (params.name !== undefined) updateData.name = params.name;
                     if (params.display_name !== undefined) updateData.display_name = params.display_name;
@@ -1132,9 +1313,9 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                     if (params.tag_ids !== undefined) updateData.tag_ids = params.tag_ids;
                     if (params.owner_user_id !== undefined) updateData.owner_user_id = params.owner_user_id;
                     if (params.team_id !== undefined) updateData.team_id = params.team_id;
-                    
+
                     const response = await this.apiClient.updateExperiment(params.id, updateData);
-                    
+
                     if (!response.ok) {
                         throw new Error(response.errors?.join(', ') || 'Failed to update experiment');
                     }
@@ -1156,7 +1337,6 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             }
         );
 
-        // Create variant tool
         this.server.tool(
             "create_variant",
             "Add a new variant to an existing experiment",
@@ -1177,64 +1357,56 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 }
 
                 try {
-                    // First get the experiment to see current variants
                     const expResponse = await this.apiClient.getExperiment(params.experiment_id);
                     if (!expResponse.ok) {
                         throw new Error('Failed to fetch experiment');
                     }
-                    
+
                     const experiment = expResponse.data;
                     const currentVariants = experiment.variants || [];
                     const nextVariantIndex = currentVariants.length;
-                    
-                    // Add new variant
+
                     const newVariant = {
                         variant: nextVariantIndex,
                         name: params.name,
                         config: params.config
                     };
-                    
+
                     const updatedVariants = [...currentVariants, newVariant];
-                    
-                    // Update percentages if provided
+
                     let percentages = experiment.percentages;
                     if (params.percentage !== undefined) {
-                        // Recalculate all percentages
                         const variantPercentages = currentVariants.map((v: any) => {
                             const pctStr = experiment.percentages.split('/');
                             return parseInt(pctStr[v.variant] || '0');
                         });
                         variantPercentages.push(params.percentage);
-                        
-                        // Normalize to 100%
-                        const total = variantPercentages.reduce((a, b) => a + b, 0);
+
+                        const total = variantPercentages.reduce((a: number, b: number) => a + b, 0);
                         if (total !== 100) {
-                            const normalized = variantPercentages.map(p => Math.round((p / total) * 100));
-                            // Adjust for rounding errors
-                            const diff = 100 - normalized.reduce((a, b) => a + b, 0);
+                            const normalized = variantPercentages.map((p: number) => Math.round((p / total) * 100));
+                            const diff = 100 - normalized.reduce((a: number, b: number) => a + b, 0);
                             normalized[0] += diff;
                             percentages = normalized.join('/');
                         } else {
                             percentages = variantPercentages.join('/');
                         }
                     } else {
-                        // Equal split
                         const perVariant = Math.floor(100 / updatedVariants.length);
                         const remainder = 100 - (perVariant * updatedVariants.length);
                         percentages = updatedVariants.map((v, i) => 
                             i === 0 ? perVariant + remainder : perVariant
                         ).join('/');
                     }
-                    
-                    // Update experiment
+
                     const updateData = {
                         variants: updatedVariants,
                         nr_variants: updatedVariants.length,
                         percentages: percentages
                     };
-                    
+
                     const response = await this.apiClient.updateExperiment(params.experiment_id, updateData);
-                    
+
                     if (!response.ok) {
                         throw new Error(response.errors?.join(', ') || 'Failed to add variant');
                     }
@@ -1260,7 +1432,6 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             }
         );
 
-        // Get experiment tool
         this.server.tool(
             "get_experiment",
             "Get detailed information about a specific experiment",
@@ -1279,7 +1450,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
 
                 try {
                     const response = await this.apiClient.getExperiment(params.id);
-                    
+
                     if (!response.ok) {
                         throw new Error(response.errors?.join(', ') || 'Failed to fetch experiment');
                     }
@@ -1301,7 +1472,6 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             }
         );
 
-        // Add more tools here as needed...
     }
 
     private async setupResources() {
@@ -1331,33 +1501,31 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
     }
 }
 
-// Helper function to detect API keys
 function detectApiKey(request: Request): { apiKey: string | null, endpoint: string | null } {
     const url = new URL(request.url);
     const authHeader = request.headers.get("Authorization");
 
-    // Check query parameter first (support both "api_key" and "apikey")
+    const endpointFromPath = extractEndpointFromPath(url.pathname, '/sse');
+
     const apiKeyFromQuery = url.searchParams.get("api_key") || url.searchParams.get("apikey");
     if (apiKeyFromQuery) {
-        const endpoint = url.searchParams.get("absmartly-endpoint") || 
-                        request.headers.get("x-absmartly-endpoint") || 
-                        "https://sandbox.absmartly.com";
+        const endpoint = url.searchParams.get("absmartly-endpoint") ||
+                        request.headers.get("x-absmartly-endpoint") ||
+                        endpointFromPath;
         return { apiKey: apiKeyFromQuery, endpoint };
     }
 
-    // Check Authorization header - but only for API key formats, not OAuth Bearer tokens
     if (authHeader) {
         const parts = authHeader.trim().split(/\s+/);
-        
-        // Skip OAuth Bearer tokens - these should go through the OAuth provider
+
         if (parts[0] === "Bearer" && parts.length === 2) {
-            // This is likely an OAuth Bearer token, not an API key
             return { apiKey: null, endpoint: null };
         }
-        
+
         let apiKey = "";
-        let absmartlyEndpoint = url.searchParams.get("absmartly-endpoint") || 
-                                request.headers.get("x-absmartly-endpoint") || 
+        let absmartlyEndpoint = url.searchParams.get("absmartly-endpoint") ||
+                                request.headers.get("x-absmartly-endpoint") ||
+                                endpointFromPath ||
                                 "";
 
         let startIndex = 0;
@@ -1388,13 +1556,10 @@ function detectApiKey(request: Request): { apiKey: string | null, endpoint: stri
     return { apiKey: null, endpoint: null };
 }
 
-// Create single MCP handler to ensure session consistency
 const baseMcpHandler = ABsmartlyMCP.mount("/sse");
 
-// Create custom OAuth handler instance
 const oauthHandler = new ABsmartlyOAuthHandler();
 
-// Wrap the OAuth handler to add debugging
 const debugOAuthHandler = {
     fetch: async (request: Request, env: any, ctx: any) => {
         debug(`🔍 debugOAuthHandler: ${request.method} ${new URL(request.url).pathname}`);
@@ -1404,9 +1569,7 @@ const debugOAuthHandler = {
     }
 };
 
-// Create OAuth provider for OAuth flow endpoints only
 const oauthProvider = new OAuthProvider({
-    // API handlers for protected endpoints
     apiHandlers: {
         "/sse": baseMcpHandler
     },
@@ -1416,10 +1579,8 @@ const oauthProvider = new OAuthProvider({
     accessTokenTTL: 3600,
     scopesSupported: ["api:read", "api:write"],
     disallowPublicClientRegistration: false,
-
-    // Client lookup function
-    async clientLookup(clientId: string, env: any) {
-        // Check if client exists in KV storage
+    defaultHandler: oauthHandler,
+    clientLookup: async (clientId: string, env: any) => {
         if (env.OAUTH_KV) {
             const clientData = await env.OAUTH_KV.get(`client:${clientId}`);
             if (clientData) {
@@ -1434,17 +1595,15 @@ const oauthProvider = new OAuthProvider({
             }
         }
 
-        // Auto-register Claude Desktop clients as public clients
         if (clientId.startsWith("claude-mcp-") || clientId.startsWith("C0")) {
             debug("Auto-registering public client:", clientId);
             const newClient = {
                 clientId: clientId,
                 redirectUris: ["https://claude.ai/api/mcp/auth_callback"],
                 clientName: "Claude Desktop",
-                tokenEndpointAuthMethod: 'none' // Public client
+                tokenEndpointAuthMethod: 'none'
             };
 
-            // Store in KV for future lookups
             if (env.OAUTH_KV) {
                 await env.OAUTH_KV.put(`client:${clientId}`, JSON.stringify({
                     ...newClient,
@@ -1457,39 +1616,45 @@ const oauthProvider = new OAuthProvider({
 
         return null;
     },
+} as any);
 
-    // Use our custom OAuth handler as the default handler
-    defaultHandler: oauthHandler
-});
-
-// Main handler
 export default {
     async fetch(request: Request, env: any, ctx: any): Promise<Response> {
         const url = new URL(request.url);
-        
-        // Handle API key detection and session tracking
+
+        if (url.pathname === '/health') {
+            return new Response(JSON.stringify({
+                status: 'healthy',
+                service: 'absmartly-mcp',
+                version: MCP_VERSION,
+                timestamp: new Date().toISOString()
+            }), {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                }
+            });
+        }
+
         const authHeader = request.headers.get("Authorization");
-        debug(`🔍 Raw Authorization header: ${authHeader ? authHeader.substring(0, 100) + '...' : 'null'}`);
-        
+        debug(`Raw Authorization header: ${authHeader ? authHeader.substring(0, 100) + '...' : 'null'}`);
+
         const { apiKey, endpoint } = detectApiKey(request);
-        debug(`🔍 detectApiKey result: apiKey=${apiKey ? apiKey.substring(0, 30) + '...' : 'null'}, endpoint=${endpoint}`);
-        
-        // Create client fingerprint for session tracking
+        debug(`detectApiKey result: apiKey=${apiKey ? apiKey.substring(0, 30) + '...' : 'null'}, endpoint=${endpoint}`);
+
         const clientFingerprint = `${request.headers.get('CF-Connecting-IP') || 'unknown'}-${request.headers.get('User-Agent') || 'unknown'}`;
-        
-        // Store API key session in KV if using API key
+
         if (apiKey && env.OAUTH_KV) {
             await env.OAUTH_KV.put(`api_key_session:${clientFingerprint}`, 'active', {
                 expirationTtl: 300 // 5 minutes
             });
         }
-        
-        // Check for OAuth discovery endpoints and block them for API key users
+
         const isOAuthDiscoveryEndpoint = url.pathname === '/.well-known/oauth-authorization-server' || 
                                         url.pathname === '/.well-known/oauth-protected-resource' ||
                                         url.pathname.startsWith('/.well-known/oauth-authorization-server/') ||
                                         url.pathname.startsWith('/.well-known/oauth-protected-resource/');
-        
+
         if (env.OAUTH_KV && isOAuthDiscoveryEndpoint) {
             const apiKeySession = await env.OAUTH_KV.get(`api_key_session:${clientFingerprint}`);
             if (apiKeySession) {
@@ -1499,24 +1664,22 @@ export default {
                 }), { status: 404 });
             }
         }
-        
-        // Handle MCP SSE endpoint
+
         if (url.pathname.startsWith("/sse")) {
-            // Check if API key is detected
             if (apiKey) {
-                debug("🔑 API key detected, bypassing OAuth flow");
-                
+                debug("API key detected, bypassing OAuth flow");
+
                 try {
                     const apiClient = new ABsmartlyAPIClient(
                         apiKey,
                         endpoint || DEFAULT_ABSMARTLY_ENDPOINT,
                         'api-key'
                     );
-                    
+
                     const userResponse = await apiClient.getCurrentUser();
-                    
+
                     if (!userResponse.ok) {
-                        console.error("Failed to fetch user info:", userResponse.status);
+                        console.error("Failed to fetch user info:", userResponse.errors);
                         return new Response("Unauthorized", {
                             status: 401,
                             headers: {
@@ -1526,17 +1689,14 @@ export default {
                             },
                         });
                     }
-                    
-                    // Extract user information - handle nested user object
+
                     const userData = userResponse.data.user || userResponse.data;
                     const userId = userData.id?.toString() || userData.email;
-                    
-                    // Create props from user data
+
                     if (!userData.email) {
-                        console.error('❌ No email found in API response for API key authentication!');
-                        console.log('🔍 Full user data:', userData);
+                        debug('No email found in API response for API key authentication, user data:', userData);
                     }
-                    
+
                     const props: ABsmartlyProps = {
                         email: userData.email || "api-key-user",
                         name: `${userData.first_name || ''} ${userData.last_name || ''}`.trim() || userData.email || "API Key User",
@@ -1544,10 +1704,9 @@ export default {
                         absmartly_api_key: apiKey,
                         user_id: userId
                     };
-                    
-                    console.log(`✅ API key authenticated for user: ${props.email}`);
-                    
-                    // Store session in KV if available
+
+                    debug(`API key authenticated for user: ${props.email}`);
+
                     if (env.OAUTH_KV) {
                         const session = {
                             userId: userId,
@@ -1558,16 +1717,15 @@ export default {
                             createdAt: Date.now(),
                             expiresAt: Date.now() + (24 * 60 * 60 * 1000) // 24 hours
                         };
-                        
+
                         await env.OAUTH_KV.put(`session:${userId}`, JSON.stringify(session), {
                             expirationTtl: 86400 // 24 hours
                         });
                     }
-                    
-                    // Pass props to MCP handler
+
                     ctx.props = props;
                     return await baseMcpHandler.fetch(request, env, ctx);
-                    
+
                 } catch (error) {
                     console.error("Error during API key authentication:", error);
                     return new Response("Internal Server Error", {
@@ -1580,45 +1738,66 @@ export default {
                     });
                 }
             }
-            
-            // No API key detected - check for OAuth token
+
             const authHeader = request.headers.get("Authorization");
-            
-            // Manual 401 response for SSE endpoints without valid auth to trigger OAuth flow
+
             if (!authHeader || !authHeader.startsWith("Bearer ")) {
-                debug("⚠️ No valid Authorization header, returning 401 to trigger OAuth flow");
-                
-                // Store the requested endpoint in KV for the OAuth flow
-                const requestedEndpoint = url.searchParams.get('absmartly-endpoint') || endpoint;
+                debug("No valid Authorization header, returning 401 to trigger OAuth flow");
+
+                const requestedEndpoint = url.searchParams.get('absmartly-endpoint') ||
+                    request.headers.get('x-absmartly-endpoint') ||
+                    extractEndpointFromPath(url.pathname, '/sse') ||
+                    endpoint;
                 if (requestedEndpoint && env.OAUTH_KV) {
-                    debug(`📍 Storing requested endpoint for OAuth flow: ${requestedEndpoint}`);
                     await env.OAUTH_KV.put(
-                        `oauth_endpoint:${clientFingerprint}`,
+                        `oauth_endpoint_pending:${clientFingerprint}`,
                         requestedEndpoint,
-                        { expirationTtl: 600 } // 10 minutes
+                        { expirationTtl: 120 }
                     );
                 }
-                
+
                 return new Response("Unauthorized", {
                     status: 401,
                     headers: {
                         "WWW-Authenticate": 'Bearer realm="OAuth"',
                         "Access-Control-Allow-Origin": "*",
-                        "Access-Control-Allow-Methods": "GET, POST, OPTIONS", 
+                        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
                         "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
-                        "X-Auth-Debug": "basic-401-response",
                     },
                 });
             }
-            
-            // Route OAuth authenticated requests through OAuth provider for token validation
+
             return await oauthProvider.fetch(request, env, ctx);
         }
-        
-        // Route all other requests to OAuth provider (only for non-API key requests)
-        debug(`🔍 Routing non-SSE request to OAuth provider: ${request.method} ${url.pathname}`);
-        const oauthResponse = await oauthProvider.fetch(request, env, ctx);
-        debug(`📍 OAuth provider response status: ${oauthResponse.status}`);
-        return oauthResponse;
+
+        if (url.pathname === '/register' && request.method === 'POST' && env.OAUTH_KV) {
+            const pendingEndpoint = await env.OAUTH_KV.get(`oauth_endpoint_pending:${clientFingerprint}`);
+            const response = await oauthProvider.fetch(request, env, ctx);
+
+            if (response.ok && pendingEndpoint) {
+                try {
+                    const body = await response.json() as { client_id?: string };
+                    if (body.client_id) {
+                        await env.OAUTH_KV.put(
+                            `oauth_endpoint:client:${body.client_id}`,
+                            pendingEndpoint,
+                            { expirationTtl: 120 }
+                        );
+                        debug(`Linked endpoint ${pendingEndpoint} to client ${body.client_id}`);
+                    }
+                    return new Response(JSON.stringify(body), {
+                        status: response.status,
+                        headers: response.headers,
+                    });
+                } catch (e) {
+                    debug('Failed to link endpoint to client:', e);
+                    return response;
+                }
+            }
+            return response;
+        }
+
+        debug(`Routing non-SSE request to OAuth provider: ${request.method} ${url.pathname}`);
+        return await oauthProvider.fetch(request, env, ctx);
     }
 };

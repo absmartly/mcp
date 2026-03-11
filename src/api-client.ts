@@ -1,10 +1,14 @@
 import { ABsmartlyResponse, ListExperimentsParams } from './types';
 import { debug } from './config';
+import { MCP_VERSION } from './version';
+
+const DEFAULT_ABSMARTLY_API_ENDPOINT = "https://sandbox.absmartly.com";
+
 export class ABsmartlyAPIClient {
   private authToken: string;
   private authType: 'jwt' | 'api-key';
   private baseUrl: string;
-  constructor(authToken: string, baseUrl: string = 'https://sandbox.absmartly.com', authType?: 'jwt' | 'api-key') {
+  constructor(authToken: string, baseUrl: string = DEFAULT_ABSMARTLY_API_ENDPOINT, authType?: 'jwt' | 'api-key') {
     baseUrl = baseUrl.replace(/\/$/, '');
     if (baseUrl.endsWith('/v1')) {
       baseUrl = baseUrl.substring(0, baseUrl.length - 3);
@@ -34,7 +38,8 @@ export class ABsmartlyAPIClient {
           signature: parts[2]?.substring(0, 20) + '...'
         });
         if (parts.length === 3) {
-          const payload = JSON.parse(atob(parts[1]));
+          const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+          const payload = JSON.parse(atob(base64));
           debug('🔍 JWT payload keys:', Object.keys(payload));
           debug('🔍 JWT payload preview:', {
             iss: payload.iss,
@@ -55,6 +60,18 @@ export class ABsmartlyAPIClient {
   get apiEndpoint(): string {
     return this.baseUrl;
   }
+  private listEntity(path: string, params?: Record<string, unknown>): Promise<ABsmartlyResponse> {
+    const searchParams = new URLSearchParams();
+    if (params) {
+      for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== null) {
+          searchParams.append(key, value.toString());
+        }
+      }
+    }
+    const query = searchParams.toString();
+    return this.makeRequest(`${path}${query ? `?${query}` : ''}`);
+  }
   private async makeRequest<T>(
     endpoint: string,
     options: RequestInit = {}
@@ -64,7 +81,7 @@ export class ABsmartlyAPIClient {
     const headers = {
       'Authorization': authHeader,
       'Content-Type': 'application/json',
-      'User-Agent': 'ABsmartly-MCP-Server/1.0.0',
+      'User-Agent': `ABsmartly-MCP-Server/${MCP_VERSION}`,
       ...options.headers,
     };
     debug(`🔗 ABsmartly API Request: [Auth: ${this.authType === 'jwt' ? 'JWT' : 'Api-Key'}] ${options.method || 'GET'} ${url}`);
@@ -120,17 +137,7 @@ export class ABsmartlyAPIClient {
     }
   }
   async listExperiments(params?: ListExperimentsParams): Promise<ABsmartlyResponse> {
-    const searchParams = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
-          // All values are already strings or can be converted to strings
-          searchParams.append(key, value.toString());
-        }
-      });
-    }
-    const endpoint = `/v1/experiments${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
-    return this.makeRequest(endpoint);
+    return this.listEntity('/v1/experiments', params as Record<string, unknown>);
   }
   async getExperiment(id: number): Promise<ABsmartlyResponse> {
     return this.makeRequest(`/v1/experiments/${id}`);
@@ -173,8 +180,8 @@ export class ABsmartlyAPIClient {
       method: 'PUT',
     });
   }
-  async listGoals(): Promise<ABsmartlyResponse> {
-    return this.makeRequest('/v1/goals');
+  async listGoals(params?: any): Promise<ABsmartlyResponse> {
+    return this.listEntity('/v1/goals', params);
   }
   async getGoal(id: number): Promise<ABsmartlyResponse> {
     return this.makeRequest(`/v1/goals/${id}`);
@@ -192,16 +199,7 @@ export class ABsmartlyAPIClient {
     });
   }
   async listMetrics(params?: any): Promise<ABsmartlyResponse> {
-    const searchParams = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          searchParams.append(key, value.toString());
-        }
-      });
-    }
-    const endpoint = `/v1/metrics${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
-    return this.makeRequest(endpoint);
+    return this.listEntity('/v1/metrics', params);
   }
   async getMetric(id: number): Promise<ABsmartlyResponse> {
     return this.makeRequest(`/v1/metrics/${id}`);
@@ -218,8 +216,8 @@ export class ABsmartlyAPIClient {
       body: JSON.stringify(data),
     });
   }
-  async listUsers(): Promise<ABsmartlyResponse> {
-    return this.makeRequest('/v1/users');
+  async listUsers(params?: any): Promise<ABsmartlyResponse> {
+    return this.listEntity('/v1/users', params);
   }
   async getUser(id: number): Promise<ABsmartlyResponse> {
     return this.makeRequest(`/v1/users/${id}`);
@@ -239,8 +237,8 @@ export class ABsmartlyAPIClient {
       body: JSON.stringify(data),
     });
   }
-  async listTeams(): Promise<ABsmartlyResponse> {
-    return this.makeRequest('/v1/teams');
+  async listTeams(params?: any): Promise<ABsmartlyResponse> {
+    return this.listEntity('/v1/teams', params);
   }
   async getTeam(id: number): Promise<ABsmartlyResponse> {
     return this.makeRequest(`/v1/teams/${id}`);
@@ -295,16 +293,7 @@ export class ABsmartlyAPIClient {
     });
   }
   async listApplications(params?: any): Promise<ABsmartlyResponse> {
-    const searchParams = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          searchParams.append(key, value.toString());
-        }
-      });
-    }
-    const endpoint = `/v1/applications${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
-    return this.makeRequest(endpoint);
+    return this.listEntity('/v1/applications', params);
   }
   async getApplication(id: number): Promise<ABsmartlyResponse> {
     return this.makeRequest(`/v1/applications/${id}`);
@@ -322,16 +311,7 @@ export class ABsmartlyAPIClient {
     });
   }
   async listUnitTypes(params?: any): Promise<ABsmartlyResponse> {
-    const searchParams = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          searchParams.append(key, value.toString());
-        }
-      });
-    }
-    const endpoint = `/v1/unit_types${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
-    return this.makeRequest(endpoint);
+    return this.listEntity('/v1/unit_types', params);
   }
   async getUnitType(id: number): Promise<ABsmartlyResponse> {
     return this.makeRequest(`/v1/unit_types/${id}`);
@@ -349,79 +329,25 @@ export class ABsmartlyAPIClient {
     });
   }
   async listEnvironments(params?: any): Promise<ABsmartlyResponse> {
-    const searchParams = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          searchParams.append(key, value.toString());
-        }
-      });
-    }
-    const endpoint = `/v1/environments${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
-    return this.makeRequest(endpoint);
+    return this.listEntity('/v1/environments', params);
   }
   async getEnvironment(id: number): Promise<ABsmartlyResponse> {
     return this.makeRequest(`/v1/environments/${id}`);
   }
   async getInsightsSummary(params?: any): Promise<ABsmartlyResponse> {
-    const searchParams = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          searchParams.append(key, value.toString());
-        }
-      });
-    }
-    const endpoint = `/v1/insights/summary${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
-    return this.makeRequest(endpoint);
+    return this.listEntity('/v1/insights/summary', params);
   }
   async getInsightsVelocity(params?: any): Promise<ABsmartlyResponse> {
-    const searchParams = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          searchParams.append(key, value.toString());
-        }
-      });
-    }
-    const endpoint = `/v1/insights/velocity/widgets${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
-    return this.makeRequest(endpoint);
+    return this.listEntity('/v1/insights/velocity/widgets', params);
   }
   async getInsightsDecisions(params?: any): Promise<ABsmartlyResponse> {
-    const searchParams = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          searchParams.append(key, value.toString());
-        }
-      });
-    }
-    const endpoint = `/v1/insights/decisions/widgets${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
-    return this.makeRequest(endpoint);
+    return this.listEntity('/v1/insights/decisions/widgets', params);
   }
   async getInsightsDecisionHistory(params?: any): Promise<ABsmartlyResponse> {
-    const searchParams = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          searchParams.append(key, value.toString());
-        }
-      });
-    }
-    const endpoint = `/v1/insights/decisions/history${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
-    return this.makeRequest(endpoint);
+    return this.listEntity('/v1/insights/decisions/history', params);
   }
   async listSegments(params?: any): Promise<ABsmartlyResponse> {
-    const searchParams = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          searchParams.append(key, value.toString());
-        }
-      });
-    }
-    const endpoint = `/v1/segments${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
-    return this.makeRequest(endpoint);
+    return this.listEntity('/v1/segments', params);
   }
   async getSegment(id: number): Promise<ABsmartlyResponse> {
     return this.makeRequest(`/v1/segments/${id}`);
@@ -439,16 +365,7 @@ export class ABsmartlyAPIClient {
     });
   }
   async listExperimentCustomSectionFields(params?: any): Promise<ABsmartlyResponse> {
-    const searchParams = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          searchParams.append(key, value.toString());
-        }
-      });
-    }
-    const endpoint = `/v1/experiment_custom_section_fields${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
-    return this.makeRequest(endpoint);
+    return this.listEntity('/v1/experiment_custom_section_fields', params);
   }
   async getExperimentCustomSectionField(id: number): Promise<ABsmartlyResponse> {
     return this.makeRequest(`/v1/experiment_custom_section_fields/${id}`);
@@ -486,16 +403,7 @@ export class ABsmartlyAPIClient {
     });
   }
   async listExperimentTags(params?: any): Promise<ABsmartlyResponse> {
-    const searchParams = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          searchParams.append(key, value.toString());
-        }
-      });
-    }
-    const endpoint = `/v1/experiment_tags${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
-    return this.makeRequest(endpoint);
+    return this.listEntity('/v1/experiment_tags', params);
   }
   async getExperimentTag(id: number): Promise<ABsmartlyResponse> {
     return this.makeRequest(`/v1/experiment_tags/${id}`);

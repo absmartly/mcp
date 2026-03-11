@@ -1,31 +1,32 @@
 import type { AuthRequest, ClientInfo } from "@cloudflare/workers-oauth-provider";
+
 const COOKIE_NAME = "mcp-approved-clients";
 const ONE_YEAR_IN_SECONDS = 31536000;
-/**
- * Configuration for the approval dialog
- */
+const DEFAULT_LOGO_URL = "https://docs.absmartly.com/img/logo.png";
+const UNKNOWN_CLIENT_NAME = "Unknown Client";
+
+const HTML_ESCAPE_MAP: Record<string, string> = {
+	"&": "&amp;",
+	"<": "&lt;",
+	">": "&gt;",
+	'"': "&quot;",
+	"'": "&#39;",
+};
+
+function escapeHtml(str: string): string {
+	return str.replace(/[&<>"']/g, (char) => HTML_ESCAPE_MAP[char]);
+}
+
 export interface ApprovalDialogOptions {
-	/**
-	 * Client information to display in the approval dialog
-	 */
 	client: ClientInfo | null;
-	/**
-	 * Server information to display in the approval dialog
-	 */
 	server: {
 		name: string;
 		logo?: string;
 		description?: string;
 	};
-	/**
-	 * Arbitrary state data to pass through the approval flow
-	 * Will be encoded in the form and returned when approval is complete
-	 */
 	state: Record<string, any>;
 }
-/**
- * Imports a secret key string for HMAC-SHA256 signing.
- */
+
 async function importKey(secret: string): Promise<CryptoKey> {
 	if (!secret) {
 		throw new Error(
@@ -41,9 +42,6 @@ async function importKey(secret: string): Promise<CryptoKey> {
 		["sign", "verify"],
 	);
 }
-/**
- * Signs data using HMAC-SHA256.
- */
 async function signData(key: CryptoKey, data: string): Promise<string> {
 	const enc = new TextEncoder();
 	const signatureBuffer = await crypto.subtle.sign("HMAC", key, enc.encode(data));
@@ -51,9 +49,6 @@ async function signData(key: CryptoKey, data: string): Promise<string> {
 		.map((b) => b.toString(16).padStart(2, "0"))
 		.join("");
 }
-/**
- * Verifies an HMAC-SHA256 signature.
- */
 async function verifySignature(
 	key: CryptoKey,
 	signatureHex: string,
@@ -70,9 +65,6 @@ async function verifySignature(
 		return false;
 	}
 }
-/**
- * Parses the signed cookie and verifies its integrity.
- */
 async function getApprovedClientsFromCookie(
 	cookieHeader: string | null,
 	secret: string,
@@ -111,9 +103,6 @@ async function getApprovedClientsFromCookie(
 		return null;
 	}
 }
-/**
- * Check if a client ID has already been approved by the user
- */
 export async function clientIdAlreadyApproved(
 	request: Request,
 	clientId: string,
@@ -124,9 +113,6 @@ export async function clientIdAlreadyApproved(
 	const approvedClients = await getApprovedClientsFromCookie(cookieHeader, cookieEncryptionKey);
 	return approvedClients?.includes(clientId) ?? false;
 }
-/**
- * Parse the redirect approval form submission
- */
 export async function parseRedirectApproval(
 	request: Request,
 	cookieEncryptionKey: string
@@ -153,35 +139,26 @@ export async function parseRedirectApproval(
 			`Failed to parse approval form: ${e instanceof Error ? e.message : String(e)}`,
 		);
 	}
-	// Get existing approved clients
 	const cookieHeader = request.headers.get("Cookie");
 	const existingApprovedClients =
 		(await getApprovedClientsFromCookie(cookieHeader, cookieEncryptionKey)) || [];
-	// Add the newly approved client ID (avoid duplicates)
 	const updatedApprovedClients = Array.from(new Set([...existingApprovedClients, clientId]));
-	// Sign the updated list
 	const payload = JSON.stringify(updatedApprovedClients);
 	const key = await importKey(cookieEncryptionKey);
 	const signature = await signData(key, payload);
 	const newCookieValue = `${signature}.${btoa(payload)}`;
-	// Generate Set-Cookie header
 	const headers: Record<string, string> = {
 		"Set-Cookie": `${COOKIE_NAME}=${newCookieValue}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=${ONE_YEAR_IN_SECONDS}`,
 	};
 	return { headers, state };
 }
-/**
- * Render the OAuth approval dialog
- */
 export function renderApprovalDialog(
 	request: Request,
 	options: ApprovalDialogOptions
 ): Response {
 	const { client, server, state } = options;
-	// Encode state for form submission
 	const encodedState = btoa(JSON.stringify(state));
-	// Get client name - handle both ClientInfo format and fallback to clientId
-	const clientName = client?.clientName || state?.oauthReqInfo?.clientId || "Unknown Client";
+	const clientName = client?.clientName || state?.oauthReqInfo?.clientId || UNKNOWN_CLIENT_NAME;
 	const html = `
 <!DOCTYPE html>
 <html lang="en">
@@ -290,11 +267,11 @@ export function renderApprovalDialog(
 <body>
 	<div class="card">
 		<div class="logo">
-			<img src="${server.logo || 'https://docs.absmartly.com/img/logo.png'}" alt="${server.name}">
+			<img src="${escapeHtml(server.logo || DEFAULT_LOGO_URL)}" alt="${escapeHtml(server.name)}">
 		</div>
 		<h1 class="title">Authorize Access</h1>
 		<div class="client-info">
-			<div class="client-name">${clientName}</div>
+			<div class="client-name">${escapeHtml(clientName)}</div>
 			<div class="client-description">This application is requesting access to your account.</div>
 		</div>
 		<div class="permissions">
@@ -309,8 +286,8 @@ export function renderApprovalDialog(
 		<div class="warning">
 			<strong>Important:</strong> Only authorize applications you trust. This will give the application access to your ABsmartly account.
 		</div>
-		<form method="POST" action="${new URL(request.url).pathname}">
-			<input type="hidden" name="state" value="${encodedState}">
+		<form method="POST" action="${escapeHtml(new URL(request.url).pathname)}">
+			<input type="hidden" name="state" value="${escapeHtml(encodedState)}">
 			<div class="buttons">
 				<button type="button" class="btn btn-secondary" onclick="window.history.back()">
 					Cancel

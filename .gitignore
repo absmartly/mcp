@@ -25,6 +25,7 @@ wrangler.toml.bak
 *.swp
 *.swo
 .claude/settings.local.json
+.claude/tasks/
 
 # OS files
 .DS_Store
@@ -53,3 +54,9 @@ backend/
 shared/
 frontend-next-vue2/
 .git_old
+
+# Generated test configs (contain API keys)
+tests/integration/claude-tests/mcp-config.json
+tests/integration/claude-tests/.mcp.json
+tests/integration/claude-tests/.claude/
+tests/integration/claude-tests/.git/

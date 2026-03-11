@@ -3,12 +3,12 @@ import { SimpleMCPServer } from './simple-mcp.js';
 async function main() {
   const apiKey = process.env.ABSMARTLY_API_KEY;
   const endpoint = process.env.ABSMARTLY_ENDPOINT || 'https://sandbox.absmartly.com';
-  
+
   if (!apiKey) {
     console.error('Error: ABSMARTLY_API_KEY environment variable is required');
     process.exit(1);
   }
-  
+
   const server = new SimpleMCPServer(apiKey, endpoint);
   console.error('ABsmartly MCP Server starting...');
   console.error('Server capabilities: experiments, feature flags, basic CRUD operations');

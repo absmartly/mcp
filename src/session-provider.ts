@@ -1,14 +1,9 @@
-/**
- * Session Provider for API Key Authentication
- * 
- * Mimics the OAuth provider's session management but for API key users.
- * Provides the same session persistence and context passing patterns.
- */
-
 import { ABsmartlyMCP } from "./index";
 import type { Env } from "./types";
+import { debug } from "./config";
 
-// Props for API key authentication (matches OAuth provider pattern)
+const DEFAULT_ABSMARTLY_API_ENDPOINT = "https://sandbox.absmartly.com";
+
 type ABsmartlyProps = {
     email: string;
     name: string;
@@ -17,21 +12,18 @@ type ABsmartlyProps = {
     user_id: string;
 };
 
-// Helper function to detect API keys (imported from main file)
 function detectApiKey(request: Request): { apiKey: string | null, endpoint: string | null } {
     const url = new URL(request.url);
     const authHeader = request.headers.get("Authorization");
 
-    // Check query parameter first
     const apiKeyFromQuery = url.searchParams.get("api_key");
     if (apiKeyFromQuery) {
         const endpoint = url.searchParams.get("absmartly-endpoint") || 
                         request.headers.get("x-absmartly-endpoint") || 
-                        "https://sandbox.absmartly.com";
+                        DEFAULT_ABSMARTLY_API_ENDPOINT;
         return { apiKey: apiKeyFromQuery, endpoint };
     }
 
-    // Check Authorization header
     if (authHeader) {
         const parts = authHeader.trim().split(/\s+/);
         let apiKey = "";
@@ -59,7 +51,7 @@ function detectApiKey(request: Request): { apiKey: string | null, endpoint: stri
         }
 
         if (apiKey) {
-            if (!absmartlyEndpoint) absmartlyEndpoint = "https://sandbox.absmartly.com";
+            if (!absmartlyEndpoint) absmartlyEndpoint = DEFAULT_ABSMARTLY_API_ENDPOINT;
             return { apiKey, endpoint: absmartlyEndpoint };
         }
     }
@@ -67,12 +59,6 @@ function detectApiKey(request: Request): { apiKey: string | null, endpoint: stri
     return { apiKey: null, endpoint: null };
 }
 
-/**
- * Session Provider for API Key Authentication
- * 
- * Provides session management for API key users that mimics
- * the OAuth provider's session handling patterns.
- */
 export class SessionProvider {
     private apiHandler: any;
 
@@ -80,13 +66,9 @@ export class SessionProvider {
         this.apiHandler = apiHandler;
     }
 
-    /**
-     * Main fetch handler that mimics OAuth provider's session management
-     */
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
         const url = new URL(request.url);
 
-        // Handle CORS preflight
         if (request.method === "OPTIONS") {
             return new Response(null, {
                 headers: {
@@ -98,7 +80,6 @@ export class SessionProvider {
             });
         }
 
-        // Check for API key authentication
         const { apiKey, endpoint } = detectApiKey(request);
 
         if (!apiKey || !endpoint) {
@@ -110,7 +91,6 @@ export class SessionProvider {
             });
         }
 
-        // Create props for API key authentication (matches OAuth pattern)
         const props: ABsmartlyProps = {
             email: 'api-key-user@example.com',
             name: 'API Key User',
@@ -119,13 +99,10 @@ export class SessionProvider {
             user_id: 'api-key-user'
         };
 
-        // Set props in context (same as OAuth provider does on line 837)
         const enrichedCtx = { ...ctx, props };
 
-        console.log("🔑 API key authenticated, routing to MCP with session management");
-        console.log("🔍 Debug - ctx.props:", JSON.stringify(enrichedCtx.props, null, 2));
+        debug("API key authenticated, routing to MCP with session management");
 
-        // Call API handler with enriched context (same pattern as OAuth provider)
         return this.apiHandler.fetch(request, env, enrichedCtx);
     }
 }

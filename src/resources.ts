@@ -1,16 +1,8 @@
-/**
- * MCP Resources for ABsmartly API Documentation
- * 
- * This file contains all the documentation resources that are exposed via MCP.
- * Each resource provides detailed documentation for specific API endpoint groups.
- */
 import type { ABsmartlyMCP } from './index';
+import { debug } from './config';
 export class ABsmartlyResources {
     private resourcesRegistered: boolean = false;
     constructor(private mcpServer: ABsmartlyMCP) {}
-    /**
-     * Read markdown file from assets binding
-     */
     private async readMarkdownFile(filename: string): Promise<string> {
         try {
             const filePath = `/docs/api/${filename}`;
@@ -24,15 +16,12 @@ export class ABsmartlyResources {
             return `# Error\n\nCould not load documentation for ${filename}`;
         }
     }
-    /**
-     * Register all documentation resources
-     */
     async setupResources() {
         if (this.resourcesRegistered) {
-            console.log("📚 Resources already registered, skipping setup");
+            debug("Resources already registered, skipping setup");
             return;
         }
-        console.log("📚 Setting up documentation resources");
+        debug("Setting up documentation resources");
         await this.setupGeneralApiDocs();
         await this.setupExperimentsApiDocs();
         await this.setupGoalsApiDocs();
@@ -53,14 +42,12 @@ export class ABsmartlyResources {
             },
             async () => {
                 let content = await this.readMarkdownFile('general.md');
-                // Replace placeholder URL with actual endpoint if available
                 if (this.mcpServer.props?.absmartly_endpoint) {
                     content = content.replace(
                         'https://sandbox.absmartly.com/v1',
                         this.mcpServer.props.absmartly_endpoint
                     );
                 }
-                // Add custom fields information if available
                 if (this.mcpServer.customFields?.length) {
                     const customFieldsInfo = `\n\n### Available Custom Fields\n${this.mcpServer.customFields.map(f => `- **${f.name}** (${f.type}): ${f.description || 'No description'}`).join('\n')}`;
                     content = content.replace(
@@ -87,7 +74,6 @@ export class ABsmartlyResources {
             },
             async () => {
                 let content = await this.readMarkdownFile('experiments.md');
-                // Add custom fields information if available
                 if (this.mcpServer.customFields?.length) {
                     const customFieldsInfo = `\n\n### Available Custom Fields\n${this.mcpServer.customFields.map(f => `- **${f.name}** (${f.type}): ${f.description || 'No description'}`).join('\n')}`;
                     content = content.replace(
@@ -214,8 +200,6 @@ export class ABsmartlyResources {
         );
     }
     private async setupTemplatesAndExamples() {
-        // Template resources are now handled by the main ABsmartlyMCP class
-        // to ensure they use dynamic entity data instead of static IDs
         this.mcpServer.server.resource(
             "API Request Examples",
             "absmartly://examples/api-requests",
@@ -224,7 +208,6 @@ export class ABsmartlyResources {
             },
             async () => {
                 let content = await this.readMarkdownFile('examples.md');
-                // Replace placeholder URL with actual endpoint if available
                 if (this.mcpServer.props?.absmartly_endpoint) {
                     content = content.replace(
                         /https:\/\/sandbox\.absmartly\.com\/v1/g,

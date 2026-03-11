@@ -1,151 +1,121 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import { debug } from './config';
+import type { Env } from './types';
+
+interface OAuthEnv extends Env {
+  OAUTH_PROVIDER: {
+    parseAuthRequest(request: Request): Promise<any>;
+    lookupClient(clientId: string): Promise<any>;
+    completeAuthorization(options: any): Promise<{ redirectTo: string }>;
+  };
+}
 
 const DEFAULT_OAUTH_CLIENT_ID = "mcp-absmartly-universal";
 const COOKIE_NAME = 'absmartly-oauth-approvals';
-const COOKIE_SECRET = 'absmartly-oauth-secret-key';
 
 export class ABsmartlyOAuthHandler extends Hono {
+  private extractEndpointFromResource(resourceParam: string | null): string | null {
+    if (!resourceParam) return null;
+    try {
+      const resourceUrl = new URL(resourceParam);
+      return resourceUrl.searchParams.get('absmartly-endpoint');
+    } catch {
+      return null;
+    }
+  }
+
   constructor() {
     super();
-    
+
     this.use('*', async (c, next) => {
-      debug(`🔍 ABsmartlyOAuthHandler: ${c.req.method} ${c.req.url}`);
+      debug(`ABsmartlyOAuthHandler: ${c.req.method} ${c.req.url}`);
       await next();
     });
 
     this.get('/authorize', async (c) => {
-      debug('📍 ABsmartlyOAuthHandler: Hit /authorize endpoint');
-      const env = c.env;
+      debug('ABsmartlyOAuthHandler: Hit /authorize endpoint');
+      const env = c.env as OAuthEnv;
       const url = new URL(c.req.url);
-      
-      const resourceParam = url.searchParams.get('resource');
-      debug('📍 Resource parameter:', resourceParam);
-      
-      if (resourceParam && env.OAUTH_KV) {
-        try {
-          const resourceUrl = new URL(resourceParam);
-          debug('📍 Parsed resource URL:', resourceUrl.href);
-          const absmartlyEndpoint = resourceUrl.searchParams.get('absmartly-endpoint');
-          debug('📍 Extracted ABsmartly endpoint from resource:', absmartlyEndpoint);
-          if (absmartlyEndpoint) {
-            debug('📍 Storing ABsmartly endpoint from resource param:', absmartlyEndpoint);
-            await env.OAUTH_KV.put("absmartly_endpoint_config", absmartlyEndpoint);
-          }
-        } catch (e) {
-          debug('📍 Failed to parse resource parameter:', e);
-        }
+
+      let authRequest;
+      let clientInfo;
+      try {
+        authRequest = await env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw);
+        clientInfo = await env.OAUTH_PROVIDER.lookupClient(authRequest.clientId);
+      } catch (e) {
+        debug('Failed to parse authorization request:', e);
+        return c.text('Invalid authorization request', 400);
       }
-      
-      const authRequest = await env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw);
-      const clientInfo = await env.OAUTH_PROVIDER.lookupClient(authRequest.clientId);
       if (!clientInfo) {
         return c.text('Client not found', 400);
       }
-      
+
+      let absmartlyEndpoint = this.extractEndpointFromResource(authRequest.resource) ||
+                              url.searchParams.get('absmartly-endpoint') ||
+                              c.req.header('x-absmartly-endpoint');
+
+      if (!absmartlyEndpoint && env.OAUTH_KV) {
+        const stored = await env.OAUTH_KV.get(`oauth_endpoint:client:${authRequest.clientId}`);
+        if (stored) {
+          debug('Retrieved endpoint from KV (per-client_id):', stored);
+          absmartlyEndpoint = stored;
+        }
+      }
+
+      if (!absmartlyEndpoint) {
+        return this.renderEndpointForm(c, url);
+      }
+
+      debug('Resolved ABsmartly endpoint:', absmartlyEndpoint);
+
       const approvedClients = await this.getApprovedClients(c);
       const isApproved = approvedClients.includes(authRequest.clientId);
-      
+
       if (isApproved) {
         debug('Client is pre-approved, redirecting to ABsmartly OAuth');
-        return this.redirectToAbsmartlyOAuth(c, authRequest);
+        return this.redirectToAbsmartlyOAuth(c, authRequest, absmartlyEndpoint);
       }
-      
-      return c.html(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Authorize ${clientInfo.clientName || authRequest.clientId}</title>
-          <style>
-            body {
-              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-              max-width: 400px;
-              margin: 100px auto;
-              padding: 20px;
-              background: #f5f5f5;
-            }
-            .container {
-              background: white;
-              padding: 30px;
-              border-radius: 8px;
-              box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            }
-            h1 { font-size: 24px; margin-bottom: 20px; }
-            .client-info { 
-              background: #f8f9fa; 
-              padding: 15px; 
-              border-radius: 4px; 
-              margin: 20px 0;
-            }
-            .scopes {
-              margin: 20px 0;
-            }
-            .scope-item {
-              padding: 8px 0;
-              border-bottom: 1px solid #eee;
-            }
-            button {
-              background: #007bff;
-              color: white;
-              border: none;
-              padding: 12px 24px;
-              border-radius: 4px;
-              font-size: 16px;
-              cursor: pointer;
-              width: 100%;
-              margin-top: 20px;
-            }
-            button:hover { background: #0056b3; }
-            .cancel {
-              background: #6c757d;
-              margin-top: 10px;
-            }
-            .cancel:hover { background: #5a6268; }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <h1>Authorization Request</h1>
-            <div class="client-info">
-              <strong>${clientInfo.clientName || authRequest.clientId}</strong> is requesting access to your ABsmartly account.
-            </div>
-            
-            <div class="scopes">
-              <strong>This application will be able to:</strong>
-              ${authRequest.scope.map(scope => `
-                <div class="scope-item">• ${this.getScopeDescription(scope)}</div>
-              `).join('')}
-            </div>
-            
-            <form method="POST" action="/authorize">
-              <input type="hidden" name="client_id" value="${authRequest.clientId}">
-              <input type="hidden" name="redirect_uri" value="${authRequest.redirectUri}">
-              <input type="hidden" name="state" value="${authRequest.state}">
-              <input type="hidden" name="scope" value="${authRequest.scope.join(' ')}">
-              <input type="hidden" name="response_type" value="${authRequest.responseType}">
-              ${authRequest.codeChallenge ? `<input type="hidden" name="code_challenge" value="${authRequest.codeChallenge}">` : ''}
-              ${authRequest.codeChallengeMethod ? `<input type="hidden" name="code_challenge_method" value="${authRequest.codeChallengeMethod}">` : ''}
-              
-              <button type="submit" name="action" value="approve">Authorize</button>
-              <button type="submit" name="action" value="cancel" class="cancel">Cancel</button>
-            </form>
-          </div>
-        </body>
-        </html>
-      `);
+
+      return this.renderApprovalPage(c, clientInfo, authRequest, absmartlyEndpoint);
     });
 
     this.post('/authorize', async (c) => {
-      const formData = await c.req.formData();
+      const env = c.env as OAuthEnv;
+      let formData;
+      try {
+        formData = await c.req.formData();
+      } catch (e) {
+        debug('Failed to parse form data:', e);
+        return c.text('Invalid form data', 400);
+      }
       const action = formData.get('action');
-      
+
       if (action === 'cancel') {
         const redirectUri = formData.get('redirect_uri') as string;
+        const clientId = formData.get('client_id') as string;
         const state = formData.get('state') as string;
+
+        if (redirectUri && clientId) {
+          const client = await env.OAUTH_PROVIDER.lookupClient(clientId);
+          if (!client || !client.redirectUris?.includes(redirectUri)) {
+            return c.text('Invalid redirect URI', 400);
+          }
+        } else if (redirectUri) {
+          return c.text('Invalid redirect URI', 400);
+        }
+
         return c.redirect(`${redirectUri}?error=access_denied&state=${state}`);
       }
-      
+
+      let absmartlyEndpoint = (formData.get('absmartly_endpoint') as string || '').trim().replace(/\/+$/, '');
+      if (absmartlyEndpoint && !absmartlyEndpoint.startsWith('http://') && !absmartlyEndpoint.startsWith('https://')) {
+        absmartlyEndpoint = 'https://' + absmartlyEndpoint;
+      }
+      if (!absmartlyEndpoint) {
+        return c.text('ABsmartly endpoint is required', 400);
+      }
+
       const authRequest = {
         clientId: formData.get('client_id') as string,
         redirectUri: formData.get('redirect_uri') as string,
@@ -155,37 +125,59 @@ export class ABsmartlyOAuthHandler extends Hono {
         codeChallenge: formData.get('code_challenge') as string,
         codeChallengeMethod: formData.get('code_challenge_method') as string,
       };
-      
-      await this.addApprovedClient(c, authRequest.clientId);
-      return this.redirectToAbsmartlyOAuth(c, authRequest);
+
+      if (env.OAUTH_KV && authRequest.clientId) {
+        await env.OAUTH_KV.put(
+          `oauth_endpoint:client:${authRequest.clientId}`,
+          absmartlyEndpoint,
+          { expirationTtl: 120 }
+        );
+      }
+
+      if (action !== 'set_endpoint') {
+        await this.addApprovedClient(c, authRequest.clientId);
+      }
+      return this.redirectToAbsmartlyOAuth(c, authRequest, absmartlyEndpoint);
     });
 
     this.get('/oauth/callback', async (c) => {
-      const env = c.env;
+      const env = c.env as OAuthEnv;
       const url = new URL(c.req.url);
-      
+
       const code = url.searchParams.get('code');
       const state = url.searchParams.get('state');
       const error = url.searchParams.get('error');
-      
+
       if (error) {
         debug('OAuth callback error:', error);
         return c.text(`OAuth error: ${error}`, 400);
       }
-      
+
       if (!code || !state) {
         return c.text('Missing code or state parameter', 400);
       }
-      
+
+      const storedState = await env.OAUTH_KV.get(`oauth:state:${state}`);
+      if (!storedState) {
+        debug('Invalid or expired state token:', state);
+        return c.text('Invalid or expired state', 400);
+      }
+
+      await env.OAUTH_KV.delete(`oauth:state:${state}`);
+
       let oauthReqInfo;
       try {
-        oauthReqInfo = JSON.parse(atob(state));
+        oauthReqInfo = JSON.parse(storedState);
       } catch (e) {
-        debug('Failed to parse state:', e);
-        return c.text('Invalid state parameter', 400);
+        debug('Failed to parse stored state:', e);
+        return c.text('Invalid state data', 400);
       }
-      
-      let absmartlyEndpoint = oauthReqInfo.absmartlyEndpoint || 'https://dev-1.absmartly.com';
+
+      const absmartlyEndpoint = oauthReqInfo.absmartlyEndpoint;
+      if (!absmartlyEndpoint) {
+        debug('No absmartlyEndpoint in stored state');
+        return c.text('Missing ABsmartly endpoint in OAuth state', 400);
+      }
       const cleanEndpoint = absmartlyEndpoint.replace(/\/+$/, '');
       const tokenUrl = `${cleanEndpoint}/auth/oauth/token`;
       const tokenBody = new URLSearchParams({
@@ -194,13 +186,13 @@ export class ABsmartlyOAuthHandler extends Hono {
         code: code,
         redirect_uri: `${url.origin}/oauth/callback`,
       });
-      
+
       if (env.ABSMARTLY_OAUTH_CLIENT_SECRET) {
         tokenBody.set('client_secret', env.ABSMARTLY_OAUTH_CLIENT_SECRET);
       }
-      
+
       debug('Exchanging code with ABsmartly:', tokenUrl);
-      
+
       const tokenResponse = await fetch(tokenUrl, {
         method: 'POST',
         headers: {
@@ -209,26 +201,27 @@ export class ABsmartlyOAuthHandler extends Hono {
         },
         body: tokenBody,
       });
-      
+
       if (!tokenResponse.ok) {
         const errorText = await tokenResponse.text();
         debug('Token exchange failed:', errorText);
-        return c.text(`Token exchange failed: ${errorText}`, 500);
+        return c.text('Token exchange with ABsmartly failed', 500);
       }
-      
-      const tokenData = await tokenResponse.json();
+
+      const tokenData = await tokenResponse.json() as { access_token: string; api_key?: string; absmartly_api_key?: string };
       debug('Token exchange successful');
-      
+
       let userInfo: any = {};
       try {
         debug('🔍 JWT analysis - token type:', typeof tokenData.access_token);
         debug('🔍 JWT analysis - token preview:', tokenData.access_token?.substring(0, 50) + '...');
-        
+
         const jwtParts = tokenData.access_token.split('.');
         debug('🔍 JWT analysis - parts count:', jwtParts.length);
-        
+
         if (jwtParts.length === 3) {
-          const payload = atob(jwtParts[1]);
+          const base64 = jwtParts[1].replace(/-/g, '+').replace(/_/g, '/');
+          const payload = atob(base64);
           debug('🔍 JWT payload raw:', payload);
           userInfo = JSON.parse(payload);
           debug('🔍 JWT decoded user info:', userInfo);
@@ -237,28 +230,20 @@ export class ABsmartlyOAuthHandler extends Hono {
         }
       } catch (error) {
         debug('Failed to decode JWT:', error);
-        debug('🔍 Token data received:', tokenData);
+        return c.text('Failed to decode authentication token', 500);
       }
-      
-      // Check if this is a reference token (only contains token, iat, exp)
+
+      let finalEmail: string;
+      let finalName: string;
+      let finalUserId: string;
+
       const isReferenceToken = userInfo?.token && !userInfo?.email && !userInfo?.sub;
-      
+
       if (isReferenceToken) {
-        debug('🔍 Detected reference token system - JWT contains token reference, not user info');
-        debug('🔍 Reference token:', userInfo.token?.substring(0, 20) + '...');
-        
-        const tokenId = userInfo.token;
-        const email = `token-user-${tokenId.substring(0, 8)}@oauth.local`;
-        const name = 'OAuth User';
-        const userId = tokenId;
-        
-        debug('🔍 Using reference token approach:', { email, name, userId: userId.substring(0, 20) + '...' });
-        
-        var finalEmail = email;
-        var finalName = name;
-        var finalUserId = userId;
+        debug('Detected reference token system - JWT contains token reference, not user info');
+        return c.text('Authentication failed: no user identity found in token', 400);
       } else {
-        debug('🔍 Extracting user info from JWT payload:', {
+        debug('Extracting user info from JWT payload:', {
           email: userInfo?.email,
           sub: userInfo?.sub,
           name: userInfo?.name,
@@ -266,81 +251,73 @@ export class ABsmartlyOAuthHandler extends Hono {
           absmartly_user_id: userInfo?.absmartly_user_id,
           allKeys: Object.keys(userInfo || {})
         });
-        
+
         finalEmail = userInfo?.email || userInfo?.sub;
         finalName = userInfo?.name || userInfo?.given_name || finalEmail;
         finalUserId = userInfo?.sub || userInfo?.absmartly_user_id?.toString() || finalEmail;
-        
+
         if (!finalEmail) {
-          debug('❌ No email found in JWT payload! Using fallback.');
-          debug('🔍 Full userInfo object:', userInfo);
-          finalEmail = 'jwt-user@oauth.local';
-          finalName = 'JWT User';
-          finalUserId = 'jwt-' + Date.now();
+          debug('No email found in JWT payload');
+          debug('Full userInfo object:', userInfo);
+          return c.text('Authentication failed: no user identity found in token', 400);
         }
-        
-        debug('🔍 Extracted user details:', { email: finalEmail, name: finalName, userId: finalUserId });
+
+        debug('Extracted user details:', { email: finalEmail, name: finalName, userId: finalUserId });
       }
-      
+
       const apiEndpoint = cleanEndpoint.endsWith('/v1') ? cleanEndpoint : `${cleanEndpoint}/v1`;
-      const result = await env.OAUTH_PROVIDER.completeAuthorization({
-        request: oauthReqInfo.authRequest,
-        userId: finalUserId,
-        metadata: {},
-        scope: oauthReqInfo.authRequest.scope,
-        props: {
-          email: finalEmail,
-          name: finalName,
-          absmartly_endpoint: apiEndpoint,
-          oauth_jwt: tokenData.access_token,
-          user_id: finalUserId,
-          absmartly_api_key: tokenData.api_key || tokenData.absmartly_api_key || undefined
-        }
-      });
-      
+
+      let result;
+      try {
+        result = await env.OAUTH_PROVIDER.completeAuthorization({
+          request: oauthReqInfo.authRequest,
+          userId: finalUserId,
+          metadata: {},
+          scope: oauthReqInfo.authRequest.scope,
+          props: {
+            email: finalEmail,
+            name: finalName,
+            absmartly_endpoint: apiEndpoint,
+            oauth_jwt: tokenData.access_token,
+            user_id: finalUserId,
+            absmartly_api_key: tokenData.api_key || tokenData.absmartly_api_key || undefined
+          }
+        });
+      } catch (e) {
+        debug('Failed to complete authorization:', e);
+        return c.text('Authorization failed', 500);
+      }
+
       return c.redirect(result.redirectTo);
     });
   }
 
-  private async redirectToAbsmartlyOAuth(c: any, authRequest: any) {
+  private async redirectToAbsmartlyOAuth(c: any, authRequest: any, absmartlyEndpoint: string) {
     const url = new URL(c.req.url);
-    const env = c.env;
-    
-    let absmartlyEndpoint = url.searchParams.get('absmartly-endpoint') || 
-                           c.req.header('x-absmartly-endpoint');
-    
-    if (!absmartlyEndpoint && env.OAUTH_KV) {
-      const storedFromResource = await env.OAUTH_KV.get("absmartly_endpoint_config");
-      if (storedFromResource) {
-        debug(`📍 Retrieved stored endpoint from resource param: ${storedFromResource}`);
-        absmartlyEndpoint = storedFromResource;
-      } else {
-        const clientFingerprint = `${c.req.header('CF-Connecting-IP') || 'unknown'}-${c.req.header('User-Agent') || 'unknown'}`;
-        const storedEndpoint = await env.OAUTH_KV.get(`oauth_endpoint:${clientFingerprint}`);
-        if (storedEndpoint) {
-          debug(`📍 Retrieved stored endpoint from fingerprint: ${storedEndpoint}`);
-          absmartlyEndpoint = storedEndpoint;
-        }
-      }
-    }
-    
-    absmartlyEndpoint = absmartlyEndpoint || 'https://dev-1.absmartly.com';
-    debug(`📍 Final ABsmartly endpoint for OAuth redirect: ${absmartlyEndpoint}`);
-    
+    const env = c.env as OAuthEnv;
+
+    debug(`ABsmartly endpoint for OAuth redirect: ${absmartlyEndpoint}`);
+
     const cleanEndpoint = absmartlyEndpoint.replace(/\/+$/, '');
+    const stateToken = crypto.randomUUID();
     const stateData = {
       authRequest,
       absmartlyEndpoint: cleanEndpoint
     };
-    const state = btoa(JSON.stringify(stateData));
-    
+
+    await env.OAUTH_KV.put(
+      `oauth:state:${stateToken}`,
+      JSON.stringify(stateData),
+      { expirationTtl: 120 }
+    );
+
     const absmartlyOAuthUrl = new URL(`${cleanEndpoint}/auth/oauth/authorize`);
     absmartlyOAuthUrl.searchParams.set('client_id', env.ABSMARTLY_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID);
     absmartlyOAuthUrl.searchParams.set('redirect_uri', `${url.origin}/oauth/callback`);
     absmartlyOAuthUrl.searchParams.set('scope', 'api:read api:write');
     absmartlyOAuthUrl.searchParams.set('response_type', 'code');
-    absmartlyOAuthUrl.searchParams.set('state', state);
-    
+    absmartlyOAuthUrl.searchParams.set('state', stateToken);
+
     return c.redirect(absmartlyOAuthUrl.toString());
   }
 
@@ -355,11 +332,12 @@ export class ABsmartlyOAuthHandler extends Hono {
   private async getApprovedClients(c: any): Promise<string[]> {
     const cookie = getCookie(c, COOKIE_NAME);
     if (!cookie) return [];
-    
+
     try {
       const decoded = JSON.parse(atob(cookie));
       return decoded.clients || [];
     } catch (e) {
+      debug('Failed to parse approval cookie:', e);
       return [];
     }
   }
@@ -369,14 +347,143 @@ export class ABsmartlyOAuthHandler extends Hono {
     if (!approvedClients.includes(clientId)) {
       approvedClients.push(clientId);
     }
-    
+
     const cookie = btoa(JSON.stringify({ clients: approvedClients }));
-    
+
     setCookie(c, COOKIE_NAME, cookie, {
       httpOnly: true,
       secure: true,
       sameSite: 'Lax',
       maxAge: 30 * 24 * 60 * 60
     });
+  }
+
+  private renderEndpointForm(c: any, url: URL) {
+    const params = url.searchParams;
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ABsmartly MCP - Connect</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+    .card { background: white; border-radius: 12px; padding: 40px; max-width: 480px; width: 100%; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    h1 { margin: 0 0 8px; font-size: 24px; color: #1a1a1a; }
+    p { color: #666; margin: 0 0 24px; font-size: 14px; line-height: 1.5; }
+    label { display: block; font-weight: 600; margin-bottom: 8px; color: #333; font-size: 14px; }
+    input[type="url"] { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; box-sizing: border-box; }
+    input[type="url"]:focus { outline: none; border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.1); }
+    button { width: 100%; padding: 12px; background: #4f46e5; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 16px; }
+    button:hover { background: #4338ca; }
+    .hint { font-size: 12px; color: #999; margin-top: 6px; }
+    .error { color: #dc2626; font-size: 13px; margin-top: 6px; display: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Connect to ABsmartly</h1>
+    <p>Enter your ABsmartly instance URL to continue the authorization flow.</p>
+    <form method="POST" action="/authorize" id="endpoint-form">
+      <input type="hidden" name="action" value="set_endpoint">
+      <input type="hidden" name="client_id" value="${this.escapeHtml(params.get('client_id') || '')}">
+      <input type="hidden" name="redirect_uri" value="${this.escapeHtml(params.get('redirect_uri') || '')}">
+      <input type="hidden" name="state" value="${this.escapeHtml(params.get('state') || '')}">
+      <input type="hidden" name="scope" value="${this.escapeHtml(params.get('scope') || '')}">
+      <input type="hidden" name="response_type" value="${this.escapeHtml(params.get('response_type') || '')}">
+      <input type="hidden" name="code_challenge" value="${this.escapeHtml(params.get('code_challenge') || '')}">
+      <input type="hidden" name="code_challenge_method" value="${this.escapeHtml(params.get('code_challenge_method') || '')}">
+      <label for="absmartly_endpoint">ABsmartly URL</label>
+      <input type="url" id="absmartly_endpoint" name="absmartly_endpoint" placeholder="https://your-instance.absmartly.com" required>
+      <div class="hint">Example: https://demo-2.absmartly.com</div>
+      <button type="submit">Continue</button>
+    </form>
+  </div>
+  <script>
+    var inp = document.getElementById('absmartly_endpoint');
+    inp.addEventListener('input', function() {
+      var v = this.value.trim();
+      if (v && !v.startsWith('http://') && !v.startsWith('https://') && !v.startsWith('h')) {
+        this.value = 'https://' + v;
+      }
+    });
+    document.getElementById('endpoint-form').addEventListener('submit', function() {
+      var v = inp.value.trim().replace(/\\/+$/, '');
+      if (v && !v.startsWith('http://') && !v.startsWith('https://')) {
+        v = 'https://' + v;
+      }
+      inp.value = v;
+    });
+  </script>
+</body>
+</html>`;
+    return c.html(html);
+  }
+
+  private renderApprovalPage(c: any, clientInfo: any, authRequest: any, absmartlyEndpoint: string) {
+    const scopes = authRequest.scope || [];
+    const scopeListHtml = scopes.map((s: string) => `<li>${this.escapeHtml(this.getScopeDescription(s))}</li>`).join('');
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ABsmartly MCP - Authorize</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+    .card { background: white; border-radius: 12px; padding: 40px; max-width: 480px; width: 100%; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    h1 { margin: 0 0 8px; font-size: 24px; color: #1a1a1a; }
+    p { color: #666; margin: 0 0 16px; font-size: 14px; line-height: 1.5; }
+    .client-name { font-weight: 600; color: #1a1a1a; }
+    ul { padding-left: 20px; margin: 0 0 24px; }
+    li { color: #444; margin-bottom: 8px; font-size: 14px; }
+    .actions { display: flex; gap: 12px; }
+    button { flex: 1; padding: 12px; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; }
+    .approve { background: #4f46e5; color: white; }
+    .approve:hover { background: #4338ca; }
+    .cancel { background: #f3f4f6; color: #374151; }
+    .cancel:hover { background: #e5e7eb; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Authorize Access</h1>
+    <p><span class="client-name">${this.escapeHtml(clientInfo.clientName || authRequest.clientId)}</span> is requesting access to your ABsmartly account.</p>
+    <p>This application will be able to:</p>
+    <ul>${scopeListHtml}</ul>
+    <div class="actions">
+      <form method="POST" action="/authorize" style="flex:1;display:flex;">
+        <input type="hidden" name="action" value="cancel">
+        <input type="hidden" name="client_id" value="${this.escapeHtml(authRequest.clientId)}">
+        <input type="hidden" name="redirect_uri" value="${this.escapeHtml(authRequest.redirectUri)}">
+        <input type="hidden" name="state" value="${this.escapeHtml(authRequest.state)}">
+        <button type="submit" class="cancel" style="width:100%;">Deny</button>
+      </form>
+      <form method="POST" action="/authorize" style="flex:1;display:flex;">
+        <input type="hidden" name="action" value="approve">
+        <input type="hidden" name="client_id" value="${this.escapeHtml(authRequest.clientId)}">
+        <input type="hidden" name="redirect_uri" value="${this.escapeHtml(authRequest.redirectUri)}">
+        <input type="hidden" name="state" value="${this.escapeHtml(authRequest.state)}">
+        <input type="hidden" name="scope" value="${this.escapeHtml(scopes.join(' '))}">
+        <input type="hidden" name="response_type" value="${this.escapeHtml(authRequest.responseType)}">
+        <input type="hidden" name="code_challenge" value="${this.escapeHtml(authRequest.codeChallenge || '')}">
+        <input type="hidden" name="code_challenge_method" value="${this.escapeHtml(authRequest.codeChallengeMethod || '')}">
+        <input type="hidden" name="absmartly_endpoint" value="${this.escapeHtml(absmartlyEndpoint)}">
+        <button type="submit" class="approve" style="width:100%;">Approve</button>
+      </form>
+    </div>
+  </div>
+</body>
+</html>`;
+    return c.html(html);
+  }
+
+  private escapeHtml(str: string): string {
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 }
