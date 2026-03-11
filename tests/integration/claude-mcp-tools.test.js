@@ -8,7 +8,7 @@
  *   - wrangler dev running (started automatically if not)
  *
  * Usage:
- *   node tests/integration/claude-mcp-tools.test.js [--show-responses]
+ *   node tests/integration/claude-mcp-tools.test.js [--show-responses] [--live]
  */
 
 import { execFileSync, spawn } from 'child_process';
@@ -23,13 +23,16 @@ const CLAUDE_TESTS_DIR = join(__dirname, 'claude-tests');
 const MCP_CONFIG_PATH = join(CLAUDE_TESTS_DIR, 'mcp-config.json');
 
 const SHOW_RESPONSES = process.argv.includes('--show-responses');
+const LIVE_MODE = process.argv.includes('--live');
 
 dotenv.config({ path: join(PROJECT_ROOT, '.env.local') });
 
 const API_KEY = process.env.ABSMARTLY_API_KEY;
 const API_ENDPOINT = process.env.ABSMARTLY_API_ENDPOINT;
 const LOCAL_MCP_PORT = 8787;
+const LIVE_MCP_URL = 'https://mcp.absmartly.com/sse';
 const LOCAL_MCP_URL = `http://127.0.0.1:${LOCAL_MCP_PORT}/sse`;
+const MCP_URL = LIVE_MODE ? LIVE_MCP_URL : LOCAL_MCP_URL;
 const CLAUDE_TIMEOUT_MS = 120_000;
 
 if (!API_KEY || !API_ENDPOINT) {
@@ -40,9 +43,9 @@ if (!API_KEY || !API_ENDPOINT) {
 function writeMcpConfig() {
   const config = {
     mcpServers: {
-      'absmartly-local': {
+      [LIVE_MODE ? 'absmartly' : 'absmartly-local']: {
         type: 'sse',
-        url: LOCAL_MCP_URL,
+        url: MCP_URL,
         headers: {
           'Authorization': API_KEY,
           'x-absmartly-endpoint': API_ENDPOINT
@@ -129,18 +132,10 @@ function assertToolResult(result, check, label) {
 
   const lastToolResult = result.toolResults[result.toolResults.length - 1];
 
-  if (SHOW_RESPONSES) {
-    console.log('');
-    console.log(`    ── tool response ──`);
-    console.log(`    ${lastToolResult.substring(0, 500).split('\n').join('\n    ')}`);
-    if (lastToolResult.length > 500) console.log(`    ... (${lastToolResult.length} chars total)`);
-    console.log(`    ───────────────────`);
-    process.stdout.write('    ');
-  }
-
   if (!check(lastToolResult)) {
     throw new Error(`${label}: ${lastToolResult.substring(0, 300)}`);
   }
+  return result;
 }
 
 async function waitForServer(url, maxWaitMs = 30_000) {
@@ -189,6 +184,7 @@ async function run() {
   const results = [];
 
   async function ensureServer() {
+    if (LIVE_MODE) return;
     try {
       const resp = await fetch(`http://127.0.0.1:${LOCAL_MCP_PORT}/health`, {
         signal: AbortSignal.timeout(2000)
@@ -205,10 +201,16 @@ async function run() {
     process.stdout.write(`\n  ${name} ... `);
     try {
       await ensureServer();
-      await fn();
+      const result = await fn();
       passed++;
       results.push({ name, status: 'PASS' });
       console.log('PASS');
+      if (SHOW_RESPONSES && result && result.output) {
+        console.log(`    ── response ──`);
+        console.log(`    ${result.output.substring(0, 1000).split('\n').join('\n    ')}`);
+        if (result.output.length > 1000) console.log(`    ... (${result.output.length} chars total)`);
+        console.log(`    ──────────────`);
+      }
     } catch (err) {
       failed++;
       results.push({ name, status: 'FAIL', error: err.message });
@@ -222,9 +224,10 @@ async function run() {
 
     writeMcpConfig();
 
+    console.log(`Mode:         ${LIVE_MODE ? 'LIVE (mcp.absmartly.com)' : 'LOCAL (wrangler dev)'}`);
     console.log(`Work dir:     ${CLAUDE_TESTS_DIR}`);
     console.log(`MCP config:   ${MCP_CONFIG_PATH}`);
-    console.log(`MCP URL:      ${LOCAL_MCP_URL}`);
+    console.log(`MCP URL:      ${MCP_URL}`);
     console.log(`API endpoint: ${API_ENDPOINT}`);
 
     // ── Tests ──
@@ -233,84 +236,84 @@ async function run() {
       const result = runClaude(
         'Use the list_experiments tool with items=2 and format=json. Return ONLY the raw JSON output from the tool, nothing else.'
       );
-      assertToolResult(result, r => r.includes('"experiments"'), 'tool result missing "experiments"');
+      return assertToolResult(result, r => r.includes('"experiments"'), 'tool result missing "experiments"');
     });
 
     await test('list_users returns users', () => {
       const result = runClaude(
         'Use the list_users tool with items=2. Return ONLY the raw JSON output from the tool, nothing else.'
       );
-      assertToolResult(result, r => r.includes('"users"'), 'tool result missing "users"');
+      return assertToolResult(result, r => r.includes('"users"'), 'tool result missing "users"');
     });
 
     await test('list_applications returns applications', () => {
       const result = runClaude(
         'Use the list_applications tool with items=2. Return ONLY the raw JSON output from the tool, nothing else.'
       );
-      assertToolResult(result, r => r.includes('"applications"'), 'tool result missing "applications"');
+      return assertToolResult(result, r => r.includes('"applications"'), 'tool result missing "applications"');
     });
 
     await test('list_unit_types returns unit types', () => {
       const result = runClaude(
         'Use the list_unit_types tool with items=2. Return ONLY the raw JSON output from the tool, nothing else.'
       );
-      assertToolResult(result, r => r.includes('"unit_types"'), 'tool result missing "unit_types"');
+      return assertToolResult(result, r => r.includes('"unit_types"'), 'tool result missing "unit_types"');
     });
 
     await test('list_metrics returns metrics', () => {
       const result = runClaude(
         'Use the list_metrics tool with items=2. Return ONLY the raw JSON output from the tool, nothing else.'
       );
-      assertToolResult(result, r => r.includes('"metrics"'), 'tool result missing "metrics"');
+      return assertToolResult(result, r => r.includes('"metrics"'), 'tool result missing "metrics"');
     });
 
     await test('list_goals returns goals', () => {
       const result = runClaude(
         'Use the list_goals tool with items=2. Return ONLY the raw JSON output from the tool, nothing else.'
       );
-      assertToolResult(result, r => r.includes('"goals"'), 'tool result missing "goals"');
+      return assertToolResult(result, r => r.includes('"goals"'), 'tool result missing "goals"');
     });
 
     await test('list_tags returns tags', () => {
       const result = runClaude(
         'Use the list_tags tool with items=2. Return ONLY the raw JSON output from the tool, nothing else.'
       );
-      assertToolResult(result, r => r.includes('"tags"'), 'tool result missing "tags"');
+      return assertToolResult(result, r => r.includes('"tags"'), 'tool result missing "tags"');
     });
 
     await test('list_teams returns teams', () => {
       const result = runClaude(
         'Use the list_teams tool with items=2. Return ONLY the raw JSON output from the tool, nothing else.'
       );
-      assertToolResult(result, r => r.includes('"teams"'), 'tool result missing "teams"');
+      return assertToolResult(result, r => r.includes('"teams"'), 'tool result missing "teams"');
     });
 
     await test('get_auth_status returns authenticated info', () => {
       const result = runClaude(
         'Use the get_auth_status tool. Return ONLY the raw text output from the tool, nothing else.'
       );
-      assertToolResult(result, r => r.includes('Authenticated') || r.includes('API Access'), 'tool result missing auth info');
+      return assertToolResult(result, r => r.includes('Authenticated') || r.includes('API Access'), 'tool result missing auth info');
     });
 
     await test('get_experiment returns experiment details', () => {
       const result = runClaude(
         'First use list_experiments with items=1 and format=json to get one experiment ID. Then use get_experiment with that ID. Return ONLY the raw JSON from get_experiment, nothing else.'
       );
-      assertToolResult(result, r => r.includes('"id"'), 'tool result missing experiment "id"');
+      return assertToolResult(result, r => r.includes('"id"'), 'tool result missing experiment "id"');
     });
 
     await test('list_experiments with search filter works', () => {
       const result = runClaude(
         'Use list_experiments with search="test" and items=2 and format=json. Return ONLY the raw JSON output from the tool, nothing else.'
       );
-      assertToolResult(result, r => r.includes('"experiments"'), 'tool result missing "experiments"');
+      return assertToolResult(result, r => r.includes('"experiments"'), 'tool result missing "experiments"');
     });
 
     await test('list_experiments markdown format works', () => {
       const result = runClaude(
         'Use list_experiments with items=2 and format=md. Return ONLY the raw markdown output from the tool, nothing else.'
       );
-      assertToolResult(result, r => r.includes('Experiment') || r.includes('#'), 'tool result not markdown');
+      return assertToolResult(result, r => r.includes('Experiment') || r.includes('#'), 'tool result not markdown');
     });
 
     await test('create_experiment tool has dynamic custom fields in schema', () => {
@@ -324,6 +327,7 @@ async function run() {
           throw new Error(`create_experiment schema missing expected param "${p}": ${result.output.substring(0, 500)}`);
         }
       }
+      return result;
     });
 
     await test('create_feature_flag tool has dynamic custom fields in schema', () => {
@@ -337,6 +341,7 @@ async function run() {
           throw new Error(`create_feature_flag schema missing expected param "${p}": ${result.output.substring(0, 500)}`);
         }
       }
+      return result;
     });
 
     // ── Experiment lifecycle tests ──
@@ -395,6 +400,7 @@ The "states" array should contain the actual state observed after each get_exper
 
       console.log(`\n    experiment_id=${parsed.experiment_id} states=${JSON.stringify(parsed.states)}`);
       process.stdout.write('    ');
+      return result;
     });
 
     await test('feature flag lifecycle: create → ready → dev → start → stop → archive', () => {
@@ -444,6 +450,7 @@ The "states" array should contain the actual state observed after each get_exper
 
       console.log(`\n    experiment_id=${parsed.experiment_id} states=${JSON.stringify(parsed.states)}`);
       process.stdout.write('    ');
+      return result;
     });
 
   } finally {
