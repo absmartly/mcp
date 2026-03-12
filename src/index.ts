@@ -29,6 +29,7 @@ import {
     normalizeBaseUrl,
     buildAuthHeader,
     extractEndpointFromPath,
+    pickDefined,
     buildQueryString,
     detectApiKey,
     safeKvPut,
@@ -443,6 +444,71 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
         return md;
     }
 
+    private registerListEntityTool(config: {
+        toolName: string;
+        description: string;
+        searchDescription: string;
+        apiPath: string;
+        entityKey: string;
+        cachedEntities: () => any[];
+        formatEntity?: (entity: any) => any;
+    }) {
+        this.server.tool(
+            config.toolName,
+            config.description,
+            {
+                search: z.string().optional().describe(config.searchDescription),
+                sort: z.string().optional().describe("Sort field (e.g., created_at)"),
+                items: z.number().optional().describe("Number of items per page (default: 1500)"),
+                page: z.number().optional().describe("Page number (default: 1)"),
+            },
+            async (params) => {
+                if (!this.apiClient) {
+                    return { content: [{ type: "text", text: "❌ API client not initialized. Please check authentication status." }] };
+                }
+
+                if (params.items !== undefined || params.page !== undefined || params.sort !== undefined) {
+                    const apiParams = pickDefined(params as Record<string, unknown>, ['items', 'page', 'sort', 'search']);
+                    const data = await this.apiClient.rawRequest(config.apiPath + buildQueryString(apiParams)) as any;
+                    const entities = data[config.entityKey] || data.items || [];
+                    const metadata = data.metadata || data;
+                    const formatted = config.formatEntity ? entities.map(config.formatEntity) : entities;
+                    return {
+                        content: [{
+                            type: "text",
+                            text: JSON.stringify({
+                                total: metadata.total || formatted.length,
+                                page: metadata.page,
+                                items: metadata.items,
+                                [config.entityKey]: formatted,
+                            }, null, 2),
+                        }],
+                    };
+                }
+
+                let entities = config.cachedEntities();
+                if (params.search) {
+                    const searchTerm = params.search.toLowerCase();
+                    const searchWords = searchTerm.split(/\s+/);
+                    entities = entities.filter((e: any) => {
+                        const name = (e.name || '').toLowerCase();
+                        const desc = (e.description || e.email || '').toLowerCase();
+                        if (name.includes(searchTerm) || desc.includes(searchTerm)) return true;
+                        if (searchWords.length > 1) return searchWords.every(w => name.includes(w));
+                        return name.split(/\s+/).some((part: string) => part.startsWith(searchTerm));
+                    });
+                }
+
+                return {
+                    content: [{
+                        type: "text",
+                        text: JSON.stringify({ total: entities.length, [config.entityKey]: entities }, null, 2),
+                    }],
+                };
+            }
+        );
+    }
+
     private setupTools() {
         this.server.tool(
             "get_auth_status",
@@ -606,341 +672,69 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             }
         );
 
-        this.server.tool(
-            "list_users",
-            "List users. Returns id, name, and email for each user.",
-            {
-                search: z.string().optional().describe("Search term to filter users. Searches in full name and email. Use the complete name for best results (e.g., 'Cal Courtney' not just 'Cal')"),
-                sort: z.string().optional().describe("Sort field (e.g., created_at)"),
-                items: z.number().optional().describe("Number of items per page (default: 1500)"),
-                page: z.number().optional().describe("Page number (default: 1)")
-            },
-            async (params) => {
-                if (!this.apiClient) {
-                    return { content: [{ type: "text", text: "❌ API client not initialized. Please check authentication status." }] };
-                }
-                if (params.items !== undefined || params.page !== undefined || params.sort !== undefined) {
-                    const apiParams: Record<string, unknown> = {};
-                    if (params.items !== undefined) apiParams.items = params.items;
-                    if (params.page !== undefined) apiParams.page = params.page;
-                    if (params.sort) apiParams.sort = params.sort;
-                    if (params.search) apiParams.search = params.search;
-                    const data = await this.apiClient.rawRequest('/users' + buildQueryString(apiParams)) as any;
-                    const users = (data.users || []).map((u: any) => ({ id: u.id, name: u.name, email: u.description || u.email }));
-                    return { content: [{ type: "text", text: JSON.stringify({ total: data.total || users.length, page: data.page, items: data.items, users }, null, 2) }] };
-                }
+        this.registerListEntityTool({
+            toolName: "list_users",
+            description: "List users. Returns id, name, and email for each user.",
+            searchDescription: "Search term to filter users. Searches in full name and email. Use the complete name for best results (e.g., 'Cal Courtney' not just 'Cal')",
+            apiPath: "/users",
+            entityKey: "users",
+            cachedEntities: () => this.users || [],
+            formatEntity: (u: any) => ({ id: u.id, name: u.name, email: u.description || u.email }),
+        });
 
-                let users = this.users || [];
+        this.registerListEntityTool({
+            toolName: "list_teams",
+            description: "List teams",
+            searchDescription: "Optional search term to filter teams by name",
+            apiPath: "/teams",
+            entityKey: "teams",
+            cachedEntities: () => this.teams || [],
+        });
 
-                if (params.search) {
-                    const searchTerm = params.search.toLowerCase().trim();
-                    const searchWords = searchTerm.split(/\s+/);
+        this.registerListEntityTool({
+            toolName: "list_applications",
+            description: "List applications",
+            searchDescription: "Optional search term to filter applications by name",
+            apiPath: "/applications",
+            entityKey: "applications",
+            cachedEntities: () => this.applications || [],
+        });
 
-                    users = users.filter(user => {
-                        const userName = user.name.toLowerCase();
-                        const userEmail = (user.description || '').toLowerCase();
+        this.registerListEntityTool({
+            toolName: "list_unit_types",
+            description: "List unit types",
+            searchDescription: "Optional search term to filter unit types by name",
+            apiPath: "/unit_types",
+            entityKey: "unit_types",
+            cachedEntities: () => this.unitTypes || [],
+        });
 
-                        if (userName.includes(searchTerm) || userEmail.includes(searchTerm)) {
-                            return true;
-                        }
+        this.registerListEntityTool({
+            toolName: "list_tags",
+            description: "List experiment tags",
+            searchDescription: "Optional search term to filter tags by name",
+            apiPath: "/experiment_tags",
+            entityKey: "tags",
+            cachedEntities: () => this.experimentTags || [],
+        });
 
-                        if (searchWords.length > 1) {
-                            return searchWords.every(word => userName.includes(word));
-                        }
+        this.registerListEntityTool({
+            toolName: "list_metrics",
+            description: "List metrics. Use to find metric IDs for primary_metric_id when creating experiments.",
+            searchDescription: "Optional search term to filter metrics by name",
+            apiPath: "/metrics",
+            entityKey: "metrics",
+            cachedEntities: () => this.metrics || [],
+        });
 
-                        const nameParts = userName.split(/\s+/);
-                        return nameParts.some((part: string) => part.startsWith(searchTerm));
-                    });
-                }
-
-                const formattedUsers = users.map(user => ({
-                    id: user.id,
-                    name: user.name,
-                    email: user.description
-                }));
-
-                return {
-                    content: [{
-                        type: "text",
-                        text: JSON.stringify({
-                            total: formattedUsers.length,
-                            users: formattedUsers
-                        }, null, 2)
-                    }]
-                };
-            }
-        );
-
-        this.server.tool(
-            "list_teams",
-            "List teams",
-            {
-                search: z.string().optional().describe("Optional search term to filter teams by name"),
-                sort: z.string().optional().describe("Sort field (e.g., created_at)"),
-                items: z.number().optional().describe("Number of items per page (default: 1500)"),
-                page: z.number().optional().describe("Page number (default: 1)")
-            },
-            async (params) => {
-                if (!this.apiClient) {
-                    return { content: [{ type: "text", text: "❌ API client not initialized. Please check authentication status." }] };
-                }
-                if (params.items !== undefined || params.page !== undefined || params.sort !== undefined) {
-                    const apiParams: Record<string, unknown> = {};
-                    if (params.items !== undefined) apiParams.items = params.items;
-                    if (params.page !== undefined) apiParams.page = params.page;
-                    if (params.sort) apiParams.sort = params.sort;
-                    if (params.search) apiParams.search = params.search;
-                    const data = await this.apiClient.rawRequest('/teams' + buildQueryString(apiParams)) as any;
-                    const teams = data.teams || [];
-                    return { content: [{ type: "text", text: JSON.stringify({ total: data.total || teams.length, page: data.page, items: data.items, teams }, null, 2) }] };
-                }
-
-                let teams = this.teams || [];
-
-                if (params.search) {
-                    const searchTerm = params.search.toLowerCase();
-                    teams = teams.filter(team =>
-                        team.name.toLowerCase().includes(searchTerm)
-                    );
-                }
-
-                return {
-                    content: [{
-                        type: "text",
-                        text: JSON.stringify({
-                            total: teams.length,
-                            teams: teams
-                        }, null, 2)
-                    }]
-                };
-            }
-        );
-
-        this.server.tool(
-            "list_applications",
-            "List applications",
-            {
-                search: z.string().optional().describe("Optional search term to filter applications by name"),
-                sort: z.string().optional().describe("Sort field (e.g., created_at)"),
-                items: z.number().optional().describe("Number of items per page (default: 1500)"),
-                page: z.number().optional().describe("Page number (default: 1)")
-            },
-            async (params) => {
-                if (!this.apiClient) {
-                    return { content: [{ type: "text", text: "❌ API client not initialized. Please check authentication status." }] };
-                }
-                if (params.items !== undefined || params.page !== undefined || params.sort !== undefined) {
-                    const apiParams: Record<string, unknown> = {};
-                    if (params.items !== undefined) apiParams.items = params.items;
-                    if (params.page !== undefined) apiParams.page = params.page;
-                    if (params.sort) apiParams.sort = params.sort;
-                    if (params.search) apiParams.search = params.search;
-                    const data = await this.apiClient!.rawRequest('/applications' + buildQueryString(apiParams)) as any;
-                    const applications = data.applications || [];
-                    return { content: [{ type: "text", text: JSON.stringify({ total: data.total || applications.length, page: data.page, items: data.items, applications }, null, 2) }] };
-                }
-
-                let applications = this.applications || [];
-
-                if (params.search) {
-                    const searchTerm = params.search.toLowerCase();
-                    applications = applications.filter(app =>
-                        app.name.toLowerCase().includes(searchTerm)
-                    );
-                }
-
-                return {
-                    content: [{
-                        type: "text",
-                        text: JSON.stringify({
-                            total: applications.length,
-                            applications: applications
-                        }, null, 2)
-                    }]
-                };
-            }
-        );
-
-        this.server.tool(
-            "list_unit_types",
-            "List unit types",
-            {
-                search: z.string().optional().describe("Optional search term to filter unit types by name"),
-                sort: z.string().optional().describe("Sort field (e.g., created_at)"),
-                items: z.number().optional().describe("Number of items per page (default: 1500)"),
-                page: z.number().optional().describe("Page number (default: 1)")
-            },
-            async (params) => {
-                if (!this.apiClient) {
-                    return { content: [{ type: "text", text: "❌ API client not initialized. Please check authentication status." }] };
-                }
-                if (params.items !== undefined || params.page !== undefined || params.sort !== undefined) {
-                    const apiParams: Record<string, unknown> = {};
-                    if (params.items !== undefined) apiParams.items = params.items;
-                    if (params.page !== undefined) apiParams.page = params.page;
-                    if (params.sort) apiParams.sort = params.sort;
-                    if (params.search) apiParams.search = params.search;
-                    const data = await this.apiClient!.rawRequest('/unit_types' + buildQueryString(apiParams)) as any;
-                    const unit_types = data.unit_types || [];
-                    return { content: [{ type: "text", text: JSON.stringify({ total: data.total || unit_types.length, page: data.page, items: data.items, unit_types }, null, 2) }] };
-                }
-
-                let unitTypes = this.unitTypes || [];
-
-                if (params.search) {
-                    const searchTerm = params.search.toLowerCase();
-                    unitTypes = unitTypes.filter(unitType =>
-                        unitType.name.toLowerCase().includes(searchTerm)
-                    );
-                }
-
-                return {
-                    content: [{
-                        type: "text",
-                        text: JSON.stringify({
-                            total: unitTypes.length,
-                            unit_types: unitTypes
-                        }, null, 2)
-                    }]
-                };
-            }
-        );
-
-        this.server.tool(
-            "list_tags",
-            "List experiment tags",
-            {
-                search: z.string().optional().describe("Optional search term to filter tags by name"),
-                sort: z.string().optional().describe("Sort field (e.g., tag)"),
-                items: z.number().optional().describe("Number of items per page (default: 1500)"),
-                page: z.number().optional().describe("Page number (default: 1)")
-            },
-            async (params) => {
-                if (!this.apiClient) {
-                    return { content: [{ type: "text", text: "❌ API client not initialized. Please check authentication status." }] };
-                }
-                if (params.items !== undefined || params.page !== undefined || params.sort !== undefined) {
-                    const apiParams: Record<string, unknown> = {};
-                    if (params.items !== undefined) apiParams.items = params.items;
-                    if (params.page !== undefined) apiParams.page = params.page;
-                    if (params.sort) apiParams.sort = params.sort;
-                    if (params.search) apiParams.search = params.search;
-                    const data = await this.apiClient!.rawRequest('/experiment_tags' + buildQueryString(apiParams)) as any;
-                    const tags = data.experiment_tags || data.items || [];
-                    const metadata = data.metadata || {};
-                    return { content: [{ type: "text", text: JSON.stringify({ total: metadata.total || tags.length, page: metadata.page, items: metadata.items, tags }, null, 2) }] };
-                }
-
-                let tags = this.experimentTags || [];
-
-                if (params.search) {
-                    const searchTerm = params.search.toLowerCase();
-                    tags = tags.filter(tag =>
-                        tag.name.toLowerCase().includes(searchTerm)
-                    );
-                }
-
-                return {
-                    content: [{
-                        type: "text",
-                        text: JSON.stringify({
-                            total: tags.length,
-                            tags: tags
-                        }, null, 2)
-                    }]
-                };
-            }
-        );
-
-        this.server.tool(
-            "list_metrics",
-            "List metrics. Use to find metric IDs for primary_metric_id when creating experiments.",
-            {
-                search: z.string().optional().describe("Optional search term to filter metrics by name"),
-                sort: z.string().optional().describe("Sort field (e.g., created_at)"),
-                items: z.number().optional().describe("Number of items per page (default: 1500)"),
-                page: z.number().optional().describe("Page number (default: 1)")
-            },
-            async (params) => {
-                if (!this.apiClient) {
-                    return { content: [{ type: "text", text: "❌ API client not initialized. Please check authentication status." }] };
-                }
-                if (params.items !== undefined || params.page !== undefined || params.sort !== undefined) {
-                    const apiParams: Record<string, unknown> = {};
-                    if (params.items !== undefined) apiParams.items = params.items;
-                    if (params.page !== undefined) apiParams.page = params.page;
-                    if (params.sort) apiParams.sort = params.sort;
-                    if (params.search) apiParams.search = params.search;
-                    const data = await this.apiClient!.rawRequest('/metrics' + buildQueryString(apiParams)) as any;
-                    const metrics = data.metrics || [];
-                    return { content: [{ type: "text", text: JSON.stringify({ total: data.total || metrics.length, page: data.page, items: data.items, metrics }, null, 2) }] };
-                }
-
-                let metrics = this.metrics || [];
-
-                if (params.search) {
-                    const searchTerm = params.search.toLowerCase();
-                    metrics = metrics.filter(m =>
-                        m.name.toLowerCase().includes(searchTerm)
-                    );
-                }
-
-                return {
-                    content: [{
-                        type: "text",
-                        text: JSON.stringify({
-                            total: metrics.length,
-                            metrics: metrics
-                        }, null, 2)
-                    }]
-                };
-            }
-        );
-
-        this.server.tool(
-            "list_goals",
-            "List goals",
-            {
-                search: z.string().optional().describe("Optional search term to filter goals by name"),
-                sort: z.string().optional().describe("Sort field (e.g., created_at)"),
-                items: z.number().optional().describe("Number of items per page (default: 1500)"),
-                page: z.number().optional().describe("Page number (default: 1)")
-            },
-            async (params) => {
-                if (!this.apiClient) {
-                    return { content: [{ type: "text", text: "❌ API client not initialized. Please check authentication status." }] };
-                }
-                if (params.items !== undefined || params.page !== undefined || params.sort !== undefined) {
-                    const apiParams: Record<string, unknown> = {};
-                    if (params.items !== undefined) apiParams.items = params.items;
-                    if (params.page !== undefined) apiParams.page = params.page;
-                    if (params.sort) apiParams.sort = params.sort;
-                    if (params.search) apiParams.search = params.search;
-                    const data = await this.apiClient!.rawRequest('/goals' + buildQueryString(apiParams)) as any;
-                    const goals = data.goals || [];
-                    return { content: [{ type: "text", text: JSON.stringify({ total: data.total || goals.length, page: data.page, items: data.items, goals }, null, 2) }] };
-                }
-
-                let goals = this.goals || [];
-
-                if (params.search) {
-                    const searchTerm = params.search.toLowerCase();
-                    goals = goals.filter(g =>
-                        g.name.toLowerCase().includes(searchTerm)
-                    );
-                }
-
-                return {
-                    content: [{
-                        type: "text",
-                        text: JSON.stringify({
-                            total: goals.length,
-                            goals: goals
-                        }, null, 2)
-                    }]
-                };
-            }
-        );
+        this.registerListEntityTool({
+            toolName: "list_goals",
+            description: "List goals",
+            searchDescription: "Optional search term to filter goals by name",
+            apiPath: "/goals",
+            entityKey: "goals",
+            cachedEntities: () => this.goals || [],
+        });
 
         const customFieldSchema = this.buildCustomFieldZodSchema();
 
