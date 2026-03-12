@@ -1,21 +1,10 @@
 import type { AuthRequest, ClientInfo } from "@cloudflare/workers-oauth-provider";
+import { escapeHtml } from "./shared";
 
 const COOKIE_NAME = "mcp-approved-clients";
 const ONE_YEAR_IN_SECONDS = 31536000;
 const DEFAULT_LOGO_URL = "https://docs.absmartly.com/img/logo.png";
 const UNKNOWN_CLIENT_NAME = "Unknown Client";
-
-const HTML_ESCAPE_MAP: Record<string, string> = {
-	"&": "&amp;",
-	"<": "&lt;",
-	">": "&gt;",
-	'"': "&quot;",
-	"'": "&#39;",
-};
-
-function escapeHtml(str: string): string {
-	return str.replace(/[&<>"']/g, (char) => HTML_ESCAPE_MAP[char]);
-}
 
 export interface ApprovalDialogOptions {
 	client: ClientInfo | null;
@@ -80,7 +69,13 @@ async function getApprovedClientsFromCookie(
 		return null;
 	}
 	const [signatureHex, base64Payload] = parts;
-	const payload = atob(base64Payload);
+	let payload: string;
+	try {
+		payload = atob(base64Payload);
+	} catch {
+		console.warn("Invalid base64 in approval cookie.");
+		return null;
+	}
 	const key = await importKey(secret);
 	const isValid = await verifySignature(key, signatureHex, payload);
 	if (!isValid) {
