@@ -19,19 +19,16 @@ import { FetchHttpClient } from "./fetch-adapter";
 import {
     ABsmartlyProps,
     DEFAULT_ABSMARTLY_ENDPOINT,
-    DEFAULT_OAUTH_CLIENT_ID,
-    DEFAULT_ABSMARTLY_DOMAIN,
+    DEFAULT_API_KEY_USER_EMAIL,
     ENTITIES_CACHE_TTL_MS,
     CORS_HEADERS,
     CLAUDE_AUTH_CALLBACK_URI,
-    DEFAULT_API_KEY_USER_EMAIL,
     API_KEY_SESSION_TTL_SECONDS,
     SESSION_TTL_SECONDS,
     OAUTH_STATE_TTL_SECONDS,
     normalizeBaseUrl,
     buildAuthHeader,
     extractEndpointFromPath,
-    pickDefined,
     buildQueryString,
     detectApiKey,
     safeKvPut,
@@ -64,6 +61,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
     private apiClient: APIClient | null = null;
     private resourcesSetup: boolean = false;
     private currentUserId: number | null = null;
+    private entityWarnings: string[] = [];
     private _customFields: any[] = [];
     private users: any[] = [];
     private teams: any[] = [];
