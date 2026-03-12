@@ -2,6 +2,9 @@ import type { HttpClient, HttpRequestConfig, HttpResponse } from '@absmartly/cli
 import { debug } from './config';
 import { MCP_VERSION } from './version';
 
+const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
+const API_VERSION_PREFIX = '/v1';
+
 export interface FetchHttpClientOptions {
   authToken: string;
   authType: 'jwt' | 'api-key';
@@ -16,16 +19,16 @@ export class FetchHttpClient implements HttpClient {
 
   constructor(baseUrl: string, options: FetchHttpClientOptions) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
-    if (this.baseUrl.endsWith('/v1')) {
-      this.baseUrl = this.baseUrl.substring(0, this.baseUrl.length - 3);
+    if (this.baseUrl.endsWith(API_VERSION_PREFIX)) {
+      this.baseUrl = this.baseUrl.substring(0, this.baseUrl.length - API_VERSION_PREFIX.length);
     }
     this.authToken = options.authToken;
     this.authType = options.authType;
-    this.timeout = options.timeout ?? 30000;
+    this.timeout = options.timeout ?? DEFAULT_REQUEST_TIMEOUT_MS;
   }
 
   async request<T = unknown>(config: HttpRequestConfig): Promise<HttpResponse<T>> {
-    let url = `${this.baseUrl}/v1${config.url}`;
+    let url = `${this.baseUrl}${API_VERSION_PREFIX}${config.url}`;
 
     if (config.params) {
       const searchParams = new URLSearchParams();
@@ -54,6 +57,7 @@ export class FetchHttpClient implements HttpClient {
     const fetchOptions: RequestInit = {
       method: config.method,
       headers,
+      signal: AbortSignal.timeout(this.timeout),
     };
 
     if (config.data !== undefined) {
@@ -62,21 +66,43 @@ export class FetchHttpClient implements HttpClient {
 
     debug(`🔗 FetchHttpClient: ${config.method} ${url}`);
 
-    const response = await fetch(url, fetchOptions);
+    let response: Response;
+    try {
+      response = await fetch(url, fetchOptions);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'TimeoutError') {
+        throw new Error(`Request timed out after ${this.timeout}ms: ${config.method} ${url}`);
+      }
+      throw new Error(`Network error for ${config.method} ${url}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    if (!response.ok) {
+      let errorBody: string;
+      try {
+        errorBody = await response.text();
+      } catch {
+        errorBody = 'Unable to read response body';
+      }
+      throw new Error(`HTTP ${response.status} for ${config.method} ${url}: ${errorBody}`);
+    }
 
     let data: T;
     const contentType = response.headers.get('content-type');
     if (contentType && contentType.includes('application/json')) {
-      data = await response.json() as T;
+      try {
+        data = await response.json() as T;
+      } catch (error) {
+        throw new Error(`Failed to parse JSON response for ${config.method} ${url}: ${error instanceof Error ? error.message : String(error)}`);
+      }
     } else {
       const text = await response.text();
       data = { message: text } as T;
     }
 
     const responseHeaders: Record<string, string> = {};
-    response.headers.forEach((value, key) => {
+    for (const [key, value] of response.headers.entries()) {
       responseHeaders[key] = value;
-    });
+    }
 
     debug(`📡 FetchHttpClient: ${response.status} ${config.method} ${url}`);
 

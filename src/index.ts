@@ -37,6 +37,24 @@ const DEFAULT_BASELINE_PARTICIPANTS_PER_DAY = '1428';
 const DEFAULT_REQUIRED_ALPHA = '0.1';
 const DEFAULT_REQUIRED_POWER = '0.8';
 
+const DEFAULT_ANALYSIS_TYPE = 'group_sequential';
+const DEFAULT_FUTILITY_TYPE = 'binding';
+const DEFAULT_MIN_ANALYSIS_INTERVAL = '1d';
+const DEFAULT_FIRST_ANALYSIS_INTERVAL = '7d';
+const DEFAULT_MAX_DURATION_INTERVAL = '4w';
+
+function normalizeBaseUrl(endpoint: string): string {
+    return endpoint.replace(/\/$/, '').replace(/\/v1$/, '');
+}
+
+function buildAuthHeader(authToken: string, isApiKey: boolean): Record<string, string> {
+    const authType = isApiKey ? 'Api-Key' : 'JWT';
+    return {
+        'Authorization': `${authType} ${authToken}`,
+        'Content-Type': 'application/json',
+    };
+}
+
 function extractEndpointFromPath(pathname: string, prefix: string): string | null {
   if (!pathname.startsWith(prefix + '/')) return null;
   const hostPart = pathname.slice(prefix.length + 1).replace(/\/+$/, '');
@@ -136,16 +154,11 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
     private async fetchCurrentUser(): Promise<void> {
         if (!this.props?.absmartly_endpoint) return;
         try {
-            const baseUrl = this.props.absmartly_endpoint.replace(/\/$/, '').replace(/\/v1$/, '');
             const authToken = this.props.absmartly_api_key || this.props.oauth_jwt;
             if (!authToken) return;
-            const authType = this.props.absmartly_api_key ? 'Api-Key' : 'JWT';
-            const response = await fetch(`${baseUrl}/auth/current-user`, {
-                headers: {
-                    'Authorization': `${authType} ${authToken}`,
-                    'Content-Type': 'application/json',
-                }
-            });
+            const baseUrl = normalizeBaseUrl(this.props.absmartly_endpoint);
+            const headers = buildAuthHeader(authToken, !!this.props.absmartly_api_key);
+            const response = await fetch(`${baseUrl}/auth/current-user`, { headers });
             if (response.ok) {
                 const data = await response.json() as any;
                 const userData = data.user || data;
@@ -250,11 +263,14 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
         try {
             debug("📦 Fetching all entities from API");
 
-            const safeCall = async <T>(fn: () => Promise<T[]>): Promise<T[]> => {
+            const warnings: string[] = [];
+            const safeCall = async <T>(label: string, fn: () => Promise<T[]>): Promise<T[]> => {
                 try {
                     return await fn();
                 } catch (e) {
-                    debug(`Entity fetch failed: ${e}`);
+                    const msg = `Failed to fetch ${label}: ${e}`;
+                    warnings.push(msg);
+                    debug(msg);
                     return [];
                 }
             };
@@ -269,15 +285,19 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 rawMetrics,
                 rawGoals
             ] = await Promise.all([
-                safeCall(() => this.apiClient!.listCustomSectionFields()),
-                safeCall(() => this.apiClient!.listUsers()),
-                safeCall(() => this.apiClient!.listTeams()),
-                safeCall(() => this.apiClient!.listApplications()),
-                safeCall(() => this.apiClient!.listUnitTypes()),
-                safeCall(() => this.apiClient!.listExperimentTags(100, 0)),
-                safeCall(() => this.apiClient!.listMetrics(100, 0)),
-                safeCall(() => this.apiClient!.listGoals(100, 0))
+                safeCall('customFields', () => this.apiClient!.listCustomSectionFields()),
+                safeCall('users', () => this.apiClient!.listUsers()),
+                safeCall('teams', () => this.apiClient!.listTeams()),
+                safeCall('applications', () => this.apiClient!.listApplications()),
+                safeCall('unitTypes', () => this.apiClient!.listUnitTypes()),
+                safeCall('experimentTags', () => this.apiClient!.listExperimentTags(100, 0)),
+                safeCall('metrics', () => this.apiClient!.listMetrics(100, 0)),
+                safeCall('goals', () => this.apiClient!.listGoals(100, 0))
             ]);
+
+            if (warnings.length > 0) {
+                console.error(`⚠️ ${warnings.length} entity fetch(es) failed:\n${warnings.join('\n')}`);
+            }
 
             this._customFields = rawCustomFields;
             this.users = (rawUsers as any[]).map((user: any) => ({
@@ -964,62 +984,20 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                         ).join('/');
                     }
 
-                    const customFieldValues = this.buildCustomFieldValuesFromParams(params);
-                    const ownerId = params.owner_user_id || this.currentUserId;
-
-                    const experimentData: Record<string, any> = {
+                    const experimentData = this.buildBaseExperimentPayload({
                         name: params.name,
-                        display_name: params.display_name || params.name,
-                        iteration: 1,
-                        type: params.type || 'test',
-                        state: params.state || 'ready',
-                        feature_state: null,
-                        development_at: null,
-                        start_at: null,
-                        stop_at: null,
-                        full_on_at: null,
-                        full_on_variant: null,
-                        feature_on_at: null,
-                        feature_off_at: null,
-                        last_seen_in_code_at: null,
+                        display_name: params.display_name,
+                        type: params.type,
+                        state: params.state,
+                        unit_type_id: params.unit_type_id,
+                        application_id: params.application_id,
+                        percentage_of_traffic: params.percentage_of_traffic,
+                        percentages,
                         nr_variants: params.variants.length,
-                        percentages: percentages,
-                        percentage_of_traffic: params.percentage_of_traffic || 100,
-                        seed: null,
-                        traffic_seed: null,
-                        unit_type: {
-                            unit_type_id: params.unit_type_id
-                        },
-                        audience: '{"filter":[{"and":[]}]}',
-                        audience_strict: true,
-                        minimum_detectable_effect: null,
-                        analysis_type: 'group_sequential',
-                        baseline_primary_metric_mean: DEFAULT_BASELINE_METRIC_MEAN,
-                        baseline_primary_metric_stdev: DEFAULT_BASELINE_METRIC_STDEV,
-                        baseline_participants_per_day: DEFAULT_BASELINE_PARTICIPANTS_PER_DAY,
-                        required_alpha: DEFAULT_REQUIRED_ALPHA,
-                        required_power: DEFAULT_REQUIRED_POWER,
-                        group_sequential_futility_type: 'binding',
-                        group_sequential_analysis_count: null,
-                        group_sequential_min_analysis_interval: '1d',
-                        group_sequential_first_analysis_interval: '7d',
-                        group_sequential_max_duration_interval: '4w',
-                        applications: [{
-                            application_id: params.application_id,
-                            application_version: '0'
-                        }],
                         variants: params.variants,
-                        variant_screenshots: [],
-                        owners: ownerId ? [{ user_id: ownerId }] : [],
-                        secondary_metrics: [],
-                        teams: [],
-                        experiment_tags: [],
-                        custom_section_field_values: customFieldValues
-                    };
-
-                    if (params.primary_metric_id) {
-                        experimentData.primary_metric = { metric_id: params.primary_metric_id };
-                    }
+                        primary_metric_id: params.primary_metric_id,
+                        owner_user_id: params.owner_user_id,
+                    });
 
                     debug('Creating experiment with data:', JSON.stringify(experimentData, null, 2));
 
@@ -1070,73 +1048,23 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
 
                 try {
                     const enabledPct = params.feature_enabled_percentage ?? 50;
-                    const customFieldValues = this.buildCustomFieldValuesFromParams(params);
-                    const ownerId = params.owner_user_id || this.currentUserId;
+                    const featureVariants = [
+                        { variant: 0, name: 'Control (Feature Off)', config: '{"feature_enabled": false}' },
+                        { variant: 1, name: 'Treatment (Feature On)', config: '{"feature_enabled": true}' }
+                    ];
 
-                    const experimentData: Record<string, any> = {
+                    const experimentData = this.buildBaseExperimentPayload({
                         name: params.name,
-                        display_name: params.name,
-                        iteration: 1,
                         type: 'feature',
                         state: 'ready',
-                        feature_state: null,
-                        development_at: null,
-                        start_at: null,
-                        stop_at: null,
-                        full_on_at: null,
-                        full_on_variant: null,
-                        feature_on_at: null,
-                        feature_off_at: null,
-                        last_seen_in_code_at: null,
-                        nr_variants: 2,
+                        unit_type_id: params.unit_type_id,
+                        application_id: params.application_id,
                         percentages: `${100 - enabledPct}/${enabledPct}`,
-                        percentage_of_traffic: 100,
-                        seed: null,
-                        traffic_seed: null,
-                        unit_type: {
-                            unit_type_id: params.unit_type_id
-                        },
-                        audience: '{"filter":[{"and":[]}]}',
-                        audience_strict: true,
-                        minimum_detectable_effect: null,
-                        analysis_type: 'group_sequential',
-                        baseline_primary_metric_mean: DEFAULT_BASELINE_METRIC_MEAN,
-                        baseline_primary_metric_stdev: DEFAULT_BASELINE_METRIC_STDEV,
-                        baseline_participants_per_day: DEFAULT_BASELINE_PARTICIPANTS_PER_DAY,
-                        required_alpha: DEFAULT_REQUIRED_ALPHA,
-                        required_power: DEFAULT_REQUIRED_POWER,
-                        group_sequential_futility_type: 'binding',
-                        group_sequential_analysis_count: null,
-                        group_sequential_min_analysis_interval: '1d',
-                        group_sequential_first_analysis_interval: '7d',
-                        group_sequential_max_duration_interval: '4w',
-                        applications: [{
-                            application_id: params.application_id,
-                            application_version: '0'
-                        }],
-                        variants: [
-                            {
-                                variant: 0,
-                                name: 'Control (Feature Off)',
-                                config: '{"feature_enabled": false}'
-                            },
-                            {
-                                variant: 1,
-                                name: 'Treatment (Feature On)',
-                                config: '{"feature_enabled": true}'
-                            }
-                        ],
-                        variant_screenshots: [],
-                        owners: ownerId ? [{ user_id: ownerId }] : [],
-                        secondary_metrics: [],
-                        teams: [],
-                        experiment_tags: [],
-                        custom_section_field_values: customFieldValues
-                    };
-
-                    if (params.primary_metric_id) {
-                        experimentData.primary_metric = { metric_id: params.primary_metric_id };
-                    }
+                        nr_variants: 2,
+                        variants: featureVariants,
+                        primary_metric_id: params.primary_metric_id,
+                        owner_user_id: params.owner_user_id,
+                    });
 
                     debug('Creating feature flag with data:', JSON.stringify(experimentData, null, 2));
 
@@ -1513,6 +1441,80 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
 
     }
 
+    private buildBaseExperimentPayload(params: {
+        name: string;
+        display_name?: string;
+        type?: string;
+        state?: string;
+        unit_type_id: number;
+        application_id: number;
+        percentage_of_traffic?: number;
+        percentages: string;
+        nr_variants: number;
+        variants: any[];
+        primary_metric_id?: number;
+        owner_user_id?: number;
+    }): Record<string, any> {
+        const customFieldValues = this.buildCustomFieldValuesFromParams(params as any);
+        const ownerId = params.owner_user_id || this.currentUserId;
+
+        const experimentData: Record<string, any> = {
+            name: params.name,
+            display_name: params.display_name || params.name,
+            iteration: 1,
+            type: params.type || 'test',
+            state: params.state || 'ready',
+            feature_state: null,
+            development_at: null,
+            start_at: null,
+            stop_at: null,
+            full_on_at: null,
+            full_on_variant: null,
+            feature_on_at: null,
+            feature_off_at: null,
+            last_seen_in_code_at: null,
+            nr_variants: params.nr_variants,
+            percentages: params.percentages,
+            percentage_of_traffic: params.percentage_of_traffic ?? 100,
+            seed: null,
+            traffic_seed: null,
+            unit_type: {
+                unit_type_id: params.unit_type_id
+            },
+            audience: '{"filter":[{"and":[]}]}',
+            audience_strict: true,
+            minimum_detectable_effect: null,
+            analysis_type: DEFAULT_ANALYSIS_TYPE,
+            baseline_primary_metric_mean: DEFAULT_BASELINE_METRIC_MEAN,
+            baseline_primary_metric_stdev: DEFAULT_BASELINE_METRIC_STDEV,
+            baseline_participants_per_day: DEFAULT_BASELINE_PARTICIPANTS_PER_DAY,
+            required_alpha: DEFAULT_REQUIRED_ALPHA,
+            required_power: DEFAULT_REQUIRED_POWER,
+            group_sequential_futility_type: DEFAULT_FUTILITY_TYPE,
+            group_sequential_analysis_count: null,
+            group_sequential_min_analysis_interval: DEFAULT_MIN_ANALYSIS_INTERVAL,
+            group_sequential_first_analysis_interval: DEFAULT_FIRST_ANALYSIS_INTERVAL,
+            group_sequential_max_duration_interval: DEFAULT_MAX_DURATION_INTERVAL,
+            applications: [{
+                application_id: params.application_id,
+                application_version: '0'
+            }],
+            variants: params.variants,
+            variant_screenshots: [],
+            owners: ownerId ? [{ user_id: ownerId }] : [],
+            secondary_metrics: [],
+            teams: [],
+            experiment_tags: [],
+            custom_section_field_values: customFieldValues
+        };
+
+        if (params.primary_metric_id) {
+            experimentData.primary_metric = { metric_id: params.primary_metric_id };
+        }
+
+        return experimentData;
+    }
+
     private buildResolverContext(): ResolverContext {
         return {
             applications: this.applications.map(a => ({ id: a.id, name: a.name })),
@@ -1558,14 +1560,10 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
 }
 
 async function verifyApiKey(apiKey: string, endpoint: string): Promise<{ ok: boolean; user?: any }> {
-    const baseUrl = endpoint.replace(/\/$/, '').replace(/\/v1$/, '');
+    const baseUrl = normalizeBaseUrl(endpoint);
+    const headers = buildAuthHeader(apiKey, true);
     try {
-        const response = await fetch(`${baseUrl}/auth/current-user`, {
-            headers: {
-                'Authorization': `Api-Key ${apiKey}`,
-                'Content-Type': 'application/json',
-            }
-        });
+        const response = await fetch(`${baseUrl}/auth/current-user`, { headers });
         if (!response.ok) return { ok: false };
         const data = await response.json() as any;
         return { ok: true, user: data.user || data };
@@ -1842,8 +1840,9 @@ export default {
             const response = await oauthProvider.fetch(request, env, ctx);
 
             if (response.ok && pendingEndpoint) {
+                const cloned = response.clone();
                 try {
-                    const body = await response.json() as { client_id?: string };
+                    const body = await cloned.json() as { client_id?: string };
                     if (body.client_id) {
                         await env.OAUTH_KV.put(
                             `oauth_endpoint:client:${body.client_id}`,
