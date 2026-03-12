@@ -95,7 +95,12 @@ export class FetchHttpClient implements HttpClient {
         throw new Error(`Failed to parse JSON response for ${config.method} ${url}: ${error instanceof Error ? error.message : String(error)}`);
       }
     } else {
-      const text = await response.text();
+      let text: string;
+      try {
+        text = await response.text();
+      } catch {
+        text = 'Unable to read response body';
+      }
       data = { message: text } as T;
     }
 
@@ -112,11 +117,4 @@ export class FetchHttpClient implements HttpClient {
       headers: responseHeaders,
     };
   }
-}
-
-export function createFetchHttpClient(
-  baseUrl: string,
-  options: FetchHttpClientOptions
-): FetchHttpClient {
-  return new FetchHttpClient(baseUrl, options);
 }
