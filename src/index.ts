@@ -16,20 +16,27 @@ import {
 } from "@absmartly/cli/api-client";
 import type { ResolverContext } from "@absmartly/cli/api-client";
 import { FetchHttpClient } from "./fetch-adapter";
-
-type ABsmartlyProps = {
-    email: string;
-    name: string;
-    absmartly_endpoint: string;
-    absmartly_api_key?: string;
-    oauth_jwt?: string;
-    user_id: string;
-};
-
-const DEFAULT_ABSMARTLY_ENDPOINT = "https://dev-1.absmartly.com/v1";
-const DEFAULT_OAUTH_CLIENT_ID = "mcp-absmartly-universal";
-const ENTITIES_CACHE_TTL = 5 * 60 * 1000;
-const DEFAULT_ABSMARTLY_DOMAIN = "absmartly.com";
+import {
+    ABsmartlyProps,
+    DEFAULT_ABSMARTLY_ENDPOINT,
+    DEFAULT_OAUTH_CLIENT_ID,
+    DEFAULT_ABSMARTLY_DOMAIN,
+    ENTITIES_CACHE_TTL_MS,
+    CORS_HEADERS,
+    CLAUDE_AUTH_CALLBACK_URI,
+    DEFAULT_API_KEY_USER_EMAIL,
+    API_KEY_SESSION_TTL_SECONDS,
+    SESSION_TTL_SECONDS,
+    OAUTH_STATE_TTL_SECONDS,
+    normalizeBaseUrl,
+    buildAuthHeader,
+    extractEndpointFromPath,
+    pickDefined,
+    buildQueryString,
+    detectApiKey,
+    safeKvPut,
+    safeKvGet,
+} from "./shared";
 
 const DEFAULT_BASELINE_METRIC_MEAN = '79';
 const DEFAULT_BASELINE_METRIC_STDEV = '30';
@@ -42,26 +49,6 @@ const DEFAULT_FUTILITY_TYPE = 'binding';
 const DEFAULT_MIN_ANALYSIS_INTERVAL = '1d';
 const DEFAULT_FIRST_ANALYSIS_INTERVAL = '7d';
 const DEFAULT_MAX_DURATION_INTERVAL = '4w';
-
-function normalizeBaseUrl(endpoint: string): string {
-    return endpoint.replace(/\/$/, '').replace(/\/v1$/, '');
-}
-
-function buildAuthHeader(authToken: string, isApiKey: boolean): Record<string, string> {
-    const authType = isApiKey ? 'Api-Key' : 'JWT';
-    return {
-        'Authorization': `${authType} ${authToken}`,
-        'Content-Type': 'application/json',
-    };
-}
-
-function extractEndpointFromPath(pathname: string, prefix: string): string | null {
-  if (!pathname.startsWith(prefix + '/')) return null;
-  const hostPart = pathname.slice(prefix.length + 1).replace(/\/+$/, '');
-  if (!hostPart) return null;
-  const host = hostPart.includes('.') ? hostPart : `${hostPart}.${DEFAULT_ABSMARTLY_DOMAIN}`;
-  return `https://${host}`;
-}
 
 export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartlyProps> {
     server = new McpServer({
@@ -245,7 +232,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                     const parsed = JSON.parse(cachedData);
                     const cacheAge = Date.now() - parsed.timestamp;
 
-                    if (cacheAge < ENTITIES_CACHE_TTL) {
+                    if (cacheAge < ENTITIES_CACHE_TTL_MS) {
                         debug(`📦 Using cached entities (age: ${Math.round(cacheAge / 1000)}s)`);
                         this.loadEntitiesFromCache(parsed.entities);
                         return;
@@ -347,7 +334,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                     };
 
                     await this.env.OAUTH_KV.put(cacheKey, JSON.stringify(cacheData), {
-                        expirationTtl: Math.floor(ENTITIES_CACHE_TTL / 1000) + 60 // Extra 60s buffer
+                        expirationTtl: Math.floor(ENTITIES_CACHE_TTL_MS / 1000) + 60
                     });
 
                     debug("📦 Cached entities successfully");
@@ -361,17 +348,6 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             console.error("❌ Error fetching entities:", error);
             this.setEmptyEntities();
         }
-    }
-
-    private buildQueryString(params: Record<string, unknown>): string {
-        const searchParams = new URLSearchParams();
-        for (const [key, value] of Object.entries(params)) {
-            if (value !== undefined && value !== null) {
-                searchParams.append(key, String(value));
-            }
-        }
-        const query = searchParams.toString();
-        return query ? `?${query}` : '';
     }
 
     private setEmptyEntities() {
@@ -559,7 +535,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                     if (params.type) apiParams.type = params.type;
                     if (params.iterations !== undefined) apiParams.iterations = params.iterations;
 
-                    const queryString = this.buildQueryString(apiParams);
+                    const queryString = buildQueryString(apiParams);
                     const data = await this.apiClient.rawRequest(`/experiments${queryString}`) as any;
 
                     const experiments = data.experiments || [];
@@ -639,7 +615,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                     if (params.page !== undefined) apiParams.page = params.page;
                     if (params.sort) apiParams.sort = params.sort;
                     if (params.search) apiParams.search = params.search;
-                    const data = await this.apiClient!.rawRequest('/users' + this.buildQueryString(apiParams)) as any;
+                    const data = await this.apiClient!.rawRequest('/users' + buildQueryString(apiParams)) as any;
                     const users = (data.users || []).map((u: any) => ({ id: u.id, name: u.name, email: u.description || u.email }));
                     return { content: [{ type: "text", text: JSON.stringify({ total: data.total || users.length, page: data.page, items: data.items, users }, null, 2) }] };
                 }
@@ -701,7 +677,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                     if (params.page !== undefined) apiParams.page = params.page;
                     if (params.sort) apiParams.sort = params.sort;
                     if (params.search) apiParams.search = params.search;
-                    const data = await this.apiClient!.rawRequest('/teams' + this.buildQueryString(apiParams)) as any;
+                    const data = await this.apiClient!.rawRequest('/teams' + buildQueryString(apiParams)) as any;
                     const teams = data.teams || [];
                     return { content: [{ type: "text", text: JSON.stringify({ total: data.total || teams.length, page: data.page, items: data.items, teams }, null, 2) }] };
                 }
@@ -743,7 +719,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                     if (params.page !== undefined) apiParams.page = params.page;
                     if (params.sort) apiParams.sort = params.sort;
                     if (params.search) apiParams.search = params.search;
-                    const data = await this.apiClient!.rawRequest('/applications' + this.buildQueryString(apiParams)) as any;
+                    const data = await this.apiClient!.rawRequest('/applications' + buildQueryString(apiParams)) as any;
                     const applications = data.applications || [];
                     return { content: [{ type: "text", text: JSON.stringify({ total: data.total || applications.length, page: data.page, items: data.items, applications }, null, 2) }] };
                 }
@@ -785,7 +761,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                     if (params.page !== undefined) apiParams.page = params.page;
                     if (params.sort) apiParams.sort = params.sort;
                     if (params.search) apiParams.search = params.search;
-                    const data = await this.apiClient!.rawRequest('/unit_types' + this.buildQueryString(apiParams)) as any;
+                    const data = await this.apiClient!.rawRequest('/unit_types' + buildQueryString(apiParams)) as any;
                     const unit_types = data.unit_types || [];
                     return { content: [{ type: "text", text: JSON.stringify({ total: data.total || unit_types.length, page: data.page, items: data.items, unit_types }, null, 2) }] };
                 }
@@ -827,7 +803,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                     if (params.page !== undefined) apiParams.page = params.page;
                     if (params.sort) apiParams.sort = params.sort;
                     if (params.search) apiParams.search = params.search;
-                    const data = await this.apiClient!.rawRequest('/experiment_tags' + this.buildQueryString(apiParams)) as any;
+                    const data = await this.apiClient!.rawRequest('/experiment_tags' + buildQueryString(apiParams)) as any;
                     const tags = data.experiment_tags || data.items || [];
                     const metadata = data.metadata || {};
                     return { content: [{ type: "text", text: JSON.stringify({ total: metadata.total || tags.length, page: metadata.page, items: metadata.items, tags }, null, 2) }] };
@@ -870,7 +846,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                     if (params.page !== undefined) apiParams.page = params.page;
                     if (params.sort) apiParams.sort = params.sort;
                     if (params.search) apiParams.search = params.search;
-                    const data = await this.apiClient!.rawRequest('/metrics' + this.buildQueryString(apiParams)) as any;
+                    const data = await this.apiClient!.rawRequest('/metrics' + buildQueryString(apiParams)) as any;
                     const metrics = data.metrics || [];
                     return { content: [{ type: "text", text: JSON.stringify({ total: data.total || metrics.length, page: data.page, items: data.items, metrics }, null, 2) }] };
                 }
@@ -912,7 +888,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                     if (params.page !== undefined) apiParams.page = params.page;
                     if (params.sort) apiParams.sort = params.sort;
                     if (params.search) apiParams.search = params.search;
-                    const data = await this.apiClient!.rawRequest('/goals' + this.buildQueryString(apiParams)) as any;
+                    const data = await this.apiClient!.rawRequest('/goals' + buildQueryString(apiParams)) as any;
                     const goals = data.goals || [];
                     return { content: [{ type: "text", text: JSON.stringify({ total: data.total || goals.length, page: data.page, items: data.items, goals }, null, 2) }] };
                 }
@@ -1559,86 +1535,24 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
     }
 }
 
-async function verifyApiKey(apiKey: string, endpoint: string): Promise<{ ok: boolean; user?: any }> {
+async function verifyApiKey(apiKey: string, endpoint: string): Promise<{ ok: boolean; user?: any; error?: string }> {
     const baseUrl = normalizeBaseUrl(endpoint);
     const headers = buildAuthHeader(apiKey, true);
     try {
         const response = await fetch(`${baseUrl}/auth/current-user`, { headers });
-        if (!response.ok) return { ok: false };
+        if (!response.ok) {
+            return { ok: false, error: response.status >= 500 ? 'server_error' : 'unauthorized' };
+        }
         const data = await response.json() as any;
         return { ok: true, user: data.user || data };
-    } catch {
-        return { ok: false };
+    } catch (error) {
+        return { ok: false, error: 'network_error' };
     }
-}
-
-function detectApiKey(request: Request): { apiKey: string | null, endpoint: string | null } {
-    const url = new URL(request.url);
-    const authHeader = request.headers.get("Authorization");
-
-    const endpointFromPath = extractEndpointFromPath(url.pathname, '/sse');
-
-    const apiKeyFromQuery = url.searchParams.get("api_key") || url.searchParams.get("apikey");
-    if (apiKeyFromQuery) {
-        const endpoint = url.searchParams.get("absmartly-endpoint") ||
-                        request.headers.get("x-absmartly-endpoint") ||
-                        endpointFromPath;
-        return { apiKey: apiKeyFromQuery, endpoint };
-    }
-
-    if (authHeader) {
-        const parts = authHeader.trim().split(/\s+/);
-
-        if (parts[0] === "Bearer" && parts.length === 2) {
-            return { apiKey: null, endpoint: null };
-        }
-
-        let apiKey = "";
-        let absmartlyEndpoint = url.searchParams.get("absmartly-endpoint") ||
-                                request.headers.get("x-absmartly-endpoint") ||
-                                endpointFromPath ||
-                                "";
-
-        let startIndex = 0;
-        if (parts[0] === "Bearer") startIndex = 1;
-        if (parts[startIndex] === "Api-Key") startIndex++;
-
-        if (parts[startIndex] && parts[startIndex + 1]) {
-            const potentialEndpoint = parts[startIndex];
-            if (!potentialEndpoint.includes('.') && !potentialEndpoint.includes('://')) {
-                if (!absmartlyEndpoint) absmartlyEndpoint = `https://${potentialEndpoint}.absmartly.com`;
-                apiKey = parts[startIndex + 1];
-            } else if (potentialEndpoint.includes('.') || potentialEndpoint.includes('://')) {
-                if (!absmartlyEndpoint) absmartlyEndpoint = potentialEndpoint.startsWith('http') ? potentialEndpoint : `https://${potentialEndpoint}`;
-                apiKey = parts[startIndex + 1];
-            } else {
-                apiKey = potentialEndpoint;
-            }
-        } else if (parts[startIndex]) {
-            apiKey = parts[startIndex];
-        }
-
-        if (apiKey) {
-            if (!absmartlyEndpoint) absmartlyEndpoint = "https://sandbox.absmartly.com";
-            return { apiKey, endpoint: absmartlyEndpoint };
-        }
-    }
-
-    return { apiKey: null, endpoint: null };
 }
 
 const baseMcpHandler = ABsmartlyMCP.mount("/sse");
 
 const oauthHandler = new ABsmartlyOAuthHandler();
-
-const debugOAuthHandler = {
-    fetch: async (request: Request, env: any, ctx: any) => {
-        debug(`🔍 debugOAuthHandler: ${request.method} ${new URL(request.url).pathname}`);
-        const response = await oauthHandler.fetch(request, env, ctx);
-        debug(`📍 debugOAuthHandler response status: ${response.status}`);
-        return response;
-    }
-};
 
 const oauthProvider = new OAuthProvider({
     apiHandlers: {
@@ -1652,9 +1566,9 @@ const oauthProvider = new OAuthProvider({
     disallowPublicClientRegistration: false,
     defaultHandler: oauthHandler,
     clientLookup: async (clientId: string, env: any) => {
-        if (env.OAUTH_KV) {
-            const clientData = await env.OAUTH_KV.get(`client:${clientId}`);
-            if (clientData) {
+        const clientData = await safeKvGet(env.OAUTH_KV, `client:${clientId}`);
+        if (clientData) {
+            try {
                 const client = JSON.parse(clientData);
                 return {
                     clientId: client.clientId,
@@ -1663,6 +1577,9 @@ const oauthProvider = new OAuthProvider({
                     clientName: client.clientName,
                     tokenEndpointAuthMethod: client.tokenEndpointAuthMethod || 'client_secret_basic'
                 };
+            } catch {
+                console.warn(`Corrupt client data for ${clientId}, removing`);
+                try { await env.OAUTH_KV.delete(`client:${clientId}`); } catch {}
             }
         }
 
@@ -1670,17 +1587,15 @@ const oauthProvider = new OAuthProvider({
             debug("Auto-registering public client:", clientId);
             const newClient = {
                 clientId: clientId,
-                redirectUris: ["https://claude.ai/api/mcp/auth_callback"],
+                redirectUris: [CLAUDE_AUTH_CALLBACK_URI],
                 clientName: "Claude Desktop",
                 tokenEndpointAuthMethod: 'none'
             };
 
-            if (env.OAUTH_KV) {
-                await env.OAUTH_KV.put(`client:${clientId}`, JSON.stringify({
-                    ...newClient,
-                    registrationDate: Date.now()
-                }));
-            }
+            await safeKvPut(env.OAUTH_KV, `client:${clientId}`, JSON.stringify({
+                ...newClient,
+                registrationDate: Date.now()
+            }));
 
             return newClient;
         }
@@ -1715,19 +1630,19 @@ export default {
 
         const clientFingerprint = `${request.headers.get('CF-Connecting-IP') || 'unknown'}-${request.headers.get('User-Agent') || 'unknown'}`;
 
-        if (apiKey && env.OAUTH_KV) {
-            await env.OAUTH_KV.put(`api_key_session:${clientFingerprint}`, 'active', {
-                expirationTtl: 300 // 5 minutes
+        if (apiKey) {
+            await safeKvPut(env.OAUTH_KV, `api_key_session:${clientFingerprint}`, 'active', {
+                expirationTtl: API_KEY_SESSION_TTL_SECONDS,
             });
         }
 
-        const isOAuthDiscoveryEndpoint = url.pathname === '/.well-known/oauth-authorization-server' || 
+        const isOAuthDiscoveryEndpoint = url.pathname === '/.well-known/oauth-authorization-server' ||
                                         url.pathname === '/.well-known/oauth-protected-resource' ||
                                         url.pathname.startsWith('/.well-known/oauth-authorization-server/') ||
                                         url.pathname.startsWith('/.well-known/oauth-protected-resource/');
 
-        if (env.OAUTH_KV && isOAuthDiscoveryEndpoint) {
-            const apiKeySession = await env.OAUTH_KV.get(`api_key_session:${clientFingerprint}`);
+        if (isOAuthDiscoveryEndpoint) {
+            const apiKeySession = await safeKvGet(env.OAUTH_KV, `api_key_session:${clientFingerprint}`);
             if (apiKeySession) {
                 return new Response(JSON.stringify({
                     error: "oauth_not_available",
@@ -1747,11 +1662,7 @@ export default {
                         console.error("Failed to verify API key");
                         return new Response("Unauthorized", {
                             status: 401,
-                            headers: {
-                                "Access-Control-Allow-Origin": "*",
-                                "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-                                "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
-                            },
+                            headers: CORS_HEADERS,
                         });
                     }
 
@@ -1763,7 +1674,7 @@ export default {
                     }
 
                     const props: ABsmartlyProps = {
-                        email: userData.email || "api-key-user",
+                        email: userData.email || DEFAULT_API_KEY_USER_EMAIL,
                         name: `${userData.first_name || ''} ${userData.last_name || ''}`.trim() || userData.email || "API Key User",
                         absmartly_endpoint: endpoint || DEFAULT_ABSMARTLY_ENDPOINT,
                         absmartly_api_key: apiKey,
@@ -1772,21 +1683,19 @@ export default {
 
                     debug(`API key authenticated for user: ${props.email}`);
 
-                    if (env.OAUTH_KV) {
-                        const session = {
-                            userId: userId,
-                            email: props.email,
-                            name: props.name,
-                            absmartly_endpoint: props.absmartly_endpoint,
-                            absmartly_api_key: apiKey,
-                            createdAt: Date.now(),
-                            expiresAt: Date.now() + (24 * 60 * 60 * 1000) // 24 hours
-                        };
+                    const session = {
+                        userId: userId,
+                        email: props.email,
+                        name: props.name,
+                        absmartly_endpoint: props.absmartly_endpoint,
+                        absmartly_api_key: apiKey,
+                        createdAt: Date.now(),
+                        expiresAt: Date.now() + (SESSION_TTL_SECONDS * 1000)
+                    };
 
-                        await env.OAUTH_KV.put(`session:${userId}`, JSON.stringify(session), {
-                            expirationTtl: 86400 // 24 hours
-                        });
-                    }
+                    await safeKvPut(env.OAUTH_KV, `session:${userId}`, JSON.stringify(session), {
+                        expirationTtl: SESSION_TTL_SECONDS,
+                    });
 
                     ctx.props = props;
                     return await baseMcpHandler.fetch(request, env, ctx);
@@ -1795,11 +1704,7 @@ export default {
                     console.error("Error during API key authentication:", error);
                     return new Response("Internal Server Error", {
                         status: 500,
-                        headers: {
-                            "Access-Control-Allow-Origin": "*",
-                            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-                            "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
-                        },
+                        headers: CORS_HEADERS,
                     });
                 }
             }
@@ -1813,21 +1718,17 @@ export default {
                     request.headers.get('x-absmartly-endpoint') ||
                     extractEndpointFromPath(url.pathname, '/sse') ||
                     endpoint;
-                if (requestedEndpoint && env.OAUTH_KV) {
-                    await env.OAUTH_KV.put(
-                        `oauth_endpoint_pending:${clientFingerprint}`,
-                        requestedEndpoint,
-                        { expirationTtl: 120 }
-                    );
+                if (requestedEndpoint) {
+                    await safeKvPut(env.OAUTH_KV, `oauth_endpoint_pending:${clientFingerprint}`, requestedEndpoint, {
+                        expirationTtl: OAUTH_STATE_TTL_SECONDS,
+                    });
                 }
 
                 return new Response("Unauthorized", {
                     status: 401,
                     headers: {
+                        ...CORS_HEADERS,
                         "WWW-Authenticate": 'Bearer realm="OAuth"',
-                        "Access-Control-Allow-Origin": "*",
-                        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-                        "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
                     },
                 });
             }
@@ -1835,8 +1736,8 @@ export default {
             return await oauthProvider.fetch(request, env, ctx);
         }
 
-        if (url.pathname === '/register' && request.method === 'POST' && env.OAUTH_KV) {
-            const pendingEndpoint = await env.OAUTH_KV.get(`oauth_endpoint_pending:${clientFingerprint}`);
+        if (url.pathname === '/register' && request.method === 'POST') {
+            const pendingEndpoint = await safeKvGet(env.OAUTH_KV, `oauth_endpoint_pending:${clientFingerprint}`);
             const response = await oauthProvider.fetch(request, env, ctx);
 
             if (response.ok && pendingEndpoint) {
@@ -1844,11 +1745,9 @@ export default {
                 try {
                     const body = await cloned.json() as { client_id?: string };
                     if (body.client_id) {
-                        await env.OAUTH_KV.put(
-                            `oauth_endpoint:client:${body.client_id}`,
-                            pendingEndpoint,
-                            { expirationTtl: 120 }
-                        );
+                        await safeKvPut(env.OAUTH_KV, `oauth_endpoint:client:${body.client_id}`, pendingEndpoint, {
+                            expirationTtl: OAUTH_STATE_TTL_SECONDS,
+                        });
                         debug(`Linked endpoint ${pendingEndpoint} to client ${body.client_id}`);
                     }
                     return new Response(JSON.stringify(body), {
