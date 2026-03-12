@@ -2,6 +2,13 @@ import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import { debug } from './config';
 import type { Env } from './types';
+import {
+  DEFAULT_OAUTH_CLIENT_ID,
+  OAUTH_STATE_TTL_SECONDS,
+  APPROVAL_COOKIE_MAX_AGE_SECONDS,
+  safeKvPut,
+  escapeHtml,
+} from './shared';
 
 interface OAuthEnv extends Env {
   OAUTH_PROVIDER: {
@@ -11,7 +18,6 @@ interface OAuthEnv extends Env {
   };
 }
 
-const DEFAULT_OAUTH_CLIENT_ID = "mcp-absmartly-universal";
 const COOKIE_NAME = 'absmartly-oauth-approvals';
 
 export class ABsmartlyOAuthHandler extends Hono {
@@ -105,7 +111,7 @@ export class ABsmartlyOAuthHandler extends Hono {
           return c.text('Invalid redirect URI', 400);
         }
 
-        return c.redirect(`${redirectUri}?error=access_denied&state=${state}`);
+        return c.redirect(`${redirectUri}?error=access_denied&state=${encodeURIComponent(state)}`);
       }
 
       let absmartlyEndpoint = (formData.get('absmartly_endpoint') as string || '').trim().replace(/\/+$/, '');
@@ -126,13 +132,12 @@ export class ABsmartlyOAuthHandler extends Hono {
         codeChallengeMethod: formData.get('code_challenge_method') as string,
       };
 
-      if (env.OAUTH_KV && authRequest.clientId) {
-        await env.OAUTH_KV.put(
-          `oauth_endpoint:client:${authRequest.clientId}`,
-          absmartlyEndpoint,
-          { expirationTtl: 120 }
-        );
-      }
+      await safeKvPut(
+        env.OAUTH_KV,
+        `oauth_endpoint:client:${authRequest.clientId}`,
+        absmartlyEndpoint,
+        { expirationTtl: OAUTH_STATE_TTL_SECONDS }
+      );
 
       if (action !== 'set_endpoint') {
         await this.addApprovedClient(c, authRequest.clientId);
@@ -305,10 +310,11 @@ export class ABsmartlyOAuthHandler extends Hono {
       absmartlyEndpoint: cleanEndpoint
     };
 
-    await env.OAUTH_KV.put(
+    await safeKvPut(
+      env.OAUTH_KV,
       `oauth:state:${stateToken}`,
       JSON.stringify(stateData),
-      { expirationTtl: 120 }
+      { expirationTtl: OAUTH_STATE_TTL_SECONDS }
     );
 
     const absmartlyOAuthUrl = new URL(`${cleanEndpoint}/auth/oauth/authorize`);
@@ -354,7 +360,7 @@ export class ABsmartlyOAuthHandler extends Hono {
       httpOnly: true,
       secure: true,
       sameSite: 'Lax',
-      maxAge: 30 * 24 * 60 * 60
+      maxAge: APPROVAL_COOKIE_MAX_AGE_SECONDS
     });
   }
 
@@ -386,13 +392,13 @@ export class ABsmartlyOAuthHandler extends Hono {
     <p>Enter your ABsmartly instance URL to continue the authorization flow.</p>
     <form method="POST" action="/authorize" id="endpoint-form">
       <input type="hidden" name="action" value="set_endpoint">
-      <input type="hidden" name="client_id" value="${this.escapeHtml(params.get('client_id') || '')}">
-      <input type="hidden" name="redirect_uri" value="${this.escapeHtml(params.get('redirect_uri') || '')}">
-      <input type="hidden" name="state" value="${this.escapeHtml(params.get('state') || '')}">
-      <input type="hidden" name="scope" value="${this.escapeHtml(params.get('scope') || '')}">
-      <input type="hidden" name="response_type" value="${this.escapeHtml(params.get('response_type') || '')}">
-      <input type="hidden" name="code_challenge" value="${this.escapeHtml(params.get('code_challenge') || '')}">
-      <input type="hidden" name="code_challenge_method" value="${this.escapeHtml(params.get('code_challenge_method') || '')}">
+      <input type="hidden" name="client_id" value="${escapeHtml(params.get('client_id') || '')}">
+      <input type="hidden" name="redirect_uri" value="${escapeHtml(params.get('redirect_uri') || '')}">
+      <input type="hidden" name="state" value="${escapeHtml(params.get('state') || '')}">
+      <input type="hidden" name="scope" value="${escapeHtml(params.get('scope') || '')}">
+      <input type="hidden" name="response_type" value="${escapeHtml(params.get('response_type') || '')}">
+      <input type="hidden" name="code_challenge" value="${escapeHtml(params.get('code_challenge') || '')}">
+      <input type="hidden" name="code_challenge_method" value="${escapeHtml(params.get('code_challenge_method') || '')}">
       <label for="absmartly_endpoint">ABsmartly URL</label>
       <input type="url" id="absmartly_endpoint" name="absmartly_endpoint" placeholder="https://your-instance.absmartly.com" required>
       <div class="hint">Example: https://demo-2.absmartly.com</div>
@@ -422,7 +428,7 @@ export class ABsmartlyOAuthHandler extends Hono {
 
   private renderApprovalPage(c: any, clientInfo: any, authRequest: any, absmartlyEndpoint: string) {
     const scopes = authRequest.scope || [];
-    const scopeListHtml = scopes.map((s: string) => `<li>${this.escapeHtml(this.getScopeDescription(s))}</li>`).join('');
+    const scopeListHtml = scopes.map((s: string) => `<li>${escapeHtml(this.getScopeDescription(s))}</li>`).join('');
     const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -448,27 +454,27 @@ export class ABsmartlyOAuthHandler extends Hono {
 <body>
   <div class="card">
     <h1>Authorize Access</h1>
-    <p><span class="client-name">${this.escapeHtml(clientInfo.clientName || authRequest.clientId)}</span> is requesting access to your ABsmartly account.</p>
+    <p><span class="client-name">${escapeHtml(clientInfo.clientName || authRequest.clientId)}</span> is requesting access to your ABsmartly account.</p>
     <p>This application will be able to:</p>
     <ul>${scopeListHtml}</ul>
     <div class="actions">
       <form method="POST" action="/authorize" style="flex:1;display:flex;">
         <input type="hidden" name="action" value="cancel">
-        <input type="hidden" name="client_id" value="${this.escapeHtml(authRequest.clientId)}">
-        <input type="hidden" name="redirect_uri" value="${this.escapeHtml(authRequest.redirectUri)}">
-        <input type="hidden" name="state" value="${this.escapeHtml(authRequest.state)}">
+        <input type="hidden" name="client_id" value="${escapeHtml(authRequest.clientId)}">
+        <input type="hidden" name="redirect_uri" value="${escapeHtml(authRequest.redirectUri)}">
+        <input type="hidden" name="state" value="${escapeHtml(authRequest.state)}">
         <button type="submit" class="cancel" style="width:100%;">Deny</button>
       </form>
       <form method="POST" action="/authorize" style="flex:1;display:flex;">
         <input type="hidden" name="action" value="approve">
-        <input type="hidden" name="client_id" value="${this.escapeHtml(authRequest.clientId)}">
-        <input type="hidden" name="redirect_uri" value="${this.escapeHtml(authRequest.redirectUri)}">
-        <input type="hidden" name="state" value="${this.escapeHtml(authRequest.state)}">
-        <input type="hidden" name="scope" value="${this.escapeHtml(scopes.join(' '))}">
-        <input type="hidden" name="response_type" value="${this.escapeHtml(authRequest.responseType)}">
-        <input type="hidden" name="code_challenge" value="${this.escapeHtml(authRequest.codeChallenge || '')}">
-        <input type="hidden" name="code_challenge_method" value="${this.escapeHtml(authRequest.codeChallengeMethod || '')}">
-        <input type="hidden" name="absmartly_endpoint" value="${this.escapeHtml(absmartlyEndpoint)}">
+        <input type="hidden" name="client_id" value="${escapeHtml(authRequest.clientId)}">
+        <input type="hidden" name="redirect_uri" value="${escapeHtml(authRequest.redirectUri)}">
+        <input type="hidden" name="state" value="${escapeHtml(authRequest.state)}">
+        <input type="hidden" name="scope" value="${escapeHtml(scopes.join(' '))}">
+        <input type="hidden" name="response_type" value="${escapeHtml(authRequest.responseType)}">
+        <input type="hidden" name="code_challenge" value="${escapeHtml(authRequest.codeChallenge || '')}">
+        <input type="hidden" name="code_challenge_method" value="${escapeHtml(authRequest.codeChallengeMethod || '')}">
+        <input type="hidden" name="absmartly_endpoint" value="${escapeHtml(absmartlyEndpoint)}">
         <button type="submit" class="approve" style="width:100%;">Approve</button>
       </form>
     </div>
@@ -478,12 +484,4 @@ export class ABsmartlyOAuthHandler extends Hono {
     return c.html(html);
   }
 
-  private escapeHtml(str: string): string {
-    return str
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
 }
