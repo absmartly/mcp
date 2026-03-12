@@ -149,9 +149,11 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 const userData = data.user || data;
                 this.currentUserId = userData?.id || null;
                 debug("Current user ID:", this.currentUserId);
+            } else {
+                console.warn(`Failed to fetch current user: HTTP ${response.status}`);
             }
         } catch (e) {
-            debug("Failed to fetch current user:", e);
+            console.warn("Failed to fetch current user:", e);
         }
     }
 
@@ -282,6 +284,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
 
             if (warnings.length > 0) {
                 console.error(`⚠️ ${warnings.length} entity fetch(es) failed:\n${warnings.join('\n')}`);
+                this.entityWarnings = warnings;
             }
 
             this._customFields = rawCustomFields;
@@ -450,10 +453,16 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 const authType = this.props?.absmartly_api_key ? 'API Key' : (this.props?.oauth_jwt ? 'OAuth JWT' : 'None');
                 const status = hasApiAccess ? "✅ Authenticated with API access" : "⚠️ No API access available";
 
+                let statusText = `${status}\n\nEmail: ${this.props?.email || 'Unknown'}\nName: ${this.props?.name || 'Unknown'}\nEndpoint: ${this.props?.absmartly_endpoint || 'Not configured'}\nAuthentication Type: ${authType}\nAPI Access: ${hasApiAccess ? 'Available' : 'Not available'}`;
+
+                if (this.entityWarnings.length > 0) {
+                    statusText += `\n\n⚠️ Entity fetch warnings:\n${this.entityWarnings.map(w => `- ${w}`).join('\n')}`;
+                }
+
                 return {
                     content: [{
                         type: "text",
-                        text: `${status}\n\nEmail: ${this.props?.email || 'Unknown'}\nName: ${this.props?.name || 'Unknown'}\nEndpoint: ${this.props?.absmartly_endpoint || 'Not configured'}\nAuthentication Type: ${authType}\nAPI Access: ${hasApiAccess ? 'Available' : 'Not available'}`
+                        text: statusText
                     }]
                 };
             }
@@ -607,13 +616,16 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 page: z.number().optional().describe("Page number (default: 1)")
             },
             async (params) => {
+                if (!this.apiClient) {
+                    return { content: [{ type: "text", text: "❌ API client not initialized. Please check authentication status." }] };
+                }
                 if (params.items !== undefined || params.page !== undefined || params.sort !== undefined) {
                     const apiParams: Record<string, unknown> = {};
                     if (params.items !== undefined) apiParams.items = params.items;
                     if (params.page !== undefined) apiParams.page = params.page;
                     if (params.sort) apiParams.sort = params.sort;
                     if (params.search) apiParams.search = params.search;
-                    const data = await this.apiClient!.rawRequest('/users' + buildQueryString(apiParams)) as any;
+                    const data = await this.apiClient.rawRequest('/users' + buildQueryString(apiParams)) as any;
                     const users = (data.users || []).map((u: any) => ({ id: u.id, name: u.name, email: u.description || u.email }));
                     return { content: [{ type: "text", text: JSON.stringify({ total: data.total || users.length, page: data.page, items: data.items, users }, null, 2) }] };
                 }
@@ -669,13 +681,16 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 page: z.number().optional().describe("Page number (default: 1)")
             },
             async (params) => {
+                if (!this.apiClient) {
+                    return { content: [{ type: "text", text: "❌ API client not initialized. Please check authentication status." }] };
+                }
                 if (params.items !== undefined || params.page !== undefined || params.sort !== undefined) {
                     const apiParams: Record<string, unknown> = {};
                     if (params.items !== undefined) apiParams.items = params.items;
                     if (params.page !== undefined) apiParams.page = params.page;
                     if (params.sort) apiParams.sort = params.sort;
                     if (params.search) apiParams.search = params.search;
-                    const data = await this.apiClient!.rawRequest('/teams' + buildQueryString(apiParams)) as any;
+                    const data = await this.apiClient.rawRequest('/teams' + buildQueryString(apiParams)) as any;
                     const teams = data.teams || [];
                     return { content: [{ type: "text", text: JSON.stringify({ total: data.total || teams.length, page: data.page, items: data.items, teams }, null, 2) }] };
                 }
@@ -711,6 +726,9 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 page: z.number().optional().describe("Page number (default: 1)")
             },
             async (params) => {
+                if (!this.apiClient) {
+                    return { content: [{ type: "text", text: "❌ API client not initialized. Please check authentication status." }] };
+                }
                 if (params.items !== undefined || params.page !== undefined || params.sort !== undefined) {
                     const apiParams: Record<string, unknown> = {};
                     if (params.items !== undefined) apiParams.items = params.items;
@@ -753,6 +771,9 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 page: z.number().optional().describe("Page number (default: 1)")
             },
             async (params) => {
+                if (!this.apiClient) {
+                    return { content: [{ type: "text", text: "❌ API client not initialized. Please check authentication status." }] };
+                }
                 if (params.items !== undefined || params.page !== undefined || params.sort !== undefined) {
                     const apiParams: Record<string, unknown> = {};
                     if (params.items !== undefined) apiParams.items = params.items;
@@ -795,6 +816,9 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 page: z.number().optional().describe("Page number (default: 1)")
             },
             async (params) => {
+                if (!this.apiClient) {
+                    return { content: [{ type: "text", text: "❌ API client not initialized. Please check authentication status." }] };
+                }
                 if (params.items !== undefined || params.page !== undefined || params.sort !== undefined) {
                     const apiParams: Record<string, unknown> = {};
                     if (params.items !== undefined) apiParams.items = params.items;
@@ -838,6 +862,9 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 page: z.number().optional().describe("Page number (default: 1)")
             },
             async (params) => {
+                if (!this.apiClient) {
+                    return { content: [{ type: "text", text: "❌ API client not initialized. Please check authentication status." }] };
+                }
                 if (params.items !== undefined || params.page !== undefined || params.sort !== undefined) {
                     const apiParams: Record<string, unknown> = {};
                     if (params.items !== undefined) apiParams.items = params.items;
@@ -880,6 +907,9 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 page: z.number().optional().describe("Page number (default: 1)")
             },
             async (params) => {
+                if (!this.apiClient) {
+                    return { content: [{ type: "text", text: "❌ API client not initialized. Please check authentication status." }] };
+                }
                 if (params.items !== undefined || params.page !== undefined || params.sort !== undefined) {
                     const apiParams: Record<string, unknown> = {};
                     if (params.items !== undefined) apiParams.items = params.items;
