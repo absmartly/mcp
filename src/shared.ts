@@ -1,9 +1,7 @@
 export const DEFAULT_ABSMARTLY_ENDPOINT = "https://sandbox.absmartly.com";
-// NOTE: index.ts previously used "https://dev-1.absmartly.com/v1" which was a dev-only
-// value that leaked into production config. The canonical default is sandbox.absmartly.com
-// (no /v1 suffix — normalizeBaseUrl handles that). This unifies all 3 divergent defaults.
 export const DEFAULT_OAUTH_CLIENT_ID = "mcp-absmartly-universal";
 export const DEFAULT_API_KEY_USER_EMAIL = "api-key-user";
+export const DEFAULT_API_KEY_USER_NAME = "API Key User";
 export const DEFAULT_ABSMARTLY_DOMAIN = "absmartly.com";
 export const CLAUDE_AUTH_CALLBACK_URI = "https://claude.ai/api/mcp/auth_callback";
 
