@@ -20,6 +20,7 @@ import {
     ABsmartlyProps,
     DEFAULT_ABSMARTLY_ENDPOINT,
     DEFAULT_API_KEY_USER_EMAIL,
+    DEFAULT_API_KEY_USER_NAME,
     ENTITIES_CACHE_TTL_MS,
     CORS_HEADERS,
     CLAUDE_AUTH_CALLBACK_URI,
@@ -151,10 +152,14 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 this.currentUserId = userData?.id || null;
                 debug("Current user ID:", this.currentUserId);
             } else {
-                console.warn(`Failed to fetch current user: HTTP ${response.status}`);
+                const msg = `Failed to fetch current user: HTTP ${response.status}`;
+                console.warn(msg);
+                this.entityWarnings.push(msg);
             }
         } catch (e) {
-            console.warn("Failed to fetch current user:", e);
+            const msg = `Failed to fetch current user: ${e}`;
+            console.warn(msg);
+            this.entityWarnings.push(msg);
         }
     }
 
@@ -347,7 +352,9 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
 
             debug("✅ All entities fetched successfully");
         } catch (error) {
-            console.error("❌ Error fetching entities:", error);
+            const msg = `Error fetching entities: ${error}`;
+            console.error("❌", msg);
+            this.entityWarnings.push(msg);
             this.setEmptyEntities();
         }
     }
@@ -468,22 +475,26 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 }
 
                 if (params.items !== undefined || params.page !== undefined || params.sort !== undefined) {
-                    const apiParams = pickDefined(params as Record<string, unknown>, ['items', 'page', 'sort', 'search']);
-                    const data = await this.apiClient.rawRequest(config.apiPath + buildQueryString(apiParams)) as any;
-                    const entities = data[config.entityKey] || data.items || [];
-                    const metadata = data.metadata || data;
-                    const formatted = config.formatEntity ? entities.map(config.formatEntity) : entities;
-                    return {
-                        content: [{
-                            type: "text",
-                            text: JSON.stringify({
-                                total: metadata.total || formatted.length,
-                                page: metadata.page,
-                                items: metadata.items,
-                                [config.entityKey]: formatted,
-                            }, null, 2),
-                        }],
-                    };
+                    try {
+                        const apiParams = pickDefined(params as Record<string, unknown>, ['items', 'page', 'sort', 'search']);
+                        const data = await this.apiClient.rawRequest(config.apiPath + buildQueryString(apiParams)) as any;
+                        const entities = data[config.entityKey] || data.items || [];
+                        const metadata = data.metadata || data;
+                        const formatted = config.formatEntity ? entities.map(config.formatEntity) : entities;
+                        return {
+                            content: [{
+                                type: "text",
+                                text: JSON.stringify({
+                                    total: metadata.total || formatted.length,
+                                    page: metadata.page,
+                                    items: metadata.items,
+                                    [config.entityKey]: formatted,
+                                }, null, 2),
+                            }],
+                        };
+                    } catch (error) {
+                        return { content: [{ type: "text", text: `❌ Failed to fetch ${config.entityKey}: ${error}` }] };
+                    }
                 }
 
                 let entities = config.cachedEntities();
@@ -1399,8 +1410,8 @@ const oauthProvider = new OAuthProvider({
                     clientName: client.clientName,
                     tokenEndpointAuthMethod: client.tokenEndpointAuthMethod || 'client_secret_basic'
                 };
-            } catch {
-                console.warn(`Corrupt client data for ${clientId}, removing`);
+            } catch (e) {
+                console.warn(`Corrupt client data for ${clientId}, removing:`, e);
                 try { await env.OAUTH_KV.delete(`client:${clientId}`); } catch {}
             }
         }
@@ -1481,9 +1492,10 @@ export default {
                     const verifyResult = await verifyApiKey(apiKey, endpoint || DEFAULT_ABSMARTLY_ENDPOINT);
 
                     if (!verifyResult.ok) {
-                        console.error("Failed to verify API key");
+                        const status = verifyResult.error === 'server_error' ? 502 : 401;
+                        console.error(`Failed to verify API key: ${verifyResult.error}`);
                         return new Response("Unauthorized", {
-                            status: 401,
+                            status,
                             headers: CORS_HEADERS,
                         });
                     }
@@ -1497,7 +1509,7 @@ export default {
 
                     const props: ABsmartlyProps = {
                         email: userData.email || DEFAULT_API_KEY_USER_EMAIL,
-                        name: `${userData.first_name || ''} ${userData.last_name || ''}`.trim() || userData.email || "API Key User",
+                        name: `${userData.first_name || ''} ${userData.last_name || ''}`.trim() || userData.email || DEFAULT_API_KEY_USER_NAME,
                         absmartly_endpoint: endpoint || DEFAULT_ABSMARTLY_ENDPOINT,
                         absmartly_api_key: apiKey,
                         user_id: userId
