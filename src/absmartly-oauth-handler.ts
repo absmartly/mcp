@@ -310,12 +310,16 @@ export class ABsmartlyOAuthHandler extends Hono {
       absmartlyEndpoint: cleanEndpoint
     };
 
-    await safeKvPut(
-      env.OAUTH_KV,
-      `oauth:state:${stateToken}`,
-      JSON.stringify(stateData),
-      { expirationTtl: OAUTH_STATE_TTL_SECONDS }
-    );
+    try {
+      await env.OAUTH_KV.put(
+        `oauth:state:${stateToken}`,
+        JSON.stringify(stateData),
+        { expirationTtl: OAUTH_STATE_TTL_SECONDS }
+      );
+    } catch (error) {
+      console.error('Failed to store OAuth state token:', error);
+      return new Response('Service temporarily unavailable', { status: 503 });
+    }
 
     const absmartlyOAuthUrl = new URL(`${cleanEndpoint}/auth/oauth/authorize`);
     absmartlyOAuthUrl.searchParams.set('client_id', env.ABSMARTLY_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID);
@@ -343,7 +347,7 @@ export class ABsmartlyOAuthHandler extends Hono {
       const decoded = JSON.parse(atob(cookie));
       return decoded.clients || [];
     } catch (e) {
-      debug('Failed to parse approval cookie:', e);
+      console.warn('Failed to parse approval cookie:', e);
       return [];
     }
   }
