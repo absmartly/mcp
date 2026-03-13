@@ -4,6 +4,8 @@ import { debug } from "./config";
 import {
   ABsmartlyProps,
   CORS_HEADERS,
+  DEFAULT_API_KEY_USER_EMAIL,
+  DEFAULT_API_KEY_USER_NAME,
   detectApiKey,
 } from "./shared";
 
@@ -36,11 +38,11 @@ export class SessionProvider {
     }
 
     const props: ABsmartlyProps = {
-      email: 'api-key-user@example.com',
-      name: 'API Key User',
+      email: DEFAULT_API_KEY_USER_EMAIL,
+      name: DEFAULT_API_KEY_USER_NAME,
       absmartly_endpoint: endpoint,
       absmartly_api_key: apiKey,
-      user_id: 'api-key-user'
+      user_id: DEFAULT_API_KEY_USER_EMAIL,
     };
 
     const enrichedCtx = { ...ctx, props };

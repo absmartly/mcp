@@ -95,12 +95,7 @@ export class FetchHttpClient implements HttpClient {
         throw new Error(`Failed to parse JSON response for ${config.method} ${url}: ${error instanceof Error ? error.message : String(error)}`);
       }
     } else {
-      let text: string;
-      try {
-        text = await response.text();
-      } catch {
-        text = 'Unable to read response body';
-      }
+      const text = await response.text();
       data = { message: text } as T;
     }
 
