@@ -1412,7 +1412,9 @@ const oauthProvider = new OAuthProvider({
                 };
             } catch (e) {
                 console.warn(`Corrupt client data for ${clientId}, removing:`, e);
-                try { await env.OAUTH_KV.delete(`client:${clientId}`); } catch {}
+                try { await env.OAUTH_KV.delete(`client:${clientId}`); } catch (deleteErr) {
+                    console.error(`Failed to remove corrupt client data for "${clientId}":`, deleteErr);
+                }
             }
         }
 
