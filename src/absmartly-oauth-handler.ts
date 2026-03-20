@@ -6,7 +6,7 @@ import {
   DEFAULT_OAUTH_CLIENT_ID,
   OAUTH_STATE_TTL_SECONDS,
   APPROVAL_COOKIE_MAX_AGE_SECONDS,
-  safeKvPut,
+  safeKvGet,
   escapeHtml,
 } from './shared';
 
@@ -61,8 +61,8 @@ export class ABsmartlyOAuthHandler extends Hono {
                               url.searchParams.get('absmartly-endpoint') ||
                               c.req.header('x-absmartly-endpoint');
 
-      if (!absmartlyEndpoint && env.OAUTH_KV) {
-        const stored = await env.OAUTH_KV.get(`oauth_endpoint:client:${authRequest.clientId}`);
+      if (!absmartlyEndpoint) {
+        const stored = await safeKvGet(env.OAUTH_KV, `oauth_endpoint:client:${authRequest.clientId}`);
         if (stored) {
           debug('Retrieved endpoint from KV (per-client_id):', stored);
           absmartlyEndpoint = stored;
@@ -132,12 +132,18 @@ export class ABsmartlyOAuthHandler extends Hono {
         codeChallengeMethod: formData.get('code_challenge_method') as string,
       };
 
-      await safeKvPut(
-        env.OAUTH_KV,
-        `oauth_endpoint:client:${authRequest.clientId}`,
-        absmartlyEndpoint,
-        { expirationTtl: OAUTH_STATE_TTL_SECONDS }
-      );
+      if (env.OAUTH_KV) {
+        try {
+          await env.OAUTH_KV.put(
+            `oauth_endpoint:client:${authRequest.clientId}`,
+            absmartlyEndpoint,
+            { expirationTtl: OAUTH_STATE_TTL_SECONDS }
+          );
+        } catch (e) {
+          console.error('Failed to store OAuth endpoint:', e);
+          return c.text('Service temporarily unavailable, please try again', 503);
+        }
+      }
 
       if (action !== 'set_endpoint') {
         await this.addApprovedClient(c, authRequest.clientId);
@@ -162,13 +168,23 @@ export class ABsmartlyOAuthHandler extends Hono {
         return c.text('Missing code or state parameter', 400);
       }
 
-      const storedState = await env.OAUTH_KV.get(`oauth:state:${state}`);
+      let storedState: string | null;
+      try {
+        storedState = await env.OAUTH_KV.get(`oauth:state:${state}`);
+      } catch (e) {
+        console.error('Failed to read OAuth state from KV:', e);
+        return c.text('Service temporarily unavailable, please try again', 503);
+      }
       if (!storedState) {
         debug('Invalid or expired state token:', state);
         return c.text('Invalid or expired state', 400);
       }
 
-      await env.OAUTH_KV.delete(`oauth:state:${state}`);
+      try {
+        await env.OAUTH_KV.delete(`oauth:state:${state}`);
+      } catch (e) {
+        console.warn('Failed to delete OAuth state token (non-critical):', e);
+      }
 
       let oauthReqInfo;
       try {

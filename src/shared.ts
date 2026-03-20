@@ -90,7 +90,8 @@ export function detectApiKey(
   if (apiKeyFromQuery) {
     const endpoint = url.searchParams.get("absmartly-endpoint") ||
                     request.headers.get("x-absmartly-endpoint") ||
-                    endpointFromPath;
+                    endpointFromPath ||
+                    defaultEndpoint;
     return { apiKey: apiKeyFromQuery, endpoint };
   }
 

@@ -222,6 +222,8 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
     }
 
     private async fetchAllEntities(): Promise<void> {
+        this.entityWarnings = [];
+
         if (!this.apiClient) {
             debug("📦 No API client - setting empty arrays");
             this.setEmptyEntities();
@@ -1379,6 +1381,7 @@ async function verifyApiKey(apiKey: string, endpoint: string): Promise<{ ok: boo
         const data = await response.json() as any;
         return { ok: true, user: data.user || data };
     } catch (error) {
+        console.error('API key verification network error:', error);
         return { ok: false, error: 'network_error' };
     }
 }
@@ -1458,7 +1461,7 @@ export default {
         }
 
         const authHeader = request.headers.get("Authorization");
-        debug(`Raw Authorization header: ${authHeader ? authHeader.substring(0, 100) + '...' : 'null'}`);
+        debug(`Authorization header present: ${authHeader ? 'yes' : 'no'}, type: ${authHeader?.split(' ')[0] || 'none'}`);
 
         const { apiKey, endpoint } = detectApiKey(request);
         debug(`detectApiKey result: apiKey=${apiKey ? apiKey.substring(0, 30) + '...' : 'null'}, endpoint=${endpoint}`);
@@ -1494,10 +1497,10 @@ export default {
                     const verifyResult = await verifyApiKey(apiKey, endpoint || DEFAULT_ABSMARTLY_ENDPOINT);
 
                     if (!verifyResult.ok) {
-                        const status = verifyResult.error === 'server_error' ? 502 : 401;
+                        const isTransient = verifyResult.error === 'server_error' || verifyResult.error === 'network_error';
                         console.error(`Failed to verify API key: ${verifyResult.error}`);
-                        return new Response("Unauthorized", {
-                            status,
+                        return new Response(isTransient ? "ABsmartly service temporarily unavailable" : "Unauthorized", {
+                            status: isTransient ? 503 : 401,
                             headers: CORS_HEADERS,
                         });
                     }
