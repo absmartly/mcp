@@ -8,40 +8,40 @@
 function extractAuthConfig(request) {
   const auth = request.headers.get('Authorization');
   const endpoint = request.headers.get('X-ABSMARTLY-API-ENDPOINT');
-  
+
   if (auth === null || auth === undefined) return null;
-  
+
   if (auth.startsWith('Bearer ')) {
     // Format 3: OAuth Bearer token
-    return { 
-      type: 'oauth', 
-      token: auth.slice(7), 
+    return {
+      type: 'oauth',
+      token: auth.slice(7),
       endpoint: endpoint || 'https://sandbox.absmartly.com/v1'
     };
-  } 
+  }
   else if (auth.startsWith('Api-Key ')) {
     // Format 2: Explicit Api-Key prefix
-    return { 
-      type: 'api_key', 
-      apiKey: auth.slice(8), 
-      endpoint: endpoint || 'https://sandbox.absmartly.com/v1' 
+    return {
+      type: 'api_key',
+      apiKey: auth.slice(8),
+      endpoint: endpoint || 'https://sandbox.absmartly.com/v1'
     };
   }
   else if (auth.includes(' ')) {
     // Format 1: Subdomain format "subdomain api_key"
     const [subdomain, apiKey] = auth.split(' ', 2);
-    return { 
-      type: 'api_key', 
-      apiKey, 
-      endpoint: `https://${subdomain}.absmartly.com/v1` 
+    return {
+      type: 'api_key',
+      apiKey,
+      endpoint: `https://${subdomain}.absmartly.com/v1`
     };
   }
   else {
     // Format 4: Simple API key only
-    return { 
-      type: 'api_key', 
-      apiKey: auth, 
-      endpoint: endpoint || 'https://sandbox.absmartly.com/v1' 
+    return {
+      type: 'api_key',
+      apiKey: auth,
+      endpoint: endpoint || 'https://sandbox.absmartly.com/v1'
     };
   }
 }
@@ -51,18 +51,23 @@ class MockRequest {
   constructor(headers = {}) {
     this.headers = new Map(Object.entries(headers));
   }
-  
+
   get(key) {
     return this.headers.get(key) || null;
   }
 }
 
-export default function runAuthParserTests() {
+export default function runAuthParserTests(): {
+  success: boolean;
+  message: string;
+  testCount: number;
+  details: Array<{ name: string; status: string; error?: string }>;
+} {
   let passed = 0;
   let failed = 0;
-  const results = [];
+  const results: Array<{ name: string; status: string; error?: string }> = [];
 
-  function test(name, testFn) {
+  function test(name: string, testFn: () => unknown): void {
     try {
       const result = testFn();
       if (result) {
@@ -74,14 +79,14 @@ export default function runAuthParserTests() {
       }
     } catch (error) {
       failed++;
-      results.push({ name, status: 'FAIL', error: error.message });
+      results.push({ name, status: 'FAIL', error: (error as Error).message });
     }
   }
 
-  function assertEquals(actual, expected, message = '') {
+  function assertEquals(actual: unknown, expected: unknown, message: string = ''): boolean {
     const actualStr = JSON.stringify(actual);
     const expectedStr = JSON.stringify(expected);
-    
+
     if (actualStr !== expectedStr) {
       throw new Error(`${message}\nExpected: ${expectedStr}\nActual: ${actualStr}`);
     }
@@ -95,14 +100,14 @@ export default function runAuthParserTests() {
         get: (key) => key === 'Authorization' ? 'demo-1 BxYKd1U2DlzOLJ74gdvaIkwy4qyOCkXi' : null
       }
     };
-    
+
     const result = extractAuthConfig(mockRequest);
     const expected = {
       type: 'api_key',
       apiKey: 'BxYKd1U2DlzOLJ74gdvaIkwy4qyOCkXi',
       endpoint: 'https://demo-1.absmartly.com/v1'
     };
-    
+
     return assertEquals(result, expected, 'Subdomain format parsing failed');
   });
 
@@ -116,14 +121,14 @@ export default function runAuthParserTests() {
         }
       }
     };
-    
+
     const result = extractAuthConfig(mockRequest);
     const expected = {
       type: 'api_key',
       apiKey: 'BxYKd1U2DlzOLJ74gdvaIkwy4qyOCkXi',
       endpoint: 'https://custom.absmartly.com/v1'
     };
-    
+
     return assertEquals(result, expected, 'Api-Key format with custom endpoint failed');
   });
 
@@ -137,14 +142,14 @@ export default function runAuthParserTests() {
         }
       }
     };
-    
+
     const result = extractAuthConfig(mockRequest);
     const expected = {
       type: 'oauth',
       token: 'oauth-token-12345',
       endpoint: 'https://dev-1.absmartly.com/v1'
     };
-    
+
     return assertEquals(result, expected, 'OAuth Bearer token format failed');
   });
 
@@ -158,14 +163,14 @@ export default function runAuthParserTests() {
         }
       }
     };
-    
+
     const result = extractAuthConfig(mockRequest);
     const expected = {
       type: 'api_key',
       apiKey: 'BxYKd1U2DlzOLJ74gdvaIkwy4qyOCkXi',
       endpoint: 'https://dev-1.absmartly.com/v1'
     };
-    
+
     return assertEquals(result, expected, 'Simple API key format failed');
   });
 
@@ -175,14 +180,14 @@ export default function runAuthParserTests() {
         get: (key) => key === 'Authorization' ? 'BxYKd1U2DlzOLJ74gdvaIkwy4qyOCkXi' : null
       }
     };
-    
+
     const result = extractAuthConfig(mockRequest);
     const expected = {
       type: 'api_key',
       apiKey: 'BxYKd1U2DlzOLJ74gdvaIkwy4qyOCkXi',
       endpoint: 'https://sandbox.absmartly.com/v1'
     };
-    
+
     return assertEquals(result, expected, 'Simple API key with default endpoint failed');
   });
 
@@ -192,7 +197,7 @@ export default function runAuthParserTests() {
         get: () => null
       }
     };
-    
+
     const result = extractAuthConfig(mockRequest);
     return assertEquals(result, null, 'Should return null for missing auth header');
   });
@@ -203,7 +208,7 @@ export default function runAuthParserTests() {
         get: (key) => key === 'Authorization' ? '' : null
       }
     };
-    
+
     const result = extractAuthConfig(mockRequest);
     // Empty string should be treated as simple API key with empty value
     const expected = {
@@ -211,7 +216,7 @@ export default function runAuthParserTests() {
       apiKey: '',
       endpoint: 'https://sandbox.absmartly.com/v1'
     };
-    
+
     return assertEquals(result, expected, 'Empty auth header should be treated as simple API key');
   });
 
@@ -221,14 +226,14 @@ export default function runAuthParserTests() {
         get: (key) => key === 'Authorization' ? 'Api-Key ' : null
       }
     };
-    
+
     const result = extractAuthConfig(mockRequest);
     const expected = {
       type: 'api_key',
       apiKey: '',
       endpoint: 'https://sandbox.absmartly.com/v1'
     };
-    
+
     return assertEquals(result, expected, 'Api-Key with no key should have empty apiKey');
   });
 
@@ -238,14 +243,14 @@ export default function runAuthParserTests() {
         get: (key) => key === 'Authorization' ? 'Bearer ' : null
       }
     };
-    
+
     const result = extractAuthConfig(mockRequest);
     const expected = {
       type: 'oauth',
       token: '',
       endpoint: 'https://sandbox.absmartly.com/v1'
     };
-    
+
     return assertEquals(result, expected, 'Bearer with no token should have empty token');
   });
 

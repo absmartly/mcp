@@ -1,16 +1,30 @@
 import { APIClient } from '@absmartly/cli/api-client';
 
 class MockHttpClient {
-  constructor(responses = []) {
+  responses: Array<{ status: number; data: any; headers: Record<string, string>; shouldThrow?: boolean; errorMessage?: string }>;
+  requests: Array<{ method: string; url: string; data?: any; params?: any; headers?: any }>;
+  callIndex: number;
+
+  constructor(responses: Array<any> = []) {
     this.responses = responses;
     this.requests = [];
     this.callIndex = 0;
   }
-  async request(config) {
+
+  async request(config: any) {
     this.requests.push(config);
     const response = this.responses[this.callIndex] || { status: 200, data: {}, headers: {} };
     this.callIndex++;
     if (response.shouldThrow) throw new Error(response.errorMessage);
+    if (response.status >= 400) {
+      const statusMessages: Record<number, string> = {
+        401: 'Unauthorized',
+        403: 'Forbidden',
+        404: 'Not found',
+        429: 'Rate limit exceeded',
+      };
+      throw new Error(statusMessages[response.status] || `HTTP ${response.status}`);
+    }
     return response;
   }
 }
@@ -18,9 +32,9 @@ class MockHttpClient {
 export default async function runTests() {
   let passed = 0;
   let failed = 0;
-  const details = [];
+  const details: Array<{ name: string; status: string; error?: string }> = [];
 
-  function assert(condition, name, error = 'Assertion failed') {
+  function assert(condition: boolean, name: string, error: string = 'Assertion failed') {
     if (condition) {
       passed++;
       details.push({ name, status: 'PASS' });
@@ -30,7 +44,7 @@ export default async function runTests() {
     }
   }
 
-  function assertEquals(actual, expected, name) {
+  function assertEquals(actual: unknown, expected: unknown, name: string) {
     const actualStr = JSON.stringify(actual);
     const expectedStr = JSON.stringify(expected);
     assert(actualStr === expectedStr, name, `Expected ${expectedStr}, got ${actualStr}`);
@@ -58,10 +72,10 @@ export default async function runTests() {
       headers: {}
     }]);
     const client = new APIClient(mock);
-    await client.listExperiments({ limit: 10, offset: 5, state: 'running' });
+    await client.listExperiments({ items: 10, page: 5, state: 'running' });
     const params = mock.requests[0].params;
-    assertEquals(params.limit, '10', 'listExperiments: passes limit param as string');
-    assertEquals(params.offset, '5', 'listExperiments: passes offset param as string');
+    assertEquals(params.items, '10', 'listExperiments: passes items param as string');
+    assertEquals(params.page, '5', 'listExperiments: passes page param as string');
     assertEquals(params.state, 'running', 'listExperiments: passes state param');
   }
 
@@ -98,19 +112,21 @@ export default async function runTests() {
   }
 
   // --- updateExperiment ---
+  // updateExperiment first calls getExperiment, then PUTs the merged data
 
   {
     const updateData = { display_name: 'Updated Name' };
-    const mock = new MockHttpClient([{
-      status: 200,
-      data: { experiment: { id: 5, display_name: 'Updated Name' } },
-      headers: {}
-    }]);
+    const existingExperiment = { id: 5, name: 'original', display_name: 'Old Name' };
+    const mock = new MockHttpClient([
+      { status: 200, data: { experiment: existingExperiment }, headers: {} },
+      { status: 200, data: { experiment: { id: 5, display_name: 'Updated Name' } }, headers: {} }
+    ]);
     const client = new APIClient(mock);
     const result = await client.updateExperiment(5, updateData);
-    assertEquals(mock.requests[0].method, 'PUT', 'updateExperiment: sends PUT');
-    assertEquals(mock.requests[0].url, '/experiments/5', 'updateExperiment: sends to /experiments/{id}');
-    assertEquals(mock.requests[0].data, { data: updateData }, 'updateExperiment: wraps body in {data: body}');
+    assertEquals(mock.requests[0].method, 'GET', 'updateExperiment: first fetches existing experiment');
+    assertEquals(mock.requests[0].url, '/experiments/5', 'updateExperiment: fetches from /experiments/{id}');
+    assertEquals(mock.requests[1].method, 'PUT', 'updateExperiment: sends PUT');
+    assertEquals(mock.requests[1].url, '/experiments/5', 'updateExperiment: PUTs to /experiments/{id}');
     assertEquals(result, { id: 5, display_name: 'Updated Name' }, 'updateExperiment: returns updated experiment');
   }
 
@@ -156,7 +172,7 @@ export default async function runTests() {
     let errorMsg = '';
     try {
       await client.getExperiment(1);
-    } catch (e) {
+    } catch (e: any) {
       errorMsg = e.message;
     }
     assert(errorMsg.includes('Unauthorized'), 'Error 401: throws with Unauthorized message', `Got: ${errorMsg}`);
@@ -174,7 +190,7 @@ export default async function runTests() {
     let errorMsg = '';
     try {
       await client.getExperiment(999);
-    } catch (e) {
+    } catch (e: any) {
       errorMsg = e.message;
     }
     assert(errorMsg.includes('Not found'), 'Error 404: throws with Not found message', `Got: ${errorMsg}`);
@@ -192,7 +208,7 @@ export default async function runTests() {
     let errorMsg = '';
     try {
       await client.listExperiments();
-    } catch (e) {
+    } catch (e: any) {
       errorMsg = e.message;
     }
     assert(errorMsg.includes('Forbidden'), 'Error 403: throws with Forbidden message', `Got: ${errorMsg}`);
@@ -210,7 +226,7 @@ export default async function runTests() {
     let errorMsg = '';
     try {
       await client.listExperiments();
-    } catch (e) {
+    } catch (e: any) {
       errorMsg = e.message;
     }
     assert(errorMsg.includes('Rate limit'), 'Error 429: throws with Rate limit message', `Got: ${errorMsg}`);
@@ -227,7 +243,7 @@ export default async function runTests() {
     let errorMsg = '';
     try {
       await client.listExperiments();
-    } catch (e) {
+    } catch (e: any) {
       errorMsg = e.message;
     }
     assert(errorMsg.includes('Connection refused'), 'Network error: propagates error message', `Got: ${errorMsg}`);

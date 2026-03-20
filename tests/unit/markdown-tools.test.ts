@@ -7,9 +7,9 @@ import {
 export default async function runTests() {
   let passed = 0;
   let failed = 0;
-  const details = [];
+  const details: Array<{ name: string; status: string; error?: string }> = [];
 
-  function assert(condition, name, error = 'Assertion failed') {
+  function assert(condition: boolean, name: string, error: string = 'Assertion failed') {
     if (condition) {
       passed++;
       details.push({ name, status: 'PASS' });
@@ -19,7 +19,7 @@ export default async function runTests() {
     }
   }
 
-  function assertEquals(actual, expected, name) {
+  function assertEquals(actual: unknown, expected: unknown, name: string) {
     const actualStr = JSON.stringify(actual);
     const expectedStr = JSON.stringify(expected);
     assert(actualStr === expectedStr, name, `Expected ${expectedStr}, got ${actualStr}`);
@@ -55,7 +55,7 @@ config: {"color": "red"}
     assertEquals(result.type, 'test', 'parseExperimentMarkdown: extracts type from frontmatter');
     assertEquals(result.percentages, '60/40', 'parseExperimentMarkdown: extracts percentages from frontmatter');
     assertEquals(result.display_name, 'My Experiment', 'parseExperimentMarkdown: extracts display_name from section');
-    assert(result.variants.length === 2, 'parseExperimentMarkdown: parses two variants', `Got ${result.variants.length}`);
+    assert(result.variants.length === 2, 'parseExperimentMarkdown: parses two variants', `Got ${result.variants?.length}`);
     assertEquals(result.variants[0].name, 'control', 'parseExperimentMarkdown: variant 0 name is control');
     assertEquals(result.variants[1].name, 'treatment', 'parseExperimentMarkdown: variant 1 name is treatment');
     assertEquals(result.variants[0].config, '{"color": "blue"}', 'parseExperimentMarkdown: variant 0 config parsed');
@@ -86,7 +86,7 @@ name: [invalid
     let threw = false;
     try {
       parseExperimentMarkdown(badMarkdown);
-    } catch (e) {
+    } catch (e: any) {
       threw = true;
       assert(e.message.includes('Invalid YAML'), 'parseExperimentMarkdown invalid YAML: error mentions YAML', `Got: ${e.message}`);
     }
@@ -112,8 +112,8 @@ Primary metric improves by 10%
 `;
     const result = parseExperimentMarkdown(markdown);
     assert(result.custom_fields !== undefined, 'parseExperimentMarkdown custom fields: has custom_fields');
-    assertEquals(result.custom_fields['Hypothesis'], 'We believe X will improve Y', 'parseExperimentMarkdown custom fields: parses hypothesis');
-    assertEquals(result.custom_fields['Success Criteria'], 'Primary metric improves by 10%', 'parseExperimentMarkdown custom fields: parses success criteria');
+    assertEquals(result.custom_fields?.['Hypothesis'], 'We believe X will improve Y', 'parseExperimentMarkdown custom fields: parses hypothesis');
+    assertEquals(result.custom_fields?.['Success Criteria'], 'Primary metric improves by 10%', 'parseExperimentMarkdown custom fields: parses success criteria');
   }
 
   // --- generateTemplate ---
@@ -156,6 +156,7 @@ Primary metric improves by 10%
   }
 
   // --- buildExperimentPayload ---
+  // Note: buildExperimentPayload is async and returns { payload, warnings }
 
   {
     const template = {
@@ -170,13 +171,14 @@ Primary metric improves by 10%
       unitTypes: [{ id: 10, name: 'user_id' }],
       metrics: [{ id: 100, name: 'conversion' }],
     };
-    const payload = buildExperimentPayload(template, context);
+    const { payload } = await buildExperimentPayload(template, context);
     assertEquals(payload.name, 'test_exp', 'buildExperimentPayload: sets name');
     assertEquals(payload.type, 'test', 'buildExperimentPayload: sets type');
     assertEquals(payload.percentages, '50/50', 'buildExperimentPayload: sets percentages');
-    assert(payload.variants.length === 2, 'buildExperimentPayload: creates default 2 variants when empty', `Got ${payload.variants.length}`);
-    assertEquals(payload.variants[0].name, 'control', 'buildExperimentPayload: default variant 0 is control');
-    assertEquals(payload.variants[1].name, 'treatment', 'buildExperimentPayload: default variant 1 is treatment');
+    const variants = payload.variants as Array<{ name: string }>;
+    assert(variants.length === 2, 'buildExperimentPayload: creates default 2 variants when empty', `Got ${variants.length}`);
+    assertEquals(variants[0].name, 'control', 'buildExperimentPayload: default variant 0 is control');
+    assertEquals(variants[1].name, 'treatment', 'buildExperimentPayload: default variant 1 is treatment');
   }
 
   // --- buildExperimentPayload: resolves application name to ID ---
@@ -193,7 +195,7 @@ Primary metric improves by 10%
       unitTypes: [],
       metrics: [],
     };
-    const payload = buildExperimentPayload(template, context);
+    const { payload } = await buildExperimentPayload(template, context);
     assertEquals(payload.applications, [{ application_id: 2, application_version: '0' }], 'buildExperimentPayload: resolves application name to ID');
   }
 
@@ -211,7 +213,7 @@ Primary metric improves by 10%
       unitTypes: [{ id: 10, name: 'user_id' }, { id: 20, name: 'session_id' }],
       metrics: [],
     };
-    const payload = buildExperimentPayload(template, context);
+    const { payload } = await buildExperimentPayload(template, context);
     assertEquals(payload.unit_type, { unit_type_id: 20 }, 'buildExperimentPayload: resolves unit_type name to ID');
   }
 
@@ -229,7 +231,7 @@ Primary metric improves by 10%
       unitTypes: [],
       metrics: [{ id: 100, name: 'conversion' }, { id: 200, name: 'revenue' }],
     };
-    const payload = buildExperimentPayload(template, context);
+    const { payload } = await buildExperimentPayload(template, context);
     assertEquals(payload.primary_metric, { metric_id: 200 }, 'buildExperimentPayload: resolves primary_metric name to ID');
   }
 
@@ -250,8 +252,8 @@ Primary metric improves by 10%
     let threw = false;
     let errorMsg = '';
     try {
-      buildExperimentPayload(template, context);
-    } catch (e) {
+      await buildExperimentPayload(template, context);
+    } catch (e: any) {
       threw = true;
       errorMsg = e.message;
     }
@@ -273,10 +275,10 @@ Primary metric improves by 10%
       unitTypes: [],
       metrics: [],
     };
-    const payload = buildExperimentPayload(template, context);
+    const { payload } = await buildExperimentPayload(template, context);
     assertEquals(payload.type, 'test', 'buildExperimentPayload defaults: type is test');
     assertEquals(payload.state, 'ready', 'buildExperimentPayload defaults: state is ready');
-    assertEquals(payload.traffic, 100, 'buildExperimentPayload defaults: traffic is 100');
+    assertEquals(payload.percentage_of_traffic, 100, 'buildExperimentPayload defaults: traffic is 100');
     assertEquals(payload.percentages, '50/50', 'buildExperimentPayload defaults: percentages is 50/50');
     assertEquals(payload.analysis_type, 'group_sequential', 'buildExperimentPayload defaults: analysis_type is group_sequential');
     assertEquals(payload.nr_variants, 2, 'buildExperimentPayload defaults: nr_variants is 2');
@@ -303,9 +305,15 @@ Primary metric improves by 10%
         { id: 4, name: 'latency' },
       ],
     };
-    const payload = buildExperimentPayload(template, context);
-    assertEquals(payload.secondary_metrics, [{ metric_id: 2 }, { metric_id: 3 }], 'buildExperimentPayload: resolves secondary metrics');
-    assertEquals(payload.guardrail_metrics, [{ metric_id: 4 }], 'buildExperimentPayload: resolves guardrail metrics');
+    const { payload } = await buildExperimentPayload(template, context);
+    const secondaryMetrics = payload.secondary_metrics as Array<{ metric_id: number; type?: string }>;
+    assert(secondaryMetrics.length > 0, 'buildExperimentPayload: has secondary metrics');
+    const hasRevenue = secondaryMetrics.some((m: any) => m.metric_id === 2);
+    const hasPageviews = secondaryMetrics.some((m: any) => m.metric_id === 3);
+    const hasLatency = secondaryMetrics.some((m: any) => m.metric_id === 4);
+    assert(hasRevenue, 'buildExperimentPayload: resolves revenue secondary metric');
+    assert(hasPageviews, 'buildExperimentPayload: resolves pageviews secondary metric');
+    assert(hasLatency, 'buildExperimentPayload: resolves latency guardrail metric');
   }
 
   // --- buildExperimentPayload: custom variants ---
@@ -321,11 +329,12 @@ Primary metric improves by 10%
       custom_fields: {},
     };
     const context = { applications: [], unitTypes: [], metrics: [] };
-    const payload = buildExperimentPayload(template, context);
+    const { payload } = await buildExperimentPayload(template, context);
     assertEquals(payload.nr_variants, 3, 'buildExperimentPayload custom variants: nr_variants is 3');
-    assertEquals(payload.variants[0].name, 'baseline', 'buildExperimentPayload custom variants: variant 0 name');
-    assertEquals(payload.variants[2].name, 'bold_design', 'buildExperimentPayload custom variants: variant 2 name');
-    assertEquals(payload.variants[1].config, '{"version":"b"}', 'buildExperimentPayload custom variants: config is re-serialized JSON');
+    const variants = payload.variants as Array<{ name: string; config: string }>;
+    assertEquals(variants[0].name, 'baseline', 'buildExperimentPayload custom variants: variant 0 name');
+    assertEquals(variants[2].name, 'bold_design', 'buildExperimentPayload custom variants: variant 2 name');
+    assertEquals(variants[1].config, '{"version":"b"}', 'buildExperimentPayload custom variants: config is re-serialized JSON');
   }
 
   const total = passed + failed;

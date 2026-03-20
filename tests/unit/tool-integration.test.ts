@@ -13,12 +13,17 @@ import {
 
 import { resolveByName } from '@absmartly/cli/api-client';
 
-export default async function runTests() {
+export default async function runTests(): Promise<{
+  success: boolean;
+  message: string;
+  testCount: number;
+  details: Array<{ name: string; status: string; error?: string }>;
+}> {
   let passed = 0;
   let failed = 0;
-  const details = [];
+  const details: Array<{ name: string; status: string; error?: string }> = [];
 
-  function assert(condition, name, error = 'Assertion failed') {
+  function assert(condition: boolean, name: string, error: string = 'Assertion failed'): void {
     if (condition) {
       passed++;
       details.push({ name, status: 'PASS' });
@@ -28,20 +33,20 @@ export default async function runTests() {
     }
   }
 
-  function assertEquals(actual, expected, name) {
+  function assertEquals(actual: unknown, expected: unknown, name: string): void {
     const actualStr = JSON.stringify(actual);
     const expectedStr = JSON.stringify(expected);
     assert(actualStr === expectedStr, name, `Expected ${expectedStr}, got ${actualStr}`);
   }
 
-  function assertThrows(fn, name, expectedMessagePart) {
+  function assertThrows(fn: () => unknown, name: string, expectedMessagePart?: string): void {
     let threw = false;
     let errorMsg = '';
     try {
       fn();
     } catch (e) {
       threw = true;
-      errorMsg = e.message;
+      errorMsg = (e as Error).message;
     }
     assert(threw, `${name}: throws`, `Expected to throw but did not`);
     if (expectedMessagePart) {
@@ -170,7 +175,7 @@ export default async function runTests() {
   // --- buildQueryString helper pattern ---
 
   {
-    function buildQueryString(params) {
+    function buildQueryString(params: Record<string, unknown>): string {
       const searchParams = new URLSearchParams();
       for (const [key, value] of Object.entries(params)) {
         if (value !== undefined && value !== null) {
@@ -205,7 +210,7 @@ export default async function runTests() {
   // --- Feature flag payload pattern ---
 
   {
-    function buildFeatureFlagPayload(name, variants) {
+    function buildFeatureFlagPayload(name: string, variants?: Array<{ name: string; variant: number; config: string }>) {
       const defaultVariants = [
         { name: 'off', variant: 0, config: JSON.stringify({}) },
         { name: 'on', variant: 1, config: JSON.stringify({}) },
@@ -230,7 +235,7 @@ export default async function runTests() {
   // --- Percentages calculation pattern ---
 
   {
-    function parsePercentages(percentageStr) {
+    function parsePercentages(percentageStr: string): number[] {
       return percentageStr.split('/').map(Number);
     }
 
@@ -243,7 +248,7 @@ export default async function runTests() {
   // --- verifyApiKey pattern ---
 
   {
-    async function verifyApiKey(baseUrl, apiKey) {
+    async function verifyApiKey(baseUrl: string, apiKey: string): Promise<{ baseUrl: string; authHeader: string }> {
       const authHeader = apiKey.includes('.') && apiKey.split('.').length === 3
         ? `JWT ${apiKey}`
         : `Api-Key ${apiKey}`;
