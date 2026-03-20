@@ -27,6 +27,10 @@ export class FetchHttpClient implements HttpClient {
     this.timeout = options.timeout ?? DEFAULT_REQUEST_TIMEOUT_MS;
   }
 
+  getBaseUrl(): string {
+    return `${this.baseUrl}${API_VERSION_PREFIX}`;
+  }
+
   async request<T = unknown>(config: HttpRequestConfig): Promise<HttpResponse<T>> {
     let url = `${this.baseUrl}${API_VERSION_PREFIX}${config.url}`;
 

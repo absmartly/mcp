@@ -28,7 +28,6 @@ import {
     SESSION_TTL_SECONDS,
     OAUTH_STATE_TTL_SECONDS,
     normalizeBaseUrl,
-    buildAuthHeader,
     extractEndpointFromPath,
     pickDefined,
     buildQueryString,
@@ -139,23 +138,11 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
     }
 
     private async fetchCurrentUser(): Promise<void> {
-        if (!this.props?.absmartly_endpoint) return;
+        if (!this.apiClient) return;
         try {
-            const authToken = this.props.absmartly_api_key || this.props.oauth_jwt;
-            if (!authToken) return;
-            const baseUrl = normalizeBaseUrl(this.props.absmartly_endpoint);
-            const headers = buildAuthHeader(authToken, !!this.props.absmartly_api_key);
-            const response = await fetch(`${baseUrl}/auth/current-user`, { headers });
-            if (response.ok) {
-                const data = await response.json() as any;
-                const userData = data.user || data;
-                this.currentUserId = userData?.id || null;
-                debug("Current user ID:", this.currentUserId);
-            } else {
-                const msg = `Failed to fetch current user: HTTP ${response.status}`;
-                console.warn(msg);
-                this.entityWarnings.push(msg);
-            }
+            const user = await this.apiClient.getCurrentUser();
+            this.currentUserId = user?.id || null;
+            debug("Current user ID:", this.currentUserId);
         } catch (e) {
             const msg = `Failed to fetch current user: ${e}`;
             console.warn(msg);
@@ -1371,18 +1358,17 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
 }
 
 async function verifyApiKey(apiKey: string, endpoint: string): Promise<{ ok: boolean; user?: any; error?: string }> {
-    const baseUrl = normalizeBaseUrl(endpoint);
-    const headers = buildAuthHeader(apiKey, true);
     try {
-        const response = await fetch(`${baseUrl}/auth/current-user`, { headers });
-        if (!response.ok) {
-            return { ok: false, error: response.status >= 500 ? 'server_error' : 'unauthorized' };
-        }
-        const data = await response.json() as any;
-        return { ok: true, user: data.user || data };
-    } catch (error) {
-        console.error('API key verification network error:', error);
-        return { ok: false, error: 'network_error' };
+        const httpClient = new FetchHttpClient(normalizeBaseUrl(endpoint), { authToken: apiKey, authType: 'api-key' });
+        const client = new APIClient(httpClient);
+        const user = await client.getCurrentUser();
+        return { ok: true, user };
+    } catch (error: any) {
+        const msg = error.message || String(error);
+        console.error('API key verification error:', msg);
+        if (msg.includes('HTTP 5')) return { ok: false, error: 'server_error' };
+        if (msg.includes('Network error') || msg.includes('timed out')) return { ok: false, error: 'network_error' };
+        return { ok: false, error: 'unauthorized' };
     }
 }
 
