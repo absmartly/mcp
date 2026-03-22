@@ -172,28 +172,59 @@ function parseStreamJson(raw) {
   return { ok: true, output: output.trim(), toolResults, toolCalls };
 }
 
-function extractExperimentId(result) {
+function extractExperimentId(result, expName) {
   const output = result.output || '';
+  const allToolText = result.toolResults.join('\n');
+  const allText = output + '\n' + allToolText;
 
-  const outputPatterns = [
-    /\b(?:experiment\s+)?ID[:\s]*(\d+)/i,
-    /\bID[:\s]*\**(\d+)\**/i,
-    /\bcreated\b.*?\b(\d{2,})\b/i,
-    /\b(\d{2,})\b.*?\bcreated\b/i,
-  ];
-  for (const pat of outputPatterns) {
-    const m = output.match(pat);
-    if (m) return parseInt(m[1], 10);
+  if (expName) {
+    const escaped = expName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const nameIdMatch = allText.match(new RegExp(`"name"\\s*:\\s*"${escaped}"[\\s\\S]{0,300}?"id"\\s*:\\s*(\\d+)`)) ||
+                        allText.match(new RegExp(`"id"\\s*:\\s*(\\d+)[\\s\\S]{0,300}?"name"\\s*:\\s*"${escaped}"`));
+    if (nameIdMatch) return parseInt(nameIdMatch[1], 10);
   }
 
-  const lastToolResult = result.toolResults[result.toolResults.length - 1] || '';
-  const createMatch = lastToolResult.match(/"id"\s*:\s*(\d+)/);
-  if (createMatch) return parseInt(createMatch[1], 10);
+  const createCalls = result.toolCalls.filter(tc =>
+    tc.tool.includes('execute_api_method') &&
+    tc.input?.method_name === 'createExperiment'
+  );
+  if (createCalls.length > 0) {
+    const createIdx = result.toolCalls.indexOf(createCalls[createCalls.length - 1]);
+    const experimentMethods = new Set([
+      'getExperiment', 'updateExperiment', 'startExperiment',
+      'stopExperiment', 'developmentExperiment', 'archiveExperiment',
+      'restartExperiment', 'fullOnExperiment',
+    ]);
+    for (let i = createIdx + 1; i < result.toolCalls.length; i++) {
+      const tc = result.toolCalls[i];
+      if (tc.tool.includes('execute_api_method') && experimentMethods.has(tc.input?.method_name)) {
+        const id = tc.input?.params?.id;
+        if (typeof id === 'number') return id;
+      }
+    }
+  }
 
-  const allToolText = result.toolResults.join('\n');
-  const expNameMatch = allToolText.match(/"name"\s*:\s*"(?:ux_test|mcp_meta)[^"]*"[\s\S]{0,200}?"id"\s*:\s*(\d+)/) ||
-                       allToolText.match(/"id"\s*:\s*(\d+)[\s\S]{0,200}?"name"\s*:\s*"(?:ux_test|mcp_meta)[^"]*"/);
-  if (expNameMatch) return parseInt(expNameMatch[1], 10);
+  const experimentMethodIds = [];
+  const experimentMethods = new Set([
+    'getExperiment', 'updateExperiment', 'startExperiment',
+    'stopExperiment', 'developmentExperiment', 'archiveExperiment',
+    'restartExperiment', 'fullOnExperiment',
+  ]);
+  for (const tc of result.toolCalls) {
+    if (tc.tool.includes('execute_api_method') && experimentMethods.has(tc.input?.method_name)) {
+      const id = tc.input?.params?.id;
+      if (typeof id === 'number') experimentMethodIds.push(id);
+    }
+  }
+  if (experimentMethodIds.length > 0) {
+    const counts = {};
+    for (const id of experimentMethodIds) counts[id] = (counts[id] || 0) + 1;
+    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    return parseInt(sorted[0][0], 10);
+  }
+
+  const outputIdMatch = output.match(/\b(?:experiment\s+)?ID[:\s]*\**(\d+)\**/i);
+  if (outputIdMatch) return parseInt(outputIdMatch[1], 10);
 
   return null;
 }
@@ -403,7 +434,7 @@ After creating it, tell me the experiment ID and its current state.`,
     );
     assertUsedMcpTool(result, 'should use execute_api_method');
 
-    state.expId = extractExperimentId(result);
+    state.expId = extractExperimentId(result, state.expName);
     if (!state.expId) throw new Error(`Could not find experiment ID in response: ${result.output.substring(0, 300)}`);
     console.log(`\n    experiment_id=${state.expId}`);
     process.stdout.write('    ');
@@ -501,7 +532,7 @@ Tell me the experiment ID.`,
     );
     assertUsedMcpTool(result, 'should use execute_api_method');
 
-    state.flagId = extractExperimentId(result);
+    state.flagId = extractExperimentId(result, state.flagName);
     if (!state.flagId) throw new Error(`Could not find feature flag ID in response: ${result.output.substring(0, 300)}`);
     console.log(`\n    flag_id=${state.flagId}`);
     process.stdout.write('    ');
@@ -551,7 +582,7 @@ Tell me the experiment ID.`,
     );
     assertUsedMcpTool(result, 'should use execute_api_method');
 
-    state.advId = extractExperimentId(result);
+    state.advId = extractExperimentId(result, state.advName);
     if (!state.advId) throw new Error(`Could not find experiment ID: ${result.output.substring(0, 300)}`);
     console.log(`\n    experiment_id=${state.advId}`);
     process.stdout.write('    ');
