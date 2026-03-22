@@ -1,9 +1,17 @@
 {
-  "name": "absmartly-mcp",
+  "name": "@absmartly/mcp",
   "version": "1.0.0",
-  "description": "Remote MCP server for ABsmartly API on Cloudflare Workers",
+  "description": "MCP server for ABsmartly — experimentation platform API access for AI assistants",
   "main": "src/index.ts",
   "type": "module",
+  "bin": {
+    "absmartly-mcp": "./bin/absmartly-mcp.mjs"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "public/docs/"
+  ],
   "scripts": {
     "prebuild": "node scripts/sync-version.js",
     "build": "tsc",
@@ -17,6 +25,7 @@
     "typecheck": "tsc --noEmit",
     "start": "wrangler dev",
     "bridge": "node mcp-bridge.js",
+    "local-server": "tsx src/local-server.ts",
     "test": "tsx tests/test-runner.js --unit-only",
     "test:unit": "tsx tests/test-runner.js --unit-only",
     "test:integration": "tsx tests/test-runner.js --integration-only",
