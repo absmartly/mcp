@@ -1,6 +1,7 @@
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { completable } from "@modelcontextprotocol/sdk/server/completable.js";
 import { z } from "zod";
 import { ABsmartlyResources } from "./resources";
 import { ABsmartlyOAuthHandler } from "./absmartly-oauth-handler";
@@ -8,14 +9,31 @@ import { Env } from "./types";
 import { debug } from "./config";
 import { MCP_VERSION } from "./version";
 import {
-    parseExperimentMarkdown,
-    generateTemplate,
-    buildExperimentPayload,
     APIClient,
-    ExperimentId,
+    summarizeExperiment,
+    summarizeExperimentRow,
+    summarizeMetric,
+    summarizeMetricRow,
+    summarizeGoal,
+    summarizeGoalRow,
+    summarizeTeam,
+    summarizeTeamRow,
+    summarizeUserDetail,
+    summarizeUserRow,
+    summarizeSegment,
+    summarizeSegmentRow,
 } from "@absmartly/cli/api-client";
-import type { ResolverContext } from "@absmartly/cli/api-client";
+import type { CustomSectionField } from "@absmartly/cli/api-client";
 import { FetchHttpClient } from "./fetch-adapter";
+import {
+    API_CATEGORIES,
+    API_CATALOG,
+    searchCatalog,
+    getCatalogByCategory,
+    getMethodEntry,
+    getCategorySummary,
+} from "./api-catalog";
+import type { ApiMethodEntry } from "./api-catalog";
 import {
     ABsmartlyProps,
     DEFAULT_ABSMARTLY_ENDPOINT,
@@ -29,24 +47,13 @@ import {
     OAUTH_STATE_TTL_SECONDS,
     normalizeBaseUrl,
     extractEndpointFromPath,
-    pickDefined,
-    buildQueryString,
     detectApiKey,
     safeKvPut,
     safeKvGet,
 } from "./shared";
 
-const DEFAULT_BASELINE_METRIC_MEAN = '79';
-const DEFAULT_BASELINE_METRIC_STDEV = '30';
-const DEFAULT_BASELINE_PARTICIPANTS_PER_DAY = '1428';
-const DEFAULT_REQUIRED_ALPHA = '0.1';
-const DEFAULT_REQUIRED_POWER = '0.8';
-
-const DEFAULT_ANALYSIS_TYPE = 'group_sequential';
-const DEFAULT_FUTILITY_TYPE = 'binding';
-const DEFAULT_MIN_ANALYSIS_INTERVAL = '1d';
-const DEFAULT_FIRST_ANALYSIS_INTERVAL = '7d';
-const DEFAULT_MAX_DURATION_INTERVAL = '4w';
+const DEFAULT_LIST_ITEMS = 20;
+const MAX_COMPLETIONS = 20;
 
 export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartlyProps> {
     server = new McpServer({
@@ -54,7 +61,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
         version: MCP_VERSION,
         capabilities: {
             tools: {},
-            resources: {},
+            resources: { subscribe: true, listChanged: true },
             prompts: {}
         }
     });
@@ -87,6 +94,13 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
         this.goals = entities.goals || [];
     }
 
+    private log(level: 'debug' | 'info' | 'warning' | 'error', message: string): void {
+        debug(message);
+        try {
+            this.server.server.sendLoggingMessage({ level, data: message });
+        } catch {}
+    }
+
     async init() {
         debug("ABsmartly MCP initialization START");
 
@@ -96,6 +110,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 this.fetchAllEntities(),
                 this.fetchCurrentUser()
             ]);
+            this.log('info', `Authenticated as ${this.props?.email}`);
             this.setupTools();
             await this.setupResources();
             this.setupPrompts();
@@ -150,64 +165,6 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
         }
     }
 
-    private customFieldKeyToTitle: Map<string, string> = new Map();
-
-    private toSnakeCase(title: string): string {
-        return title
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, '_')
-            .replace(/^_+|_+$/g, '');
-    }
-
-    private buildCustomFieldZodSchema(): Record<string, z.ZodTypeAny> {
-        const schema: Record<string, z.ZodTypeAny> = {};
-        this.customFieldKeyToTitle.clear();
-
-        const activeFields = this._customFields.filter((f: any) => !f.archived);
-        for (const field of activeFields) {
-            const key = this.toSnakeCase(field.title);
-            this.customFieldKeyToTitle.set(key, field.title);
-
-            const desc = field.description
-                ? `${field.title} - ${field.description}`
-                : field.title;
-
-            switch (field.type) {
-                case 'boolean':
-                    schema[key] = z.boolean().optional().describe(desc);
-                    break;
-                case 'number':
-                    schema[key] = z.number().optional().describe(desc);
-                    break;
-                case 'json':
-                    schema[key] = z.string().optional().describe(`${desc} (JSON string)`);
-                    break;
-                default:
-                    schema[key] = z.string().optional().describe(desc);
-                    break;
-            }
-        }
-        return schema;
-    }
-
-    private buildCustomFieldValuesFromParams(params: Record<string, any>): any[] {
-        const values: any[] = [];
-        for (const [key, title] of this.customFieldKeyToTitle) {
-            const value = params[key];
-            if (value === undefined || value === null) continue;
-
-            const field = this._customFields.find((f: any) => f.title === title);
-            if (!field) continue;
-
-            values.push({
-                experiment_custom_section_field_id: field.id,
-                type: field.type,
-                value: typeof value === 'object' ? JSON.stringify(value) : String(value)
-            });
-        }
-        return values;
-    }
-
     private async fetchAllEntities(): Promise<void> {
         this.entityWarnings = [];
 
@@ -230,6 +187,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                     if (cacheAge < ENTITIES_CACHE_TTL_MS) {
                         debug(`📦 Using cached entities (age: ${Math.round(cacheAge / 1000)}s)`);
                         this.loadEntitiesFromCache(parsed.entities);
+                        this.log('debug', 'Using cached entities');
                         return;
                     } else {
                         debug(`📦 Cache expired (age: ${Math.round(cacheAge / 1000)}s), fetching fresh data`);
@@ -273,7 +231,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 safeCall('applications', () => this.apiClient!.listApplications()),
                 safeCall('unitTypes', () => this.apiClient!.listUnitTypes()),
                 safeCall('experimentTags', () => this.apiClient!.listExperimentTags(100, 0)),
-                safeCall('metrics', () => this.apiClient!.listMetrics(100, 0)),
+                safeCall('metrics', () => this.apiClient!.listMetrics({ items: 100 })),
                 safeCall('goals', () => this.apiClient!.listGoals(100, 0))
             ]);
 
@@ -339,7 +297,16 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 }
             }
 
-            debug("✅ All entities fetched successfully");
+            const entityCount = this.applications.length + this.unitTypes.length +
+                this.metrics.length + this.goals.length + this.teams.length +
+                this.users.length + this.experimentTags.length + this._customFields.length;
+            this.log('info', `Entities refreshed: ${entityCount} total`);
+
+            try {
+                this.server.sendResourceListChanged();
+            } catch (_) {
+                debug("Could not send resource list changed notification (server may not be connected)");
+            }
         } catch (error) {
             const msg = `Error fetching entities: ${error}`;
             console.error("❌", msg);
@@ -359,154 +326,136 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
         this.goals = [];
     }
 
-    private formatExperimentAsMarkdown(exp: any, baseUrl: string): string {
-        const link = `${baseUrl}/experiments/${exp.id}`;
-        const state = exp.state.toUpperCase();
-        const stateEmoji: Record<string, string> = {
-            'CREATED': '🆕',
-            'READY': '🟡',
-            'RUNNING': '🟢',
-            'STOPPED': '🔴',
-            'ARCHIVED': '🗄️',
-            'DEVELOPMENT': '🔧',
-            'FULL_ON': '💯',
-            'SCHEDULED': '📅'
-        };
-        const emoji = stateEmoji[state] || '❓';
-
-        const hypothesis = exp.custom_section_field_values?.find((f: any) => 
-            f.custom_section_field?.title === 'Hypothesis')?.value || '';
-        const purpose = exp.custom_section_field_values?.find((f: any) => 
-            f.custom_section_field?.title === 'Purpose')?.value || '';
-
-        let md = `## ${emoji} [${exp.display_name || exp.name}](${link})\n\n`;
-        md += `**ID:** ${exp.id} | **State:** ${state} | **Type:** ${exp.type || 'test'}\n`;
-        md += `**Created:** ${new Date(exp.created_at).toLocaleDateString()} by ${exp.created_by?.first_name || 'Unknown'} ${exp.created_by?.last_name || ''}\n`;
-
-        if (exp.owners?.length > 0) {
-            const owners = exp.owners.map((o: any) => 
-                `${o.user?.first_name || ''} ${o.user?.last_name || ''}`.trim()
-            ).filter(Boolean).join(', ');
-            if (owners) md += `**Owners:** ${owners}\n`;
-        }
-
-        if (exp.primary_metric) {
-            md += `**Primary Metric:** ${exp.primary_metric.name}`;
-            if (exp.minimum_detectable_effect) {
-                md += ` (MDE: ${exp.minimum_detectable_effect}%)`;
+    private buildMethodArgs(entry: ApiMethodEntry, params: Record<string, unknown>): unknown[] {
+        return entry.params.map(p => {
+            const value = params[p.name];
+            if (value === undefined && p.required) {
+                throw new Error(`Missing required parameter: ${p.name}`);
             }
-            md += '\n';
-        }
-
-        if (exp.percentages) {
-            md += `**Traffic Split:** ${exp.percentages} (${exp.percentage_of_traffic}% of traffic)\n`;
-        }
-
-        if (hypothesis) {
-            md += `\n**Hypothesis:** ${hypothesis}\n`;
-        }
-
-        if (purpose) {
-            md += `\n**Purpose:** ${purpose}\n`;
-        }
-
-        if (exp.variants && exp.variants.length > 0) {
-            md += '\n### Variants\n';
-            for (const variant of exp.variants) {
-                const variantName = variant.name || `Variant ${variant.variant}`;
-                md += `- **${variantName}** (${variant.variant === 0 ? 'Control' : 'Treatment'})\n`;
-
-                const screenshot = exp.variant_screenshots?.find((s: any) =>
-                    s.variant === variant.variant
-                );
-                if (screenshot?.screenshot_url) {
-                    md += `  ![${variantName} Screenshot](${screenshot.screenshot_url})\n`;
-                }
-
-                if (variant.config) {
-                    md += `  Config: \`${variant.config}\`\n`;
-                }
-            }
-        }
-
-        if (exp.experiment_tags?.length > 0) {
-            const tags = exp.experiment_tags.map((t: any) => t.tag?.name || t.name).filter(Boolean);
-            if (tags.length > 0) {
-                md += `\n**Tags:** ${tags.map((t: string) => `\`${t}\``).join(', ')}\n`;
-            }
-        }
-
-        md += '\n---\n';
-        return md;
+            return value;
+        }).filter(v => v !== undefined);
     }
 
-    private registerListEntityTool(config: {
-        toolName: string;
-        description: string;
-        searchDescription: string;
-        apiPath: string;
-        entityKey: string;
-        cachedEntities: () => any[];
-        formatEntity?: (entity: any) => any;
-    }) {
-        this.server.tool(
-            config.toolName,
-            config.description,
-            {
-                search: z.string().optional().describe(config.searchDescription),
-                sort: z.string().optional().describe("Sort field (e.g., created_at)"),
-                items: z.number().optional().describe("Number of items per page (default: 1500)"),
-                page: z.number().optional().describe("Page number (default: 1)"),
-            },
-            async (params) => {
-                if (!this.apiClient) {
-                    return { content: [{ type: "text", text: "❌ API client not initialized. Please check authentication status." }] };
-                }
+    private static readonly EXPERIMENT_LIST_METHODS = new Set([
+        'listExperiments', 'searchExperiments',
+    ]);
+    private static readonly EXPERIMENT_SINGLE_METHODS = new Set([
+        'getExperiment', 'createExperiment', 'updateExperiment',
+        'startExperiment', 'stopExperiment', 'developmentExperiment',
+        'restartExperiment', 'fullOnExperiment',
+    ]);
+    private static readonly METRIC_LIST_METHODS = new Set(['listMetrics']);
+    private static readonly METRIC_SINGLE_METHODS = new Set(['getMetric', 'createMetric', 'updateMetric']);
+    private static readonly GOAL_LIST_METHODS = new Set(['listGoals']);
+    private static readonly GOAL_SINGLE_METHODS = new Set(['getGoal', 'createGoal', 'updateGoal']);
+    private static readonly TEAM_LIST_METHODS = new Set(['listTeams']);
+    private static readonly TEAM_SINGLE_METHODS = new Set(['getTeam', 'createTeam', 'updateTeam']);
+    private static readonly USER_LIST_METHODS = new Set(['listUsers']);
+    private static readonly USER_SINGLE_METHODS = new Set(['getUser', 'createUser', 'updateUser']);
+    private static readonly SEGMENT_LIST_METHODS = new Set(['listSegments']);
+    private static readonly SEGMENT_SINGLE_METHODS = new Set(['getSegment', 'createSegment', 'updateSegment']);
 
-                if (params.items !== undefined || params.page !== undefined || params.sort !== undefined) {
-                    try {
-                        const apiParams = pickDefined(params as Record<string, unknown>, ['items', 'page', 'sort', 'search']);
-                        const data = await this.apiClient.rawRequest(config.apiPath + buildQueryString(apiParams)) as any;
-                        const entities = data[config.entityKey] || data.items || [];
-                        const metadata = data.metadata || data;
-                        const formatted = config.formatEntity ? entities.map(config.formatEntity) : entities;
-                        return {
-                            content: [{
-                                type: "text",
-                                text: JSON.stringify({
-                                    total: metadata.total || formatted.length,
-                                    page: metadata.page,
-                                    items: metadata.items,
-                                    [config.entityKey]: formatted,
-                                }, null, 2),
-                            }],
-                        };
-                    } catch (error) {
-                        return { content: [{ type: "text", text: `❌ Failed to fetch ${config.entityKey}: ${error}` }] };
-                    }
-                }
+    private static isSingleEntity(result: unknown): result is Record<string, unknown> {
+        return result !== null && typeof result === 'object' && !Array.isArray(result) && 'id' in result;
+    }
 
-                let entities = config.cachedEntities();
-                if (params.search) {
-                    const searchTerm = params.search.toLowerCase();
-                    const searchWords = searchTerm.split(/\s+/);
-                    entities = entities.filter((e: any) => {
-                        const name = (e.name || '').toLowerCase();
-                        const desc = (e.description || e.email || '').toLowerCase();
-                        if (name.includes(searchTerm) || desc.includes(searchTerm)) return true;
-                        if (searchWords.length > 1) return searchWords.every(w => name.includes(w));
-                        return name.split(/\s+/).some((part: string) => part.startsWith(searchTerm));
-                    });
-                }
+    private getBaseUrl(): string {
+        return this.props?.absmartly_endpoint?.replace(/\/v\d+\/?$/, '') || '';
+    }
 
-                return {
-                    content: [{
-                        type: "text",
-                        text: JSON.stringify({ total: entities.length, [config.entityKey]: entities }, null, 2),
-                    }],
-                };
+    private summarizeResult(methodName: string, result: unknown, show: string[], exclude: string[]): unknown {
+        const baseUrl = this.getBaseUrl();
+        if (ABsmartlyMCP.EXPERIMENT_LIST_METHODS.has(methodName) && Array.isArray(result)) {
+            return result.map((exp: any) => {
+                const summary = summarizeExperimentRow(exp, show, exclude);
+                if (baseUrl) summary.link = `${baseUrl}/experiments/${exp.id}`;
+                return summary;
+            });
+        }
+        if (ABsmartlyMCP.EXPERIMENT_SINGLE_METHODS.has(methodName) && ABsmartlyMCP.isSingleEntity(result)) {
+            const summary = summarizeExperiment(result as Record<string, unknown>, show, exclude);
+            if (baseUrl) (summary as any).link = `${baseUrl}/experiments/${(result as any).id}`;
+            return summary;
+        }
+
+        if (ABsmartlyMCP.METRIC_LIST_METHODS.has(methodName) && Array.isArray(result)) {
+            return result.map((m: any) => summarizeMetricRow(m));
+        }
+        if (ABsmartlyMCP.METRIC_SINGLE_METHODS.has(methodName) && ABsmartlyMCP.isSingleEntity(result)) {
+            return summarizeMetric(result as Record<string, unknown>);
+        }
+
+        if (ABsmartlyMCP.GOAL_LIST_METHODS.has(methodName) && Array.isArray(result)) {
+            return result.map((g: any) => summarizeGoalRow(g));
+        }
+        if (ABsmartlyMCP.GOAL_SINGLE_METHODS.has(methodName) && ABsmartlyMCP.isSingleEntity(result)) {
+            return summarizeGoal(result as Record<string, unknown>);
+        }
+
+        if (ABsmartlyMCP.TEAM_LIST_METHODS.has(methodName) && Array.isArray(result)) {
+            return result.map((t: any) => summarizeTeamRow(t));
+        }
+        if (ABsmartlyMCP.TEAM_SINGLE_METHODS.has(methodName) && ABsmartlyMCP.isSingleEntity(result)) {
+            return summarizeTeam(result as Record<string, unknown>);
+        }
+
+        if (ABsmartlyMCP.USER_LIST_METHODS.has(methodName) && Array.isArray(result)) {
+            return result.map((u: any) => summarizeUserRow(u));
+        }
+        if (ABsmartlyMCP.USER_SINGLE_METHODS.has(methodName) && ABsmartlyMCP.isSingleEntity(result)) {
+            return summarizeUserDetail(result as Record<string, unknown>);
+        }
+
+        if (ABsmartlyMCP.SEGMENT_LIST_METHODS.has(methodName) && Array.isArray(result)) {
+            return result.map((s: any) => summarizeSegmentRow(s));
+        }
+        if (ABsmartlyMCP.SEGMENT_SINGLE_METHODS.has(methodName) && ABsmartlyMCP.isSingleEntity(result)) {
+            return summarizeSegment(result as Record<string, unknown>);
+        }
+
+        return result;
+    }
+
+    private static readonly USER_FIELD_TYPE = 'user';
+    private static readonly CREATE_EXPERIMENT_METHOD = 'createExperiment';
+
+    private autoPopulateCustomFields(data: Record<string, unknown>): void {
+        const existingValues = data.custom_section_field_values as Record<string, unknown> | undefined;
+        if (existingValues && Object.keys(existingValues).length > 0) {
+            return;
+        }
+
+        const experimentType = data.type as string | undefined;
+        const fieldValues: Record<string, { type: string; value: string }> = {};
+
+        for (const field of this._customFields as CustomSectionField[]) {
+            if (field.archived) continue;
+            if (!field.custom_section) continue;
+            if (field.custom_section.type !== experimentType) continue;
+            if (field.custom_section.archived) continue;
+
+            let value = field.default_value || '';
+            if (field.type === ABsmartlyMCP.USER_FIELD_TYPE && this.currentUserId) {
+                value = JSON.stringify({ selected: [{ userId: this.currentUserId }] });
             }
-        );
+
+            fieldValues[String(field.id)] = { type: field.type, value };
+        }
+
+        const customFieldsByName = (data as any).custom_fields as Record<string, string> | undefined;
+        if (customFieldsByName) {
+            for (const [name, val] of Object.entries(customFieldsByName)) {
+                const matching = (this._customFields as CustomSectionField[]).find(
+                    f => f.name === name && !f.archived
+                );
+                if (matching) {
+                    fieldValues[String(matching.id)] = { type: matching.type, value: val };
+                }
+            }
+            delete (data as any).custom_fields;
+        }
+
+        data.custom_section_field_values = fieldValues;
     }
 
     private setupTools() {
@@ -514,6 +463,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             "get_auth_status",
             "Get current authentication status and user information",
             {},
+            { readOnlyHint: true },
             async () => {
                 const hasApiAccess = !!this.apiClient;
                 const authType = this.props?.absmartly_api_key ? 'API Key' : (this.props?.oauth_jwt ? 'OAuth JWT' : 'None');
@@ -535,800 +485,247 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
         );
 
         this.server.tool(
-            "list_experiments",
-            "List experiments with optional filtering. To filter by owner name: 1) First use list_users to find the user ID, 2) Then use the owners parameter with that ID",
+            "discover_api_methods",
+            "Discover available ABsmartly API methods. Use this to find what operations are available before calling execute_api_method. You can browse by category or search by keyword.",
             {
-                search: z.string().optional().describe("Search experiments by name or description"),
-                sort: z.string().optional().describe("Sort field (e.g., created_at, updated_at)"),
-                page: z.number().optional().describe("Page number (default: 1)"),
-                items: z.number().optional().describe("Items per page (default: 10)"),
-                state: z.string().optional().describe("Filter by state (comma-separated: created,ready,running,development,full_on,running_not_full_on,stopped,archived,scheduled)"),
-                significance: z.string().optional().describe("Filter by significance results (comma-separated: positive,negative,neutral,inconclusive)"),
-                owners: z.string().optional().describe("Filter by owner user IDs (comma-separated numbers, e.g.: 3,5,7). To find a user's ID, use list_users with their full name (e.g., list_users({search: 'Cal Courtney'}))"),
-                teams: z.string().optional().describe("Filter by team IDs (comma-separated numbers, e.g.: 1,2,3). Use the list_teams tool to find team IDs by name"),
-                tags: z.string().optional().describe("Filter by tag IDs (comma-separated numbers, e.g.: 2,4,6). Use the list_tags tool to find tag IDs by name"),
-                templates: z.string().optional().describe("Filter by template IDs (comma-separated numbers, e.g.: 238,240). Note: This expects numeric template IDs"),
-                applications: z.string().optional().describe("Filter by application IDs (comma-separated numbers, e.g.: 39,3). Use the list_applications tool to find application IDs by name"),
-                unit_types: z.string().optional().describe("Filter by unit type IDs (comma-separated numbers, e.g.: 42,75). Use the list_unit_types tool to find unit type IDs by name"),
-                impact: z.string().optional().describe("Filter by impact range (min,max: 1,5)"),
-                created_at: z.string().optional().describe("Filter by creation date range (start,end) in milliseconds since epoch"),
-                updated_at: z.string().optional().describe("Filter by update date range (start,end) in milliseconds since epoch"),
-                full_on_at: z.string().optional().describe("Filter by full_on date range (start,end) in milliseconds since epoch"),
-                sample_ratio_mismatch: z.union([z.literal(0), z.literal(1)]).optional().describe("Filter experiments with sample ratio mismatch"),
-                cleanup_needed: z.union([z.literal(0), z.literal(1)]).optional().describe("Filter experiments that need cleanup"),
-                audience_mismatch: z.union([z.literal(0), z.literal(1)]).optional().describe("Filter experiments with audience mismatch"),
-                sample_size_reached: z.union([z.literal(0), z.literal(1)]).optional().describe("Filter experiments that reached sample size"),
-                experiments_interact: z.union([z.literal(0), z.literal(1)]).optional().describe("Filter experiments that interact with other experiments"),
-                group_sequential_updated: z.union([z.literal(0), z.literal(1)]).optional().describe("Filter experiments with updated group sequential analysis"),
-                assignment_conflict: z.union([z.literal(0), z.literal(1)]).optional().describe("Filter experiments with assignment conflicts"),
-                metric_threshold_reached: z.union([z.literal(0), z.literal(1)]).optional().describe("Filter experiments that reached metric threshold"),
-                previews: z.union([z.literal(0), z.literal(1)]).optional().describe("Include experiment preview data"),
-                analysis_type: z.string().optional().describe("Filter by analysis type (e.g., group_sequential,fixed_horizon)"),
-                type: z.string().optional().describe("Filter by experiment type (e.g., test, feature)"),
-                iterations: z.number().optional().describe("Filter by number of iterations"),
-                format: z.enum(['json', 'md']).optional().describe("Output format: 'json' for full data or 'md' for formatted markdown (default: md)")
+                category: completable(
+                    z.string().optional().describe(`Browse by category. Available: ${API_CATEGORIES.join(', ')}`),
+                    (value) => {
+                        const lower = (value || '').toLowerCase();
+                        return API_CATEGORIES
+                            .filter(c => c.toLowerCase().startsWith(lower))
+                            .slice(0, MAX_COMPLETIONS);
+                    }
+                ),
+                search: z.string().optional().describe("Search methods by keyword (matches method name, description, or category)"),
             },
+            { readOnlyHint: true },
             async (params) => {
-                if (!this.apiClient) {
+                if (!params.category && !params.search) {
+                    const summary = getCategorySummary();
+                    const lines = summary.map(s =>
+                        `**${s.category}** (${s.count}): ${s.methods.join(', ')}`
+                    );
                     return {
                         content: [{
-                            type: "text",
-                            text: "❌ API client not initialized. Please check authentication status."
+                            type: "text" as const,
+                            text: `# ABsmartly API — ${API_CATALOG.length} methods in ${summary.length} categories\n\nUse \`category\` to see details for a category, or \`search\` to find methods by keyword.\n\n${lines.join('\n\n')}`
                         }]
                     };
                 }
 
-                try {
-                    const apiParams: Record<string, unknown> = { items: params.items || 10 };
-                    if (params.search) apiParams.search = params.search;
-                    if (params.sort) apiParams.sort = params.sort;
-                    if (params.page) apiParams.page = params.page;
-                    if (params.state) apiParams.state = params.state;
-                    if (params.significance) apiParams.significance = params.significance;
-                    if (params.owners) apiParams.owners = params.owners;
-                    if (params.teams) apiParams.teams = params.teams;
-                    if (params.tags) apiParams.tags = params.tags;
-                    if (params.templates) apiParams.templates = params.templates;
-                    if (params.applications) apiParams.applications = params.applications;
-                    if (params.unit_types) apiParams.unit_types = params.unit_types;
-                    if (params.impact) apiParams.impact = params.impact;
-                    if (params.created_at) apiParams.created_at = params.created_at;
-                    if (params.updated_at) apiParams.updated_at = params.updated_at;
-                    if (params.full_on_at) apiParams.full_on_at = params.full_on_at;
-                    if (params.sample_ratio_mismatch !== undefined) apiParams.sample_ratio_mismatch = params.sample_ratio_mismatch;
-                    if (params.cleanup_needed !== undefined) apiParams.cleanup_needed = params.cleanup_needed;
-                    if (params.audience_mismatch !== undefined) apiParams.audience_mismatch = params.audience_mismatch;
-                    if (params.sample_size_reached !== undefined) apiParams.sample_size_reached = params.sample_size_reached;
-                    if (params.experiments_interact !== undefined) apiParams.experiments_interact = params.experiments_interact;
-                    if (params.group_sequential_updated !== undefined) apiParams.group_sequential_updated = params.group_sequential_updated;
-                    if (params.assignment_conflict !== undefined) apiParams.assignment_conflict = params.assignment_conflict;
-                    if (params.metric_threshold_reached !== undefined) apiParams.metric_threshold_reached = params.metric_threshold_reached;
-                    if (params.previews !== undefined) apiParams.previews = params.previews;
-                    if (params.analysis_type) apiParams.analysis_type = params.analysis_type;
-                    if (params.type) apiParams.type = params.type;
-                    if (params.iterations !== undefined) apiParams.iterations = params.iterations;
+                let results: ApiMethodEntry[];
+                if (params.category) {
+                    results = getCatalogByCategory(params.category);
+                    if (results.length === 0) {
+                        return { content: [{ type: "text" as const, text: `No methods found in category "${params.category}". Use discover_api_methods without params to see all categories.` }] };
+                    }
+                } else {
+                    results = searchCatalog(params.search!);
+                    if (results.length === 0) {
+                        return { content: [{ type: "text" as const, text: `No methods found matching "${params.search}". Try a broader search or browse by category.` }] };
+                    }
+                }
 
-                    const queryString = buildQueryString(apiParams);
-                    const data = await this.apiClient.rawRequest(`/experiments${queryString}`) as any;
+                const formatted = results.map(m => {
+                    const paramList = m.params.length > 0
+                        ? m.params.map(p => `  - \`${p.name}\` (${p.type}${p.required ? ', required' : ''}): ${p.description}`).join('\n')
+                        : '  (no parameters)';
+                    return `### ${m.method}\n${m.description}\n${m.dangerous ? '**WARNING: Destructive operation**\n' : ''}**Params:**\n${paramList}\n**Returns:** ${m.returns}`;
+                });
 
-                    const experiments = data.experiments || [];
-                    const format = params.format || 'md';
+                return {
+                    content: [{
+                        type: "text" as const,
+                        text: formatted.join('\n\n---\n\n')
+                    }]
+                };
+            }
+        );
 
-                    const baseUrl = this.props.absmartly_endpoint.replace(/\/v1\/?$/, '');
+        this.server.tool(
+            "get_api_method_docs",
+            "Get detailed documentation for a specific ABsmartly API method. Use discover_api_methods first to find the method name.",
+            {
+                method_name: completable(
+                    z.string().describe("Exact method name (e.g. 'createMetric', 'listTeamMembers')"),
+                    (value) => {
+                        const lower = (value || '').toLowerCase();
+                        return API_CATALOG
+                            .filter(m => m.method.toLowerCase().includes(lower))
+                            .map(m => m.method)
+                            .slice(0, MAX_COMPLETIONS);
+                    }
+                ),
+            },
+            { readOnlyHint: true },
+            async (params) => {
+                const entry = getMethodEntry(params.method_name);
+                if (!entry) {
+                    const suggestions = searchCatalog(params.method_name).slice(0, 5);
+                    const sugText = suggestions.length > 0
+                        ? `\n\nDid you mean:\n${suggestions.map(s => `- ${s.method}: ${s.description}`).join('\n')}`
+                        : '\n\nUse discover_api_methods to browse available methods.';
+                    return { content: [{ type: "text" as const, text: `Method "${params.method_name}" not found.${sugText}` }] };
+                }
 
-                    if (format === 'json') {
-                        const experimentsWithLinks = experiments.map((exp: any) => ({
-                            ...exp,
-                            link: `${baseUrl}/experiments/${exp.id}`
-                        }));
+                let doc = `# ${entry.method}\n\n**Category:** ${entry.category}\n**Description:** ${entry.description}\n`;
+                if (entry.dangerous) {
+                    doc += '**WARNING: This is a destructive/dangerous operation.**\n';
+                }
+                doc += `**Returns:** ${entry.returns}\n\n`;
 
-                        return {
-                            content: [{
-                                type: "text",
-                                text: JSON.stringify({
-                                    total: data.total || experiments.length,
-                                    page: data.page || 1,
-                                    items: data.items || experiments.length,
-                                    experiments: experimentsWithLinks
-                                }, null, 2)
-                            }]
-                        };
-                    } else {
-                        let markdown = `# Experiments (${experiments.length} of ${data.total || experiments.length})\n\n`;
+                if (entry.params.length > 0) {
+                    doc += '## Parameters\n\n';
+                    doc += '| Name | Type | Required | Description |\n|------|------|----------|-------------|\n';
+                    for (const p of entry.params) {
+                        doc += `| ${p.name} | ${p.type} | ${p.required ? 'Yes' : 'No'} | ${p.description} |\n`;
+                    }
+                } else {
+                    doc += '## Parameters\n\nNone.\n';
+                }
 
-                        if (experiments.length === 0) {
-                            markdown += '*No experiments found matching your criteria.*\n';
-                        } else {
-                            markdown += experiments.map((exp: any) =>
-                                this.formatExperimentAsMarkdown(exp, baseUrl)
-                            ).join('\n');
+                if (entry.example) {
+                    doc += `\n## Example\n\n\`\`\`json\n${JSON.stringify(entry.example, null, 2)}\n\`\`\`\n`;
+                }
+
+                doc += `\n## Usage with execute_api_method\n\n\`\`\`json\n{\n  "method_name": "${entry.method}",\n  "params": ${JSON.stringify(
+                    Object.fromEntries(entry.params.filter(p => p.required).map(p => [p.name, p.type === 'number' ? 1 : p.type === 'boolean' ? true : p.type === 'object' ? {} : p.type === 'array' ? [] : 'value'])),
+                    null, 2
+                )}\n}\n\`\`\``;
+
+                if (params.method_name === ABsmartlyMCP.CREATE_EXPERIMENT_METHOD && this._customFields.length > 0) {
+                    doc += '\n\n## Available Custom Fields\n\n';
+                    doc += 'Pass `custom_fields` (by name) in `params.data` to override defaults:\n\n';
+                    doc += '| Title | Type | Default Value | Section Type |\n|-------|------|---------------|-------------|\n';
+                    for (const f of this._customFields as CustomSectionField[]) {
+                        if (f.archived) continue;
+                        const sectionType = f.custom_section?.type || 'unknown';
+                        doc += `| ${f.name} | ${f.type} | ${f.default_value || ''} | ${sectionType} |\n`;
+                    }
+                }
+
+                return { content: [{ type: "text" as const, text: doc }] };
+            }
+        );
+
+        this.server.tool(
+            "execute_api_method",
+            "Execute any ABsmartly API method by name. Results for experiments, metrics, goals, teams, users, and segments are auto-summarized. Use 'show'/'exclude' for experiment field control. Pass 'raw: true' for unsummarized response. Some methods (delete, stop) are destructive.",
+            {
+                method_name: completable(
+                    z.string().describe("Method name from the API catalog (e.g. 'getMetric', 'createTeam')"),
+                    (value) => {
+                        const lower = (value || '').toLowerCase();
+                        return API_CATALOG
+                            .filter(m => m.method.toLowerCase().includes(lower))
+                            .map(m => m.method)
+                            .slice(0, MAX_COMPLETIONS);
+                    }
+                ),
+                params: z.record(z.unknown()).optional().describe("Method parameters as a JSON object. Keys match the parameter names from the method docs. For createExperiment, pass 'custom_fields' by name to override defaults."),
+                show: z.array(z.string()).optional().describe("Extra fields to include in experiment summaries (e.g. ['audience', 'archived', 'experiment_report'])"),
+                exclude: z.array(z.string()).optional().describe("Fields to exclude from experiment summaries (e.g. ['owners', 'tags', 'teams'])"),
+                raw: z.boolean().optional().describe("Return full unsummarized response (default: false)"),
+                limit: z.number().optional().describe("Max items for list operations (default: 20). Convenience shortcut for passing items/limit in params."),
+            },
+            { destructiveHint: true },
+            async (params) => {
+                if (!this.apiClient) {
+                    return { content: [{ type: "text" as const, text: "API client not initialized. Check authentication status." }] };
+                }
+
+                const entry = getMethodEntry(params.method_name);
+                if (!entry) {
+                    return { content: [{ type: "text" as const, text: `Unknown method "${params.method_name}". Use discover_api_methods to find available methods.` }] };
+                }
+
+                const methodFn = (this.apiClient as any)[params.method_name];
+                if (typeof methodFn !== 'function') {
+                    return { content: [{ type: "text" as const, text: `Method "${params.method_name}" exists in catalog but is not available on the API client.` }] };
+                }
+
+                if (entry.dangerous) {
+                    try {
+                        const elicitResult = await this.server.server.elicitInput({
+                            message: `Are you sure you want to ${entry.description.toLowerCase()}?`,
+                            requestedSchema: {
+                                type: "object" as const,
+                                properties: {
+                                    confirm: {
+                                        type: "string",
+                                        title: "Confirm",
+                                        description: "Type 'yes' to confirm this destructive action",
+                                    }
+                                },
+                                required: ["confirm"]
+                            }
+                        });
+
+                        if (elicitResult.action !== 'accept' || elicitResult.content?.confirm !== 'yes') {
+                            this.log('info', `Destructive action cancelled: ${params.method_name}`);
+                            return { content: [{ type: "text" as const, text: `Action cancelled: ${params.method_name} was not confirmed by user.` }] };
                         }
+                    } catch (_) {
+                        debug("Elicitation not supported by client, proceeding without confirmation");
+                    }
+                }
 
-                        const currentPage = data.page || 1;
-                        const totalPages = Math.ceil((data.total || experiments.length) / (params.items || 10));
+                try {
+                    const methodParams = params.params || {};
+                    if (params.method_name === ABsmartlyMCP.CREATE_EXPERIMENT_METHOD && methodParams.data) {
+                        this.autoPopulateCustomFields(methodParams.data as Record<string, unknown>);
+                    }
 
-                        if (totalPages > 1) {
-                            markdown += `\n\n📄 Page ${currentPage} of ${totalPages}`;
-                            if (currentPage < totalPages) {
-                                markdown += ` (use \`page: ${currentPage + 1}\` to see more)`;
+                    const itemsLimit = params.limit ?? DEFAULT_LIST_ITEMS;
+                    if (params.method_name.startsWith('list') || params.method_name.startsWith('search')) {
+                        if (entry.params.some(ep => ep.name === 'options')) {
+                            if (!methodParams.options) methodParams.options = {};
+                            if (typeof methodParams.options === 'object' && !(methodParams.options as any).items) {
+                                (methodParams.options as any).items = itemsLimit;
                             }
                         }
-
-                        return {
-                            content: [{
-                                type: "text",
-                                text: markdown
-                            }]
-                        };
-                    }
-                } catch (error) {
-                    return {
-                        content: [{
-                            type: "text",
-                            text: `❌ Error fetching experiments: ${error}`
-                        }]
-                    };
-                }
-            }
-        );
-
-        this.registerListEntityTool({
-            toolName: "list_users",
-            description: "List users. Returns id, name, and email for each user.",
-            searchDescription: "Search term to filter users. Searches in full name and email. Use the complete name for best results (e.g., 'Cal Courtney' not just 'Cal')",
-            apiPath: "/users",
-            entityKey: "users",
-            cachedEntities: () => this.users || [],
-            formatEntity: (u: any) => ({ id: u.id, name: u.name, email: u.description || u.email }),
-        });
-
-        this.registerListEntityTool({
-            toolName: "list_teams",
-            description: "List teams",
-            searchDescription: "Optional search term to filter teams by name",
-            apiPath: "/teams",
-            entityKey: "teams",
-            cachedEntities: () => this.teams || [],
-        });
-
-        this.registerListEntityTool({
-            toolName: "list_applications",
-            description: "List applications",
-            searchDescription: "Optional search term to filter applications by name",
-            apiPath: "/applications",
-            entityKey: "applications",
-            cachedEntities: () => this.applications || [],
-        });
-
-        this.registerListEntityTool({
-            toolName: "list_unit_types",
-            description: "List unit types",
-            searchDescription: "Optional search term to filter unit types by name",
-            apiPath: "/unit_types",
-            entityKey: "unit_types",
-            cachedEntities: () => this.unitTypes || [],
-        });
-
-        this.registerListEntityTool({
-            toolName: "list_tags",
-            description: "List experiment tags",
-            searchDescription: "Optional search term to filter tags by name",
-            apiPath: "/experiment_tags",
-            entityKey: "tags",
-            cachedEntities: () => this.experimentTags || [],
-        });
-
-        this.registerListEntityTool({
-            toolName: "list_metrics",
-            description: "List metrics. Use to find metric IDs for primary_metric_id when creating experiments.",
-            searchDescription: "Optional search term to filter metrics by name",
-            apiPath: "/metrics",
-            entityKey: "metrics",
-            cachedEntities: () => this.metrics || [],
-        });
-
-        this.registerListEntityTool({
-            toolName: "list_goals",
-            description: "List goals",
-            searchDescription: "Optional search term to filter goals by name",
-            apiPath: "/goals",
-            entityKey: "goals",
-            cachedEntities: () => this.goals || [],
-        });
-
-        const customFieldSchema = this.buildCustomFieldZodSchema();
-
-        this.server.tool(
-            "create_experiment",
-            "Create a new A/B test experiment with variants and configurations. Supports DOM changes for visual experiments like button styling, layout modifications, etc.",
-            {
-                name: z.string().describe("Experiment name"),
-                display_name: z.string().optional().describe("Display name (defaults to name)"),
-                description: z.string().optional().describe("Experiment description"),
-                type: z.enum(['test', 'feature']).optional().describe("Experiment type (default: test)"),
-                state: z.enum(['created', 'ready', 'running']).optional().describe("Initial state (default: ready)"),
-                unit_type_id: z.number().describe("Unit type ID (use list_unit_types to find IDs)"),
-                application_id: z.number().describe("Application ID (use list_applications to find IDs)"),
-                percentage_of_traffic: z.number().optional().describe("Percentage of traffic to include (0-100, default: 100)"),
-                variants: z.array(z.object({
-                    variant: z.number().describe("Variant index (0 for control, 1+ for treatments)"),
-                    name: z.string().describe("Variant name"),
-                    config: z.string().describe("JSON string with variant configuration. For DOM changes use: {\"dom_changes\":[{\"selector\":\"button\",\"css\":{\"border-radius\":\"8px\",\"background-color\":\"#007bff\"}}]}"),
-                    percentage: z.number().optional().describe("Traffic percentage for this variant")
-                })).describe("Array of experiment variants with DOM change configurations"),
-                primary_metric_id: z.number().optional().describe("Primary metric ID (use list_metrics to find IDs)"),
-                tag_ids: z.array(z.number()).optional().describe("Tag IDs to assign (use list_tags to find IDs)"),
-                owner_user_id: z.number().optional().describe("Owner user ID (defaults to logged-in user, use list_users to find IDs)"),
-                team_id: z.number().optional().describe("Team ID (use list_teams to find IDs)"),
-                ...customFieldSchema
-            },
-            async (params) => {
-                if (!this.apiClient) {
-                    return {
-                        content: [{
-                            type: "text",
-                            text: "Error: No API access available. Please ensure you're authenticated."
-                        }]
-                    };
-                }
-
-                try {
-                    let percentages = params.variants.map(v => v.percentage || 50).join('/');
-                    if (!params.variants.some(v => v.percentage)) {
-                        const perVariant = Math.floor(100 / params.variants.length);
-                        const remainder = 100 - (perVariant * params.variants.length);
-                        percentages = params.variants.map((_v, i) =>
-                            i === 0 ? perVariant + remainder : perVariant
-                        ).join('/');
-                    }
-
-                    const experimentData = this.buildBaseExperimentPayload({
-                        name: params.name,
-                        display_name: params.display_name,
-                        type: params.type,
-                        state: params.state,
-                        unit_type_id: params.unit_type_id,
-                        application_id: params.application_id,
-                        percentage_of_traffic: params.percentage_of_traffic,
-                        percentages,
-                        nr_variants: params.variants.length,
-                        variants: params.variants,
-                        primary_metric_id: params.primary_metric_id,
-                        owner_user_id: params.owner_user_id,
-                    });
-
-                    debug('Creating experiment with data:', JSON.stringify(experimentData, null, 2));
-
-                    const result = await this.apiClient!.createExperiment(experimentData as any);
-
-                    return {
-                        content: [{
-                            type: "text",
-                            text: JSON.stringify(result, null, 2)
-                        }]
-                    };
-                } catch (error) {
-                    const errorMessage = error instanceof Error ? error.message : String(error);
-                    return {
-                        content: [{
-                            type: "text",
-                            text: `Error creating experiment: ${errorMessage}`
-                        }]
-                    };
-                }
-            }
-        );
-
-        this.server.tool(
-            "create_feature_flag",
-            "Create a feature flag (experiment with type='feature' and simple on/off variants)",
-            {
-                name: z.string().describe("Feature flag name"),
-                unit_type_id: z.number().describe("Unit type ID (use list_unit_types to find IDs)"),
-                application_id: z.number().describe("Application ID (use list_applications to find IDs)"),
-                feature_enabled_percentage: z.number().optional().describe("Percentage to enable feature (0-100, default: 50)"),
-                description: z.string().optional().describe("Feature flag description"),
-                primary_metric_id: z.number().optional().describe("Primary metric ID (use list_metrics to find IDs)"),
-                tag_ids: z.array(z.number()).optional().describe("Tag IDs to assign (use list_tags to find IDs)"),
-                owner_user_id: z.number().optional().describe("Owner user ID (defaults to logged-in user, use list_users to find IDs)"),
-                team_id: z.number().optional().describe("Team ID (use list_teams to find IDs)"),
-                ...customFieldSchema
-            },
-            async (params) => {
-                if (!this.apiClient) {
-                    return {
-                        content: [{
-                            type: "text",
-                            text: "Error: No API access available. Please ensure you're authenticated."
-                        }]
-                    };
-                }
-
-                try {
-                    const enabledPct = params.feature_enabled_percentage ?? 50;
-                    const featureVariants = [
-                        { variant: 0, name: 'Control (Feature Off)', config: '{"feature_enabled": false}' },
-                        { variant: 1, name: 'Treatment (Feature On)', config: '{"feature_enabled": true}' }
-                    ];
-
-                    const experimentData = this.buildBaseExperimentPayload({
-                        name: params.name,
-                        type: 'feature',
-                        state: 'ready',
-                        unit_type_id: params.unit_type_id,
-                        application_id: params.application_id,
-                        percentages: `${100 - enabledPct}/${enabledPct}`,
-                        nr_variants: 2,
-                        variants: featureVariants,
-                        primary_metric_id: params.primary_metric_id,
-                        owner_user_id: params.owner_user_id,
-                    });
-
-                    debug('Creating feature flag with data:', JSON.stringify(experimentData, null, 2));
-
-                    const result = await this.apiClient!.createExperiment(experimentData as any);
-
-                    return {
-                        content: [{
-                            type: "text",
-                            text: JSON.stringify(result, null, 2)
-                        }]
-                    };
-                } catch (error) {
-                    const errorMessage = error instanceof Error ? error.message : String(error);
-                    return {
-                        content: [{
-                            type: "text",
-                            text: `Error creating feature flag: ${errorMessage}`
-                        }]
-                    };
-                }
-            }
-        );
-
-        this.server.tool(
-            "update_experiment",
-            "Update experiment state or configuration (start, stop, archive, etc)",
-            {
-                id: z.number().describe("Experiment ID"),
-                action: z.enum(['start', 'stop', 'archive', 'ready', 'full_on', 'development', 'restart']).optional().describe("State change action"),
-                full_on_variant: z.number().optional().describe("Variant number for full_on action (>= 1, required when action is full_on)"),
-                name: z.string().optional().describe("Update experiment name"),
-                display_name: z.string().optional().describe("Update display name"),
-                description: z.string().optional().describe("Update description"),
-                percentage_of_traffic: z.number().optional().describe("Update traffic percentage (0-100)"),
-                tag_ids: z.array(z.number()).optional().describe("Update tag IDs"),
-                owner_user_id: z.number().optional().describe("Update owner user ID"),
-                team_id: z.number().optional().describe("Update team ID")
-            },
-            async (params) => {
-                if (!this.apiClient) {
-                    return {
-                        content: [{
-                            type: "text",
-                            text: "Error: No API access available. Please ensure you're authenticated."
-                        }]
-                    };
-                }
-
-                try {
-                    const expId = ExperimentId(params.id);
-
-                    if (params.action) {
-                        let result: any;
-                        switch (params.action) {
-                            case 'start':
-                                result = await this.apiClient!.startExperiment(expId);
-                                break;
-                            case 'stop':
-                                result = await this.apiClient!.stopExperiment(expId);
-                                break;
-                            case 'archive':
-                                await this.apiClient!.archiveExperiment(expId);
-                                result = { id: params.id, state: 'archived' };
-                                break;
-                            case 'ready':
-                                result = await this.apiClient!.rawRequest('/experiments/' + params.id, 'PUT', { data: { state: 'ready' } });
-                                break;
-                            case 'full_on':
-                                result = await this.apiClient!.fullOnExperiment(expId, params.full_on_variant || 1, '');
-                                break;
-                            case 'development':
-                                result = await this.apiClient!.developmentExperiment(expId, '');
-                                break;
-                            case 'restart':
-                                result = await this.apiClient!.restartExperiment(expId);
-                                break;
-                            default:
-                                throw new Error(`Unknown action: ${params.action}`);
+                        if (entry.params.some(ep => ep.name === 'limit') && methodParams.limit === undefined) {
+                            methodParams.limit = itemsLimit;
                         }
-
-                        return {
-                            content: [{
-                                type: "text",
-                                text: JSON.stringify({
-                                    message: `Successfully ${params.action === 'full_on' ? 'set to full on' : params.action + 'ed'} experiment ${params.id}`,
-                                    experiment: result
-                                }, null, 2)
-                            }]
-                        };
-                    }
-
-                    const updateData: any = {};
-                    if (params.name !== undefined) updateData.name = params.name;
-                    if (params.display_name !== undefined) updateData.display_name = params.display_name;
-                    if (params.description !== undefined) updateData.description = params.description;
-                    if (params.percentage_of_traffic !== undefined) updateData.percentage_of_traffic = params.percentage_of_traffic;
-                    if (params.tag_ids !== undefined) updateData.tag_ids = params.tag_ids;
-                    if (params.owner_user_id !== undefined) updateData.owner_user_id = params.owner_user_id;
-                    if (params.team_id !== undefined) updateData.team_id = params.team_id;
-
-                    const result = await this.apiClient!.updateExperiment(expId, updateData as any);
-
-                    return {
-                        content: [{
-                            type: "text",
-                            text: JSON.stringify(result, null, 2)
-                        }]
-                    };
-                } catch (error) {
-                    return {
-                        content: [{
-                            type: "text",
-                            text: `Error updating experiment: ${error instanceof Error ? error.message : String(error)}`
-                        }]
-                    };
-                }
-            }
-        );
-
-        this.server.tool(
-            "create_variant",
-            "Add a new variant to an existing experiment",
-            {
-                experiment_id: z.number().describe("Experiment ID"),
-                name: z.string().describe("Variant name"),
-                config: z.string().describe("JSON string with variant configuration"),
-                percentage: z.number().optional().describe("Traffic percentage for this variant")
-            },
-            async (params) => {
-                if (!this.apiClient) {
-                    return {
-                        content: [{
-                            type: "text",
-                            text: "Error: No API access available. Please ensure you're authenticated."
-                        }]
-                    };
-                }
-
-                try {
-                    const experiment = await this.apiClient!.getExperiment(ExperimentId(params.experiment_id)) as any;
-                    const currentVariants = experiment.variants || [];
-                    const nextVariantIndex = currentVariants.length;
-
-                    const newVariant = {
-                        variant: nextVariantIndex,
-                        name: params.name,
-                        config: params.config
-                    };
-
-                    const updatedVariants = [...currentVariants, newVariant];
-
-                    let percentages = experiment.percentages;
-                    if (params.percentage !== undefined) {
-                        const variantPercentages = currentVariants.map((v: any) => {
-                            const pctStr = experiment.percentages.split('/');
-                            return parseInt(pctStr[v.variant] || '0');
-                        });
-                        variantPercentages.push(params.percentage);
-
-                        const total = variantPercentages.reduce((a: number, b: number) => a + b, 0);
-                        if (total !== 100) {
-                            const normalized = variantPercentages.map((p: number) => Math.round((p / total) * 100));
-                            const diff = 100 - normalized.reduce((a: number, b: number) => a + b, 0);
-                            normalized[0] += diff;
-                            percentages = normalized.join('/');
-                        } else {
-                            percentages = variantPercentages.join('/');
+                        if (entry.params.some(ep => ep.name === 'items') && methodParams.items === undefined) {
+                            methodParams.items = itemsLimit;
                         }
-                    } else {
-                        const perVariant = Math.floor(100 / updatedVariants.length);
-                        const remainder = 100 - (perVariant * updatedVariants.length);
-                        percentages = updatedVariants.map((v, i) => 
-                            i === 0 ? perVariant + remainder : perVariant
-                        ).join('/');
                     }
 
-                    const updateData = {
-                        variants: updatedVariants,
-                        nr_variants: updatedVariants.length,
-                        percentages: percentages
-                    };
+                    const args = this.buildMethodArgs(entry, methodParams);
+                    const result = await methodFn.apply(this.apiClient, args);
 
-                    const result = await this.apiClient!.updateExperiment(ExperimentId(params.experiment_id), updateData as any);
+                    if (result === undefined || result === null) {
+                        return { content: [{ type: "text" as const, text: `Successfully executed ${params.method_name}.` }] };
+                    }
+
+                    const showFields = params.show || [];
+                    const excludeFields = params.exclude || [];
+                    const output = params.raw
+                        ? result
+                        : this.summarizeResult(params.method_name, result, showFields, excludeFields);
 
                     return {
                         content: [{
-                            type: "text",
-                            text: JSON.stringify({
-                                message: `Successfully added variant ${nextVariantIndex} to experiment ${params.experiment_id}`,
-                                variant: newVariant,
-                                experiment: result
-                            }, null, 2)
+                            type: "text" as const,
+                            text: JSON.stringify(output, null, 2)
                         }]
                     };
                 } catch (error) {
+                    const errorMsg = error instanceof Error ? error.message : String(error);
+                    this.log('error', `${params.method_name} failed: ${errorMsg}`);
                     return {
                         content: [{
-                            type: "text",
-                            text: `Error adding variant: ${error instanceof Error ? error.message : String(error)}`
+                            type: "text" as const,
+                            text: `Error executing ${params.method_name}: ${errorMsg}`
                         }]
                     };
                 }
             }
         );
-
-        this.server.tool(
-            "get_experiment",
-            "Get detailed information about a specific experiment",
-            {
-                id: z.number().describe("Experiment ID")
-            },
-            async (params) => {
-                if (!this.apiClient) {
-                    return {
-                        content: [{
-                            type: "text",
-                            text: "Error: No API access available. Please ensure you're authenticated."
-                        }]
-                    };
-                }
-
-                try {
-                    const result = await this.apiClient!.getExperiment(ExperimentId(params.id));
-
-                    return {
-                        content: [{
-                            type: "text",
-                            text: JSON.stringify(result, null, 2)
-                        }]
-                    };
-                } catch (error) {
-                    return {
-                        content: [{
-                            type: "text",
-                            text: `Error fetching experiment: ${error instanceof Error ? error.message : String(error)}`
-                        }]
-                    };
-                }
-            }
-        );
-
-        this.server.tool(
-            "create_experiment_from_markdown",
-            "Create an experiment from a markdown template with YAML frontmatter. Supports name-based resolution for applications, unit types, and metrics (e.g., use 'website' instead of application ID 39).",
-            {
-                markdown: z.string().describe("Markdown template with YAML frontmatter defining the experiment. Use generate_experiment_template to get a sample template."),
-            },
-            async (params) => {
-                if (!this.apiClient) {
-                    return {
-                        content: [{ type: "text", text: "Error: No API access available. Please ensure you're authenticated." }]
-                    };
-                }
-
-                try {
-                    const template = parseExperimentMarkdown(params.markdown);
-
-                    if (!template.name) {
-                        return {
-                            content: [{ type: "text", text: "Error: Template must include a 'name' field." }],
-                            isError: true,
-                        };
-                    }
-
-                    const resolverContext = this.buildResolverContext();
-                    const payload = buildExperimentPayload(template, resolverContext);
-
-                    if (this.currentUserId && !payload.owners) {
-                        payload.owners = [{ user_id: this.currentUserId }];
-                    }
-
-                    debug('Creating experiment from markdown with payload:', JSON.stringify(payload, null, 2));
-
-                    const result = await this.apiClient!.createExperiment(payload as any);
-
-                    return {
-                        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
-                    };
-                } catch (error) {
-                    return {
-                        content: [{ type: "text", text: `Error: ${error instanceof Error ? error.message : String(error)}` }],
-                        isError: true,
-                    };
-                }
-            }
-        );
-
-        this.server.tool(
-            "generate_experiment_template",
-            "Generate a sample experiment markdown template populated with available applications, unit types, and metrics from your ABsmartly instance.",
-            {
-                name: z.string().optional().describe("Experiment name for the template (default: 'my_experiment')"),
-                type: z.enum(['test', 'feature']).optional().describe("Experiment type (default: 'test')"),
-            },
-            async (params) => {
-                try {
-                    const generatorContext = {
-                        applications: this.applications.map(a => ({ name: a.name })),
-                        unitTypes: this.unitTypes.map(u => ({ name: u.name })),
-                        metrics: this.metrics.map(m => ({ name: m.name })),
-                    };
-
-                    const content = generateTemplate(generatorContext, {
-                        name: params.name,
-                        type: params.type,
-                    });
-
-                    return {
-                        content: [{ type: "text", text: content }]
-                    };
-                } catch (error) {
-                    return {
-                        content: [{ type: "text", text: `Error generating template: ${error instanceof Error ? error.message : String(error)}` }],
-                        isError: true,
-                    };
-                }
-            }
-        );
-
-        this.server.tool(
-            "create_feature_flag_from_markdown",
-            "Create a feature flag from a simplified markdown template. Automatically sets type to 'feature' with on/off variants.",
-            {
-                markdown: z.string().describe("Markdown template with YAML frontmatter. Must include name, application, and unit_type. Optional: percentage_of_traffic (default 100), primary_metric."),
-            },
-            async (params) => {
-                if (!this.apiClient) {
-                    return {
-                        content: [{ type: "text", text: "Error: No API access available. Please ensure you're authenticated." }]
-                    };
-                }
-
-                try {
-                    const template = parseExperimentMarkdown(params.markdown);
-                    template.type = 'feature';
-
-                    if (!template.variants || template.variants.length === 0) {
-                        template.variants = [
-                            { variant: 0, name: 'Control (Feature Off)', config: '{"feature_enabled": false}' },
-                            { variant: 1, name: 'Treatment (Feature On)', config: '{"feature_enabled": true}' },
-                        ];
-                        template.percentages = '50/50';
-                    }
-
-                    if (!template.name) {
-                        return {
-                            content: [{ type: "text", text: "Error: Template must include a 'name' field." }],
-                            isError: true,
-                        };
-                    }
-
-                    const resolverContext = this.buildResolverContext();
-                    const payload = buildExperimentPayload(template, resolverContext);
-
-                    if (this.currentUserId && !payload.owners) {
-                        payload.owners = [{ user_id: this.currentUserId }];
-                    }
-
-                    debug('Creating feature flag from markdown with payload:', JSON.stringify(payload, null, 2));
-
-                    const result = await this.apiClient!.createExperiment(payload as any);
-
-                    return {
-                        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
-                    };
-                } catch (error) {
-                    return {
-                        content: [{ type: "text", text: `Error: ${error instanceof Error ? error.message : String(error)}` }],
-                        isError: true,
-                    };
-                }
-            }
-        );
-
     }
 
-    private buildBaseExperimentPayload(params: {
-        name: string;
-        display_name?: string;
-        type?: string;
-        state?: string;
-        unit_type_id: number;
-        application_id: number;
-        percentage_of_traffic?: number;
-        percentages: string;
-        nr_variants: number;
-        variants: any[];
-        primary_metric_id?: number;
-        owner_user_id?: number;
-    }): Record<string, any> {
-        const customFieldValues = this.buildCustomFieldValuesFromParams(params as any);
-        const ownerId = params.owner_user_id || this.currentUserId;
-
-        const experimentData: Record<string, any> = {
-            name: params.name,
-            display_name: params.display_name || params.name,
-            iteration: 1,
-            type: params.type || 'test',
-            state: params.state || 'ready',
-            feature_state: null,
-            development_at: null,
-            start_at: null,
-            stop_at: null,
-            full_on_at: null,
-            full_on_variant: null,
-            feature_on_at: null,
-            feature_off_at: null,
-            last_seen_in_code_at: null,
-            nr_variants: params.nr_variants,
-            percentages: params.percentages,
-            percentage_of_traffic: params.percentage_of_traffic ?? 100,
-            seed: null,
-            traffic_seed: null,
-            unit_type: {
-                unit_type_id: params.unit_type_id
-            },
-            audience: '{"filter":[{"and":[]}]}',
-            audience_strict: true,
-            minimum_detectable_effect: null,
-            analysis_type: DEFAULT_ANALYSIS_TYPE,
-            baseline_primary_metric_mean: DEFAULT_BASELINE_METRIC_MEAN,
-            baseline_primary_metric_stdev: DEFAULT_BASELINE_METRIC_STDEV,
-            baseline_participants_per_day: DEFAULT_BASELINE_PARTICIPANTS_PER_DAY,
-            required_alpha: DEFAULT_REQUIRED_ALPHA,
-            required_power: DEFAULT_REQUIRED_POWER,
-            group_sequential_futility_type: DEFAULT_FUTILITY_TYPE,
-            group_sequential_analysis_count: null,
-            group_sequential_min_analysis_interval: DEFAULT_MIN_ANALYSIS_INTERVAL,
-            group_sequential_first_analysis_interval: DEFAULT_FIRST_ANALYSIS_INTERVAL,
-            group_sequential_max_duration_interval: DEFAULT_MAX_DURATION_INTERVAL,
-            applications: [{
-                application_id: params.application_id,
-                application_version: '0'
-            }],
-            variants: params.variants,
-            variant_screenshots: [],
-            owners: ownerId ? [{ user_id: ownerId }] : [],
-            secondary_metrics: [],
-            teams: [],
-            experiment_tags: [],
-            custom_section_field_values: customFieldValues
-        };
-
-        if (params.primary_metric_id) {
-            experimentData.primary_metric = { metric_id: params.primary_metric_id };
-        }
-
-        return experimentData;
-    }
-
-    private buildResolverContext(): ResolverContext {
-        return {
-            applications: this.applications.map(a => ({ id: a.id, name: a.name })),
-            unitTypes: this.unitTypes.map(u => ({ id: u.id, name: u.name })),
-            metrics: this.metrics.map(m => ({ id: m.id, name: m.name })),
-            goals: this.goals.map(g => ({ id: g.id, name: g.name })),
-            customSectionFields: this._customFields.map((f: any) => ({
-                id: f.id,
-                name: f.title || f.name,
-                type: f.type,
-                default_value: f.default_value,
-                archived: f.archived,
-                custom_section: f.custom_section,
-            })),
-        };
-    }
 
     private async setupResources() {
         if (this.resourcesSetup) {
@@ -1340,16 +737,163 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
         this.resourcesSetup = true;
     }
 
+    private buildEntityContext(): string {
+        const sections: string[] = [];
+
+        if (this.applications.length > 0) {
+            const appLines = this.applications.map((a: any) => `  - id=${a.id}, name="${a.name}"`);
+            sections.push(`Applications:\n${appLines.join('\n')}`);
+        }
+
+        if (this.unitTypes.length > 0) {
+            const utLines = this.unitTypes.map((u: any) => `  - id=${u.id}, name="${u.name}"`);
+            sections.push(`Unit Types:\n${utLines.join('\n')}`);
+        }
+
+        if (this.metrics.length > 0) {
+            const mLines = this.metrics.map((m: any) => `  - id=${m.id}, name="${m.name}"`);
+            sections.push(`Metrics:\n${mLines.join('\n')}`);
+        }
+
+        if (this.teams.length > 0) {
+            const tLines = this.teams.map((t: any) => `  - id=${t.id}, name="${t.name}"`);
+            sections.push(`Teams:\n${tLines.join('\n')}`);
+        }
+
+        if (this._customFields.length > 0) {
+            const cfLines = (this._customFields as CustomSectionField[])
+                .filter(f => !f.archived)
+                .map(f => `  - title="${f.name}", type="${f.type}", default="${f.default_value || ''}", section_type="${f.custom_section?.type || 'unknown'}"`);
+            sections.push(`Custom Fields:\n${cfLines.join('\n')}`);
+        }
+
+        return sections.join('\n\n');
+    }
+
     private setupPrompts() {
         this.server.prompt(
             "experiment-status",
             "Quick overview of all running experiments",
             async () => ({
                 messages: [{
-                    role: "user",
+                    role: "user" as const,
                     content: {
-                        type: "text",
+                        type: "text" as const,
                         text: "Show me all currently running experiments with their key metrics and performance"
+                    }
+                }]
+            })
+        );
+
+        this.server.prompt(
+            "create-experiment",
+            "Create a new A/B test experiment with all required fields pre-populated from available entities",
+            {
+                name: z.string().describe("Experiment name (snake_case recommended)"),
+                type: z.string().optional().describe("Experiment type: 'test' or 'feature' (default: 'test')"),
+            },
+            (args) => {
+                const entityContext = this.buildEntityContext();
+                const expType = args.type || 'test';
+                return {
+                    messages: [{
+                        role: "user" as const,
+                        content: {
+                            type: "text" as const,
+                            text: `Create a new ${expType === 'feature' ? 'feature flag' : 'A/B test'} experiment named "${args.name}".
+
+Use the execute_api_method tool with method_name "createExperiment" to create it. Use the context below to fill in valid IDs for applications, unit types, metrics, teams, and custom fields.
+
+${entityContext}
+
+Requirements:
+- Set type to "${expType}"
+- Use valid application and unit type IDs from the lists above
+- Include appropriate secondary metrics
+- Fill in custom fields with sensible defaults
+- Set up control and treatment variants
+- Use snake_case for the experiment name`
+                        }
+                    }]
+                };
+            }
+        );
+
+        this.server.prompt(
+            "create-feature-flag",
+            "Create a new feature flag (simplified experiment with type=feature)",
+            {
+                name: z.string().describe("Feature flag name (snake_case recommended)"),
+            },
+            (args) => {
+                const entityContext = this.buildEntityContext();
+                return {
+                    messages: [{
+                        role: "user" as const,
+                        content: {
+                            type: "text" as const,
+                            text: `Create a new feature flag named "${args.name}".
+
+Use the execute_api_method tool with method_name "createExperiment" to create it with type "feature". Feature flags typically have two variants: "off" (control) and "on" (treatment).
+
+${entityContext}
+
+Requirements:
+- Set type to "feature"
+- Two variants: off (control, variant 0) and on (treatment, variant 1)
+- Use valid application and unit type IDs from the lists above
+- Custom fields will be auto-populated for the "feature" type`
+                        }
+                    }]
+                };
+            }
+        );
+
+        this.server.prompt(
+            "analyze-experiment",
+            "Fetch and analyze a specific experiment's details, state, and performance",
+            {
+                id: z.string().describe("Experiment ID to analyze"),
+            },
+            (args) => ({
+                messages: [{
+                    role: "user" as const,
+                    content: {
+                        type: "text" as const,
+                        text: `Analyze experiment with ID ${args.id}.
+
+Steps:
+1. Use execute_api_method with method_name "getExperiment" and params { "id": ${args.id} } to fetch the experiment details (use show: ["experiment_report", "audience"] for full data)
+2. Check the experiment state (created, running, stopped, etc.)
+3. If running, check for alerts (SRM, audience mismatch, sample size reached)
+4. Review the traffic split and variant configuration
+5. If available, analyze the experiment report metrics and statistical significance
+6. Provide a summary with actionable recommendations`
+                    }
+                }]
+            })
+        );
+
+        this.server.prompt(
+            "experiment-review",
+            "Review all running experiments and identify ones needing attention",
+            async () => ({
+                messages: [{
+                    role: "user" as const,
+                    content: {
+                        type: "text" as const,
+                        text: `Review all running experiments and identify any that need attention.
+
+Steps:
+1. Use execute_api_method with method_name "listExperiments" and params { "options": { "state": "running" } } with show: ["experiment_report"]
+2. For each running experiment, check for:
+   - SRM alerts (alert_srm)
+   - Audience mismatch alerts
+   - Sample size reached
+   - Assignment conflicts
+   - Experiments that have been running unusually long
+3. Summarize findings and prioritize which experiments need immediate attention
+4. Suggest next actions for each flagged experiment (stop, extend, investigate, etc.)`
                     }
                 }]
             })
