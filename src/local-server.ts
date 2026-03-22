@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { completable } from "@modelcontextprotocol/sdk/server/completable.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { readFileSync, existsSync } from "fs";
@@ -42,7 +41,6 @@ const KEYCHAIN_ACCOUNT_PREFIX = 'api-key';
 const CREDENTIALS_FILE_PATH = '.config/absmartly/credentials.json';
 
 const DEFAULT_LIST_ITEMS = 20;
-const MAX_COMPLETIONS = 20;
 
 const EXPERIMENT_LIST_METHODS = new Set([
     'listExperiments', 'searchExperiments',
@@ -407,15 +405,7 @@ async function main() {
         "discover_api_methods",
         "Discover available ABsmartly API methods. Use this to find what operations are available before calling execute_api_method. You can browse by category or search by keyword.",
         {
-            category: completable(
-                z.string().optional().describe(`Browse by category. Available: ${API_CATEGORIES.join(', ')}`),
-                (value) => {
-                    const lower = (value || '').toLowerCase();
-                    return API_CATEGORIES
-                        .filter(c => c.toLowerCase().startsWith(lower))
-                        .slice(0, MAX_COMPLETIONS);
-                }
-            ),
+            category: z.string().optional().describe(`Browse by category. Available: ${API_CATEGORIES.join(', ')}`),
             search: z.string().optional().describe("Search methods by keyword (matches method name, description, or category)"),
         },
         { readOnlyHint: true },
@@ -466,16 +456,7 @@ async function main() {
         "get_api_method_docs",
         "Get detailed documentation for a specific ABsmartly API method. Use discover_api_methods first to find the method name.",
         {
-            method_name: completable(
-                z.string().describe("Exact method name (e.g. 'createMetric', 'listTeamMembers')"),
-                (value) => {
-                    const lower = (value || '').toLowerCase();
-                    return API_CATALOG
-                        .filter(m => m.method.toLowerCase().includes(lower))
-                        .map(m => m.method)
-                        .slice(0, MAX_COMPLETIONS);
-                }
-            ),
+            method_name: z.string().describe("Exact method name (e.g. 'createMetric', 'listTeamMembers')"),
         },
         { readOnlyHint: true },
         async (params) => {
@@ -532,16 +513,7 @@ async function main() {
         "execute_api_method",
         "Execute any ABsmartly API method by name. Results for experiments, metrics, goals, teams, users, and segments are auto-summarized. Use 'show'/'exclude' for experiment field control. Pass 'raw: true' for unsummarized response.",
         {
-            method_name: completable(
-                z.string().describe("Method name from the API catalog"),
-                (value) => {
-                    const lower = (value || '').toLowerCase();
-                    return API_CATALOG
-                        .filter(m => m.method.toLowerCase().includes(lower))
-                        .map(m => m.method)
-                        .slice(0, MAX_COMPLETIONS);
-                }
-            ),
+            method_name: z.string().describe("Method name from the API catalog"),
             params: z.record(z.unknown()).optional().describe("Method parameters as a JSON object"),
             show: z.array(z.string()).optional().describe("Extra fields to include in experiment summaries"),
             exclude: z.array(z.string()).optional().describe("Fields to exclude from experiment summaries"),

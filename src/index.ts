@@ -1,7 +1,6 @@
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { completable } from "@modelcontextprotocol/sdk/server/completable.js";
 import { z } from "zod";
 import { ABsmartlyResources } from "./resources";
 import { ABsmartlyOAuthHandler } from "./absmartly-oauth-handler";
@@ -53,7 +52,6 @@ import {
 } from "./shared";
 
 const DEFAULT_LIST_ITEMS = 20;
-const MAX_COMPLETIONS = 20;
 
 export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartlyProps> {
     server = new McpServer({
@@ -488,15 +486,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             "discover_api_methods",
             "Discover available ABsmartly API methods. Use this to find what operations are available before calling execute_api_method. You can browse by category or search by keyword.",
             {
-                category: completable(
-                    z.string().optional().describe(`Browse by category. Available: ${API_CATEGORIES.join(', ')}`),
-                    (value) => {
-                        const lower = (value || '').toLowerCase();
-                        return API_CATEGORIES
-                            .filter(c => c.toLowerCase().startsWith(lower))
-                            .slice(0, MAX_COMPLETIONS);
-                    }
-                ),
+                category: z.string().optional().describe(`Browse by category. Available: ${API_CATEGORIES.join(', ')}`),
                 search: z.string().optional().describe("Search methods by keyword (matches method name, description, or category)"),
             },
             { readOnlyHint: true },
@@ -547,16 +537,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             "get_api_method_docs",
             "Get detailed documentation for a specific ABsmartly API method. Use discover_api_methods first to find the method name.",
             {
-                method_name: completable(
-                    z.string().describe("Exact method name (e.g. 'createMetric', 'listTeamMembers')"),
-                    (value) => {
-                        const lower = (value || '').toLowerCase();
-                        return API_CATALOG
-                            .filter(m => m.method.toLowerCase().includes(lower))
-                            .map(m => m.method)
-                            .slice(0, MAX_COMPLETIONS);
-                    }
-                ),
+                method_name: z.string().describe("Exact method name (e.g. 'createMetric', 'listTeamMembers')"),
             },
             { readOnlyHint: true },
             async (params) => {
@@ -613,16 +594,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             "execute_api_method",
             "Execute any ABsmartly API method by name. Results for experiments, metrics, goals, teams, users, and segments are auto-summarized. Use 'show'/'exclude' for experiment field control. Pass 'raw: true' for unsummarized response. Some methods (delete, stop) are destructive.",
             {
-                method_name: completable(
-                    z.string().describe("Method name from the API catalog (e.g. 'getMetric', 'createTeam')"),
-                    (value) => {
-                        const lower = (value || '').toLowerCase();
-                        return API_CATALOG
-                            .filter(m => m.method.toLowerCase().includes(lower))
-                            .map(m => m.method)
-                            .slice(0, MAX_COMPLETIONS);
-                    }
-                ),
+                method_name: z.string().describe("Method name from the API catalog (e.g. 'getMetric', 'createTeam')"),
                 params: z.record(z.unknown()).optional().describe("Method parameters as a JSON object. Keys match the parameter names from the method docs. For createExperiment, pass 'custom_fields' by name to override defaults."),
                 show: z.array(z.string()).optional().describe("Extra fields to include in experiment summaries (e.g. ['audience', 'archived', 'experiment_report'])"),
                 exclude: z.array(z.string()).optional().describe("Fields to exclude from experiment summaries (e.g. ['owners', 'tags', 'teams'])"),
