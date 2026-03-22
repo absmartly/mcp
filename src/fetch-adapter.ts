@@ -32,7 +32,9 @@ export class FetchHttpClient implements HttpClient {
   }
 
   async request<T = unknown>(config: HttpRequestConfig): Promise<HttpResponse<T>> {
-    let url = `${this.baseUrl}${API_VERSION_PREFIX}${config.url}`;
+    let url = config.url.startsWith('http://') || config.url.startsWith('https://')
+      ? config.url
+      : `${this.baseUrl}${API_VERSION_PREFIX}${config.url}`;
 
     if (config.params) {
       const searchParams = new URLSearchParams();
