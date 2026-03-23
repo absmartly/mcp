@@ -260,15 +260,19 @@ async function main() {
     });
     const apiClient = new APIClient(fetchHttpClient);
 
-    const mcpServer = new McpServer({
-        name: "ABsmartly MCP Server (Local)",
-        version: MCP_VERSION,
-        capabilities: {
-            tools: {},
-            resources: { subscribe: true, listChanged: true },
-            prompts: {},
+    const mcpServer = new McpServer(
+        {
+            name: "ABsmartly MCP Server (Local)",
+            version: MCP_VERSION,
         },
-    });
+        {
+            capabilities: {
+                tools: {},
+                resources: { subscribe: true, listChanged: true },
+                prompts: {},
+            },
+        }
+    );
 
     let currentUserId: number | null = null;
     const entityWarnings: string[] = [];

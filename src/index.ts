@@ -54,15 +54,19 @@ import {
 const DEFAULT_LIST_ITEMS = 20;
 
 export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartlyProps> {
-    server = new McpServer({
-        name: "ABsmartly MCP Server",
-        version: MCP_VERSION,
-        capabilities: {
-            tools: {},
-            resources: { subscribe: true, listChanged: true },
-            prompts: {}
+    server = new McpServer(
+        {
+            name: "ABsmartly MCP Server",
+            version: MCP_VERSION,
+        },
+        {
+            capabilities: {
+                tools: {},
+                resources: { subscribe: true, listChanged: true },
+                prompts: {}
+            }
         }
-    });
+    );
 
     private apiClient: APIClient | null = null;
     private resourcesSetup: boolean = false;
