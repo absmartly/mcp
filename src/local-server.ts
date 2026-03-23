@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { completable } from "@modelcontextprotocol/sdk/server/completable.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { readFileSync, existsSync } from "fs";
@@ -671,7 +672,10 @@ async function main() {
         "Create a new A/B test experiment with all required fields pre-populated from available entities",
         {
             name: z.string().describe("Experiment name (snake_case recommended)"),
-            type: z.string().optional().describe("Experiment type: 'test' or 'feature' (default: 'test')"),
+            type: completable(
+                z.string().default('test').describe("Experiment type: 'test' or 'feature' (default: 'test')"),
+                (value) => ['test', 'feature'].filter(t => t.startsWith(value || ''))
+            ),
         },
         (args) => {
             const entityContext = buildEntityContext({ applications, unitTypes, metrics, teams, customFields });

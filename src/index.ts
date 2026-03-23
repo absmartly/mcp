@@ -1,6 +1,7 @@
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { completable } from "@modelcontextprotocol/sdk/server/completable.js";
 import { z } from "zod";
 import { ABsmartlyResources } from "./resources";
 import { ABsmartlyOAuthHandler } from "./absmartly-oauth-handler";
@@ -766,7 +767,10 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             "Create a new A/B test experiment with all required fields pre-populated from available entities",
             {
                 name: z.string().describe("Experiment name (snake_case recommended)"),
-                type: z.string().optional().describe("Experiment type: 'test' or 'feature' (default: 'test')"),
+                type: completable(
+                    z.string().default('test').describe("Experiment type: 'test' or 'feature' (default: 'test')"),
+                    (value) => ['test', 'feature'].filter(t => t.startsWith(value || ''))
+                ),
             },
             (args) => {
                 const entityContext = this.buildEntityContext();

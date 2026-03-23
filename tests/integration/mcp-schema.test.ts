@@ -148,6 +148,44 @@ async function run() {
         assert(promptNames.includes(name), `prompt ${name} exists`);
     }
 
+    console.log('\n-- Prompt Completions --\n');
+
+    assert(!!caps?.completions, 'completions capability declared');
+
+    const typeT = await client.complete({
+        ref: { type: "ref/prompt" as const, name: "create-experiment" },
+        argument: { name: "type", value: "t" },
+    });
+    assert(typeT.completion.values.length === 1, 'type "t" returns 1 result');
+    assert(typeT.completion.values[0] === 'test', 'type "t" completes to "test"');
+
+    const typeEmpty = await client.complete({
+        ref: { type: "ref/prompt" as const, name: "create-experiment" },
+        argument: { name: "type", value: "" },
+    });
+    assert(typeEmpty.completion.values.length === 2, 'type "" returns 2 results');
+    assert(typeEmpty.completion.values.includes('test'), 'type "" includes "test"');
+    assert(typeEmpty.completion.values.includes('feature'), 'type "" includes "feature"');
+
+    const typeF = await client.complete({
+        ref: { type: "ref/prompt" as const, name: "create-experiment" },
+        argument: { name: "type", value: "f" },
+    });
+    assert(typeF.completion.values.length === 1, 'type "f" returns 1 result');
+    assert(typeF.completion.values[0] === 'feature', 'type "f" completes to "feature"');
+
+    const typeNone = await client.complete({
+        ref: { type: "ref/prompt" as const, name: "create-experiment" },
+        argument: { name: "type", value: "xyz" },
+    });
+    assert(typeNone.completion.values.length === 0, 'type "xyz" returns empty');
+
+    const nameNoComplete = await client.complete({
+        ref: { type: "ref/prompt" as const, name: "create-experiment" },
+        argument: { name: "name", value: "test" },
+    });
+    assert(nameNoComplete.completion.values.length === 0, 'name param has no completions');
+
     console.log(`\n${'='.repeat(45)}`);
     console.log(`Results: ${passed} passed, ${failed} failed`);
     if (failures.length > 0) {
