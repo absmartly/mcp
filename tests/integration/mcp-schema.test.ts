@@ -138,7 +138,23 @@ async function run() {
 
     const templates = await client.listResourceTemplates();
     const templateUris = templates.resourceTemplates.map(t => t.uriTemplate);
-    assert(templateUris.some(u => u.includes('experiments')), 'experiment resource template exists');
+
+    const expectedTemplates = [
+        'absmartly://experiments/{id}',
+        'absmartly://metrics/{id}',
+        'absmartly://goals/{id}',
+        'absmartly://teams/{id}',
+        'absmartly://users/{id}',
+        'absmartly://segments/{id}',
+        'absmartly://applications/{name}',
+        'absmartly://teams/by-name/{name}',
+        'absmartly://metrics/by-name/{name}',
+        'absmartly://goals/by-name/{name}',
+    ];
+    for (const uri of expectedTemplates) {
+        assert(templateUris.includes(uri), `resource template ${uri} exists`);
+    }
+    assert(templateUris.length === expectedTemplates.length, `exactly ${expectedTemplates.length} templates`, `got ${templateUris.length}`);
 
     console.log('\n-- Prompts --\n');
 
@@ -147,6 +163,81 @@ async function run() {
     for (const name of ['experiment-status', 'create-experiment', 'create-feature-flag', 'analyze-experiment', 'experiment-review']) {
         assert(promptNames.includes(name), `prompt ${name} exists`);
     }
+
+    console.log('\n-- Resource Template Completions --\n');
+
+    const appNameEmpty = await client.complete({
+        ref: { type: "ref/resource" as const, uri: "absmartly://applications/{name}" },
+        argument: { name: "name", value: "" },
+    });
+    assert(appNameEmpty.completion.values.length > 0, 'app name "" returns results');
+    assert(appNameEmpty.completion.values.length <= 20, 'app name "" respects limit');
+
+    const appNameWeb = await client.complete({
+        ref: { type: "ref/resource" as const, uri: "absmartly://applications/{name}" },
+        argument: { name: "name", value: "web" },
+    });
+    assert(appNameWeb.completion.values.length > 0, 'app name "web" returns results');
+    assert(appNameWeb.completion.values.every(v => v.toLowerCase().includes('web')), 'app name "web" all contain "web"');
+
+    const teamNameEmpty = await client.complete({
+        ref: { type: "ref/resource" as const, uri: "absmartly://teams/by-name/{name}" },
+        argument: { name: "name", value: "" },
+    });
+    assert(teamNameEmpty.completion.values.length > 0, 'team name "" returns results');
+
+    const teamNameQA = await client.complete({
+        ref: { type: "ref/resource" as const, uri: "absmartly://teams/by-name/{name}" },
+        argument: { name: "name", value: "QA" },
+    });
+    assert(teamNameQA.completion.values.length > 0, 'team name "QA" returns results');
+    assert(teamNameQA.completion.values.every(v => v.toLowerCase().includes('qa')), 'team name "QA" all contain "qa"');
+
+    const teamIdEmpty = await client.complete({
+        ref: { type: "ref/resource" as const, uri: "absmartly://teams/{id}" },
+        argument: { name: "id", value: "" },
+    });
+    assert(teamIdEmpty.completion.values.length > 0, 'team id "" returns results');
+    assert(teamIdEmpty.completion.values.every(v => /^\d+$/.test(v)), 'team id "" all are numeric');
+
+    const metricNameEmpty = await client.complete({
+        ref: { type: "ref/resource" as const, uri: "absmartly://metrics/by-name/{name}" },
+        argument: { name: "name", value: "" },
+    });
+    assert(metricNameEmpty.completion.values.length > 0, 'metric name "" returns results');
+
+    const metricIdEmpty = await client.complete({
+        ref: { type: "ref/resource" as const, uri: "absmartly://metrics/{id}" },
+        argument: { name: "id", value: "" },
+    });
+    assert(metricIdEmpty.completion.values.length > 0, 'metric id "" returns results');
+
+    const goalNameEmpty = await client.complete({
+        ref: { type: "ref/resource" as const, uri: "absmartly://goals/by-name/{name}" },
+        argument: { name: "name", value: "" },
+    });
+    assert(goalNameEmpty.completion.values.length > 0, 'goal name "" returns results');
+
+    const appNameNone = await client.complete({
+        ref: { type: "ref/resource" as const, uri: "absmartly://applications/{name}" },
+        argument: { name: "name", value: "xyznonexistent" },
+    });
+    assert(appNameNone.completion.values.length === 0, 'app name "xyznonexistent" returns empty');
+
+    console.log('\n-- Resource Template Reading --\n');
+
+    const appByName = await client.readResource({ uri: "absmartly://applications/website" });
+    const appData = JSON.parse((appByName.contents[0] as any).text);
+    assert(appData.name === 'website', 'read application by name returns correct app');
+    assert(typeof appData.id === 'number', 'application has numeric id');
+
+    const teamById = await client.readResource({ uri: "absmartly://teams/1" });
+    const teamData = JSON.parse((teamById.contents[0] as any).text);
+    assert(typeof teamData.id === 'number' || typeof teamData.name === 'string', 'read team by id returns data');
+
+    const appNotFound = await client.readResource({ uri: "absmartly://applications/nonexistent_app_xyz" });
+    const notFoundData = JSON.parse((appNotFound.contents[0] as any).text);
+    assert(!!notFoundData.error, 'non-existent app returns error');
 
     console.log('\n-- Prompt Completions --\n');
 
