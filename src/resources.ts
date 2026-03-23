@@ -313,56 +313,251 @@ export class ABsmartlyResources {
             );
         }
     }
+    private getApiClient() {
+        return (this.mcpServer as any).apiClient;
+    }
+
+    private getCachedEntities(key: string): any[] {
+        return (this.mcpServer as any)[key] || [];
+    }
+
+    private completeByName(cacheKey: string) {
+        return (value: string) => {
+            const lower = (value || '').toLowerCase();
+            return this.getCachedEntities(cacheKey)
+                .filter((e: any) => (e.name || '').toLowerCase().includes(lower))
+                .map((e: any) => e.name)
+                .slice(0, 20);
+        };
+    }
+
+    private completeById(cacheKey: string) {
+        return (value: string) => {
+            const prefix = value || '';
+            return this.getCachedEntities(cacheKey)
+                .map((e: any) => String(e.id))
+                .filter(id => id.startsWith(prefix))
+                .slice(0, 20);
+        };
+    }
+
+    private errorResult(uri: URL, message: string) {
+        return {
+            contents: [{
+                uri: uri.href,
+                mimeType: "application/json" as const,
+                text: JSON.stringify({ error: message })
+            }]
+        };
+    }
+
+    private jsonResult(uri: URL, data: unknown) {
+        return {
+            contents: [{
+                uri: uri.href,
+                mimeType: "application/json" as const,
+                text: JSON.stringify(data, null, 2)
+            }]
+        };
+    }
+
     private setupResourceTemplates() {
-        const template = new ResourceTemplate("absmartly://experiments/{id}", { list: undefined });
+        const {
+            summarizeExperiment,
+            summarizeMetric,
+            summarizeGoal,
+            summarizeTeam,
+            summarizeUserDetail,
+            summarizeSegment,
+        } = require("@absmartly/cli/api-client");
 
         this.mcpServer.server.resource(
-            "Experiment Detail",
-            template,
+            "Experiment by ID",
+            new ResourceTemplate("absmartly://experiments/{id}", {
+                list: undefined,
+                complete: { id: this.completeById('experiments') },
+            }),
             { description: "Fetch and summarize a specific experiment by ID" },
             async (uri, variables) => {
                 const id = Number(variables.id);
-                if (isNaN(id)) {
-                    return {
-                        contents: [{
-                            uri: uri.href,
-                            mimeType: "application/json",
-                            text: JSON.stringify({ error: "Invalid experiment ID" })
-                        }]
-                    };
-                }
-
-                const apiClient = (this.mcpServer as any).apiClient;
-                if (!apiClient) {
-                    return {
-                        contents: [{
-                            uri: uri.href,
-                            mimeType: "application/json",
-                            text: JSON.stringify({ error: "API client not initialized" })
-                        }]
-                    };
-                }
-
+                if (isNaN(id)) return this.errorResult(uri, "Invalid experiment ID");
+                const client = this.getApiClient();
+                if (!client) return this.errorResult(uri, "API client not initialized");
                 try {
-                    const { summarizeExperiment } = await import("@absmartly/cli/api-client");
-                    const experiment = await apiClient.getExperiment(id);
-                    const summarized = summarizeExperiment(experiment, [], []);
-                    return {
-                        contents: [{
-                            uri: uri.href,
-                            mimeType: "application/json",
-                            text: JSON.stringify(summarized, null, 2)
-                        }]
-                    };
+                    const exp = await client.getExperiment(id);
+                    return this.jsonResult(uri, summarizeExperiment(exp, [], []));
                 } catch (error) {
-                    return {
-                        contents: [{
-                            uri: uri.href,
-                            mimeType: "application/json",
-                            text: JSON.stringify({ error: `Failed to fetch experiment ${id}: ${error}` })
-                        }]
-                    };
+                    return this.errorResult(uri, `Failed to fetch experiment ${id}: ${error}`);
                 }
+            }
+        );
+
+        this.mcpServer.server.resource(
+            "Metric by ID",
+            new ResourceTemplate("absmartly://metrics/{id}", {
+                list: undefined,
+                complete: { id: this.completeById('metrics') },
+            }),
+            { description: "Fetch and summarize a specific metric by ID" },
+            async (uri, variables) => {
+                const id = Number(variables.id);
+                if (isNaN(id)) return this.errorResult(uri, "Invalid metric ID");
+                const client = this.getApiClient();
+                if (!client) return this.errorResult(uri, "API client not initialized");
+                try {
+                    const metric = await client.getMetric(id);
+                    return this.jsonResult(uri, summarizeMetric(metric));
+                } catch (error) {
+                    return this.errorResult(uri, `Failed to fetch metric ${id}: ${error}`);
+                }
+            }
+        );
+
+        this.mcpServer.server.resource(
+            "Goal by ID",
+            new ResourceTemplate("absmartly://goals/{id}", {
+                list: undefined,
+                complete: { id: this.completeById('goals') },
+            }),
+            { description: "Fetch and summarize a specific goal by ID" },
+            async (uri, variables) => {
+                const id = Number(variables.id);
+                if (isNaN(id)) return this.errorResult(uri, "Invalid goal ID");
+                const client = this.getApiClient();
+                if (!client) return this.errorResult(uri, "API client not initialized");
+                try {
+                    const goal = await client.getGoal(id);
+                    return this.jsonResult(uri, summarizeGoal(goal));
+                } catch (error) {
+                    return this.errorResult(uri, `Failed to fetch goal ${id}: ${error}`);
+                }
+            }
+        );
+
+        this.mcpServer.server.resource(
+            "Team by ID",
+            new ResourceTemplate("absmartly://teams/{id}", {
+                list: undefined,
+                complete: { id: this.completeById('teams') },
+            }),
+            { description: "Fetch and summarize a specific team by ID" },
+            async (uri, variables) => {
+                const id = Number(variables.id);
+                if (isNaN(id)) return this.errorResult(uri, "Invalid team ID");
+                const client = this.getApiClient();
+                if (!client) return this.errorResult(uri, "API client not initialized");
+                try {
+                    const team = await client.getTeam(id);
+                    return this.jsonResult(uri, summarizeTeam(team));
+                } catch (error) {
+                    return this.errorResult(uri, `Failed to fetch team ${id}: ${error}`);
+                }
+            }
+        );
+
+        this.mcpServer.server.resource(
+            "User by ID",
+            new ResourceTemplate("absmartly://users/{id}", {
+                list: undefined,
+                complete: { id: this.completeById('users') },
+            }),
+            { description: "Fetch and summarize a specific user by ID" },
+            async (uri, variables) => {
+                const id = Number(variables.id);
+                if (isNaN(id)) return this.errorResult(uri, "Invalid user ID");
+                const client = this.getApiClient();
+                if (!client) return this.errorResult(uri, "API client not initialized");
+                try {
+                    const user = await client.getUser(id);
+                    return this.jsonResult(uri, summarizeUserDetail(user));
+                } catch (error) {
+                    return this.errorResult(uri, `Failed to fetch user ${id}: ${error}`);
+                }
+            }
+        );
+
+        this.mcpServer.server.resource(
+            "Segment by ID",
+            new ResourceTemplate("absmartly://segments/{id}", {
+                list: undefined,
+                complete: { id: this.completeById('segments') },
+            }),
+            { description: "Fetch a specific segment by ID" },
+            async (uri, variables) => {
+                const id = Number(variables.id);
+                if (isNaN(id)) return this.errorResult(uri, "Invalid segment ID");
+                const client = this.getApiClient();
+                if (!client) return this.errorResult(uri, "API client not initialized");
+                try {
+                    const segment = await client.getSegment(id);
+                    return this.jsonResult(uri, summarizeSegment(segment));
+                } catch (error) {
+                    return this.errorResult(uri, `Failed to fetch segment ${id}: ${error}`);
+                }
+            }
+        );
+
+        this.mcpServer.server.resource(
+            "Application by name",
+            new ResourceTemplate("absmartly://applications/{name}", {
+                list: undefined,
+                complete: { name: this.completeByName('applications') },
+            }),
+            { description: "Look up an application by name" },
+            async (uri, variables) => {
+                const name = decodeURIComponent(String(variables.name));
+                const apps = this.getCachedEntities('applications');
+                const match = apps.find((a: any) => a.name.toLowerCase() === name.toLowerCase());
+                if (!match) return this.errorResult(uri, `Application "${name}" not found`);
+                return this.jsonResult(uri, match);
+            }
+        );
+
+        this.mcpServer.server.resource(
+            "Team by name",
+            new ResourceTemplate("absmartly://teams/by-name/{name}", {
+                list: undefined,
+                complete: { name: this.completeByName('teams') },
+            }),
+            { description: "Look up a team by name" },
+            async (uri, variables) => {
+                const name = decodeURIComponent(String(variables.name));
+                const teams = this.getCachedEntities('teams');
+                const match = teams.find((t: any) => t.name.toLowerCase() === name.toLowerCase());
+                if (!match) return this.errorResult(uri, `Team "${name}" not found`);
+                return this.jsonResult(uri, match);
+            }
+        );
+
+        this.mcpServer.server.resource(
+            "Metric by name",
+            new ResourceTemplate("absmartly://metrics/by-name/{name}", {
+                list: undefined,
+                complete: { name: this.completeByName('metrics') },
+            }),
+            { description: "Look up a metric by name" },
+            async (uri, variables) => {
+                const name = decodeURIComponent(String(variables.name));
+                const metrics = this.getCachedEntities('metrics');
+                const match = metrics.find((m: any) => m.name.toLowerCase() === name.toLowerCase());
+                if (!match) return this.errorResult(uri, `Metric "${name}" not found`);
+                return this.jsonResult(uri, match);
+            }
+        );
+
+        this.mcpServer.server.resource(
+            "Goal by name",
+            new ResourceTemplate("absmartly://goals/by-name/{name}", {
+                list: undefined,
+                complete: { name: this.completeByName('goals') },
+            }),
+            { description: "Look up a goal by name" },
+            async (uri, variables) => {
+                const name = decodeURIComponent(String(variables.name));
+                const goals = this.getCachedEntities('goals');
+                const match = goals.find((g: any) => g.name.toLowerCase() === name.toLowerCase());
+                if (!match) return this.errorResult(uri, `Goal "${name}" not found`);
+                return this.jsonResult(uri, match);
             }
         );
     }
