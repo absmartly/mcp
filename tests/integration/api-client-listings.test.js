@@ -37,7 +37,7 @@ export default async function runApiClientListingsTests() {
     if (!condition) throw new Error(message || 'Assertion failed');
   }
 
-  const credentials = resolveTestCredentials();
+  const credentials = await resolveTestCredentials();
   if (!credentials) {
     return { success: true, testCount: 0, message: SKIP_MESSAGE, details: [] };
   }

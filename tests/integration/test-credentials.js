@@ -2,29 +2,30 @@
  * Shared credential resolver for integration tests.
  *
  * Resolution order:
- *   1. Environment variables (ABSMARTLY_API_KEY, ABSMARTLY_API_ENDPOINT)
- *      which includes anything already loaded via dotenv
- *   2. `--profile <name>` CLI argument → reads from ~/.config/absmartly/
+ *   1. `--profile <name>` CLI argument -> reads from ~/.config/absmartly/
+ *      via the @absmartly/cli config and keyring modules (explicit profile always wins)
+ *   2. Environment variables (ABSMARTLY_API_KEY, ABSMARTLY_API_ENDPOINT)
+ *      which includes anything loaded via dotenv from .env.local
  *
  * Returns { apiKey, endpoint } or null (caller should skip the test).
  */
 
-import { homedir } from 'os';
 import { join, dirname } from 'path';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+// These modules are not exported via package.json "exports", so we import by
+// relative path. This is intentional — the CLI's own config/keyring logic
+// handles credentials.json, OS keychain, and profile resolution.
+import { getProfile } from '../../node_modules/@absmartly/cli/dist/lib/config/config.js';
+import { getAPIKey } from '../../node_modules/@absmartly/cli/dist/lib/config/keyring.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, '..', '..');
 
-const ABSMARTLY_CONFIG_DIR = join(homedir(), '.config', 'absmartly');
-const CREDENTIALS_FILE = join(ABSMARTLY_CONFIG_DIR, 'credentials.json');
-const CONFIG_YAML_FILE = join(ABSMARTLY_CONFIG_DIR, 'config.yaml');
-
 /**
- * Load all .env.*.local files from the project root.
- * Priority (highest first): .env.local, .env.{NODE_ENV}.local, .env
+ * Load .env files from the project root.
+ * Priority (highest first): .env.{NODE_ENV}.local, .env.local, .env
  */
 function loadEnvFiles() {
   const candidates = [];
@@ -42,108 +43,49 @@ function loadEnvFiles() {
 }
 
 /**
- * Read the ABsmartly CLI credentials file.
- * Returns the parsed JSON or an empty object.
- */
-function readCredentials() {
-  if (!existsSync(CREDENTIALS_FILE)) return {};
-  try {
-    return JSON.parse(readFileSync(CREDENTIALS_FILE, 'utf8'));
-  } catch {
-    return {};
-  }
-}
-
-/**
- * Minimal parser for the profile endpoint from config.yaml.
- * Handles the known two-space-indent structure:
- *
- *   profiles:
- *     <profileName>:
- *       api:
- *         endpoint: https://...
- */
-function parseProfileEndpoint(yamlText, profileName) {
-  const lines = yamlText.split('\n');
-  let state = 'root';
-  const PROFILES_RE = /^profiles:\s*$/;
-  const PROFILE_RE = new RegExp(`^  ${escapeRegex(profileName)}:\\s*$`);
-  const API_RE = /^    api:\s*$/;
-  const ENDPOINT_RE = /^      endpoint:\s*(\S+)/;
-
-  for (const line of lines) {
-    switch (state) {
-      case 'root':
-        if (PROFILES_RE.test(line)) state = 'profiles';
-        break;
-      case 'profiles':
-        if (PROFILE_RE.test(line)) { state = 'profile'; break; }
-        // Reset if we exit profiles block (top-level key without leading spaces)
-        if (/^\S/.test(line) && !PROFILES_RE.test(line)) state = 'root';
-        break;
-      case 'profile':
-        if (API_RE.test(line)) { state = 'api'; break; }
-        // Exit if we reach another profile (same indent level)
-        if (/^  \S/.test(line)) state = 'profiles';
-        break;
-      case 'api': {
-        const m = ENDPOINT_RE.exec(line);
-        if (m) return m[1];
-        // Exit if we reach another section (same or lower indent)
-        if (/^    \S/.test(line)) state = 'profile';
-        break;
-      }
-    }
-  }
-  return null;
-}
-
-function escapeRegex(str) {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
  * Resolve credentials from the ABsmartly CLI config for a given profile.
- * Key name convention: "api-key" for default, "api-key-{profile}" for others.
+ * Uses the CLI's own config and keyring modules to handle both
+ * credentials.json and OS keychain lookups.
  */
-function resolveFromCliConfig(profileName) {
-  if (!existsSync(CONFIG_YAML_FILE)) return null;
+async function resolveFromCliConfig(profileName) {
+  try {
+    const profile = getProfile(profileName);
+    const endpoint = profile?.api?.endpoint;
+    if (!endpoint) return null;
 
-  const yaml = readFileSync(CONFIG_YAML_FILE, 'utf8');
-  const endpoint = parseProfileEndpoint(yaml, profileName);
-  if (!endpoint) return null;
+    const apiKey = await getAPIKey(profileName);
+    if (!apiKey) return null;
 
-  const creds = readCredentials();
-  const keyName = profileName === 'default' ? 'api-key' : `api-key-${profileName}`;
-  const apiKey = creds[keyName] ?? null;
-  if (!apiKey) return null;
-
-  return { apiKey, endpoint };
+    return { apiKey, endpoint };
+  } catch {
+    return null;
+  }
 }
 
 /**
  * Resolve credentials for integration tests.
  *
- * @returns {{ apiKey: string, endpoint: string } | null}
- *   null means credentials were not found — the calling test should skip.
+ * @returns {Promise<{ apiKey: string, endpoint: string } | null>}
+ *   null means credentials were not found -- the calling test should skip.
  */
-export function resolveTestCredentials() {
+export async function resolveTestCredentials() {
+  // --profile takes precedence when explicitly specified
+  const profileIdx = process.argv.indexOf('--profile');
+  if (profileIdx !== -1) {
+    const profileName = process.argv[profileIdx + 1];
+    if (profileName && !profileName.startsWith('-')) {
+      const creds = await resolveFromCliConfig(profileName);
+      if (creds) return creds;
+    }
+  }
+
+  // Fall back to env vars (includes .env.local via dotenv)
   loadEnvFiles();
 
   const envKey = process.env.ABSMARTLY_API_KEY;
   const envEndpoint = process.env.ABSMARTLY_API_ENDPOINT;
   if (envKey && envEndpoint) {
     return { apiKey: envKey, endpoint: envEndpoint };
-  }
-
-  // Try --profile <name> from process.argv
-  const profileIdx = process.argv.indexOf('--profile');
-  if (profileIdx !== -1) {
-    const profileName = process.argv[profileIdx + 1];
-    if (profileName && !profileName.startsWith('-')) {
-      const creds = resolveFromCliConfig(profileName);
-      if (creds) return creds;
-    }
   }
 
   return null;

@@ -25,7 +25,7 @@ const MCP_CONFIG_PATH = join(CLAUDE_TESTS_DIR, 'mcp-config.json');
 const SHOW_RESPONSES = process.argv.includes('--show-responses');
 const LIVE_MODE = process.argv.includes('--live');
 
-const credentials = resolveTestCredentials();
+const credentials = await resolveTestCredentials();
 if (!credentials) {
   console.error('No credentials found. Set ABSMARTLY_API_KEY/ABSMARTLY_API_ENDPOINT in .env.local or use --profile <name>');
   process.exit(1);
