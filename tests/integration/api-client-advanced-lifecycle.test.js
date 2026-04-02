@@ -8,30 +8,22 @@
  *   - Full-on with variant
  *   - Archive
  *
- * Requires ABSMARTLY_API_KEY and ABSMARTLY_API_ENDPOINT in .env.local.
+ * Requires credentials via .env.local or --profile <name>.
  */
 
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
-import dotenv from 'dotenv';
 import { APIClient } from '@absmartly/cli/api-client';
 import { FetchHttpClient } from '../../src/fetch-adapter.ts';
+import { resolveTestCredentials, SKIP_MESSAGE } from './test-credentials.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-dotenv.config({ path: join(__dirname, '../../.env.local') });
-
-const SKIP_MESSAGE = 'Skipped: ABSMARTLY_API_KEY and ABSMARTLY_API_ENDPOINT required';
 const TEST_EXPERIMENT_PREFIX = 'mcp_integration_test_advanced_';
 
 function stripV1(endpoint) {
   return endpoint.endsWith('/v1') ? endpoint.slice(0, -3) : endpoint;
 }
 
-function buildClient() {
-  const endpoint = stripV1(process.env.ABSMARTLY_API_ENDPOINT || '');
-  const apiKey = process.env.ABSMARTLY_API_KEY || '';
-  const httpClient = new FetchHttpClient(endpoint, { authToken: apiKey, authType: 'api-key' });
+function buildClient(credentials) {
+  const endpoint = stripV1(credentials.endpoint);
+  const httpClient = new FetchHttpClient(endpoint, { authToken: credentials.apiKey, authType: 'api-key' });
   return new APIClient(httpClient);
 }
 
@@ -58,16 +50,12 @@ export default async function runApiClientAdvancedLifecycleTests() {
     }
   }
 
-  if (!process.env.ABSMARTLY_API_KEY || !process.env.ABSMARTLY_API_ENDPOINT) {
-    return {
-      success: true,
-      testCount: 0,
-      message: SKIP_MESSAGE,
-      details: [],
-    };
+  const credentials = resolveTestCredentials();
+  if (!credentials) {
+    return { success: true, testCount: 0, message: SKIP_MESSAGE, details: [] };
   }
 
-  const client = buildClient();
+  const client = buildClient(credentials);
 
   let applicationId = null;
   let unitTypeId = null;

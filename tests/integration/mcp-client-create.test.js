@@ -6,24 +6,18 @@
  * by connecting to a local wrangler dev server at http://localhost:8787.
  *
  * Prerequisites:
- *   - ABSMARTLY_API_KEY and ABSMARTLY_API_ENDPOINT in .env.local
+ *   - Credentials via .env.local or --profile <name>
  *   - wrangler dev running: npm run dev
  */
 
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
-import dotenv from 'dotenv';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { APIClient } from '@absmartly/cli/api-client';
 import { FetchHttpClient } from '../../src/fetch-adapter.ts';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-dotenv.config({ path: join(__dirname, '../../.env.local') });
+import { resolveTestCredentials } from './test-credentials.js';
 
 const LOCAL_MCP_URL = 'http://localhost:8787/sse';
-const SKIP_NO_CREDENTIALS = 'Skipped: ABSMARTLY_API_KEY and ABSMARTLY_API_ENDPOINT required';
+const SKIP_NO_CREDENTIALS = 'Skipped: no credentials found (set ABSMARTLY_API_KEY/ABSMARTLY_API_ENDPOINT or use --profile <name>)';
 const SKIP_NO_SERVER = 'Skipped: local wrangler dev server not running at localhost:8787';
 const TEST_EXPERIMENT_PREFIX = 'mcp_integration_test_mcp_';
 
@@ -63,15 +57,15 @@ function parseMcpContent(result) {
   }
 }
 
-function buildApiClient() {
-  const endpoint = stripV1(process.env.ABSMARTLY_API_ENDPOINT || '');
-  const apiKey = process.env.ABSMARTLY_API_KEY || '';
-  const httpClient = new FetchHttpClient(endpoint, { authToken: apiKey, authType: 'api-key' });
+function buildApiClient(credentials) {
+  const endpoint = stripV1(credentials.endpoint);
+  const httpClient = new FetchHttpClient(endpoint, { authToken: credentials.apiKey, authType: 'api-key' });
   return new APIClient(httpClient);
 }
 
 export default async function runMcpClientCreateTests() {
-  if (!process.env.ABSMARTLY_API_KEY || !process.env.ABSMARTLY_API_ENDPOINT) {
+  const credentials = resolveTestCredentials();
+  if (!credentials) {
     return { success: true, testCount: 0, message: SKIP_NO_CREDENTIALS, details: [] };
   }
 
@@ -102,7 +96,7 @@ export default async function runMcpClientCreateTests() {
     }
   }
 
-  const apiClient = buildApiClient();
+  const apiClient = buildApiClient(credentials);
   let mcpClient = null;
 
   try {
