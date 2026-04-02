@@ -15,7 +15,7 @@ import { execFileSync, spawn } from 'child_process';
 import { writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import dotenv from 'dotenv';
+import { resolveTestCredentials } from './test-credentials.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, '..', '..');
@@ -25,10 +25,14 @@ const MCP_CONFIG_PATH = join(CLAUDE_TESTS_DIR, 'mcp-config.json');
 const SHOW_RESPONSES = process.argv.includes('--show-responses');
 const LIVE_MODE = process.argv.includes('--live');
 
-dotenv.config({ path: join(PROJECT_ROOT, '.env.local') });
+const credentials = resolveTestCredentials();
+if (!credentials) {
+  console.error('No credentials found. Set ABSMARTLY_API_KEY/ABSMARTLY_API_ENDPOINT in .env.local or use --profile <name>');
+  process.exit(1);
+}
 
-const API_KEY = process.env.ABSMARTLY_API_KEY;
-const API_ENDPOINT = process.env.ABSMARTLY_API_ENDPOINT;
+const API_KEY = credentials.apiKey;
+const API_ENDPOINT = credentials.endpoint;
 const LOCAL_MCP_PORT = 8787;
 const LIVE_MCP_URL = 'https://mcp.absmartly.com/sse';
 const LOCAL_MCP_URL = `http://127.0.0.1:${LOCAL_MCP_PORT}/sse`;
