@@ -63,3 +63,6 @@ tests/integration/claude-tests/mcp-config.json
 tests/integration/claude-tests/.mcp.json
 tests/integration/claude-tests/.claude/
 tests/integration/claude-tests/.git/
+
+# Superpowers plans (local only)
+docs/superpowers/
