@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Comprehensive integration tests for the 3 meta-tools (discover_api_methods,
- * get_api_method_docs, execute_api_method) using `claude -p`.
+ * Comprehensive integration tests for the 3 meta-tools (discover_commands,
+ * get_command_docs, execute_command) using `claude -p`.
  *
  * All ABsmartly operations (list, create, update, lifecycle) are tested
- * through execute_api_method — the single generic executor.
+ * through execute_command — the single generic executor.
  *
  * Credentials come from the ABsmartly CLI test-1 profile:
  *   - Endpoint: ~/.config/absmartly/config.yaml
@@ -217,13 +217,13 @@ async function run() {
   console.log(`API endpoint: ${API_ENDPOINT}`);
 
   // ════════════════════════════════════════════════
-  // 1. discover_api_methods
+  // 1. discover_commands
   // ════════════════════════════════════════════════
-  console.log(`\n── discover_api_methods ──`);
+  console.log(`\n── discover_commands ──`);
 
   await test('discover: no params → category summary', () => {
     const result = runClaude(
-      'Use the discover_api_methods tool without any parameters. Return ONLY the raw text output from the tool, nothing else.'
+      'Use the discover_commands tool without any parameters. Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('categories') && r.includes('experiments') && r.includes('methods'),
@@ -233,7 +233,7 @@ async function run() {
 
   await test('discover: browse experiments category', () => {
     const result = runClaude(
-      'Use the discover_api_methods tool with category="experiments". Return ONLY the raw text output from the tool, nothing else.'
+      'Use the discover_commands tool with category="experiments". Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('listExperiments') && r.includes('getExperiment'),
@@ -243,7 +243,7 @@ async function run() {
 
   await test('discover: search "metric"', () => {
     const result = runClaude(
-      'Use the discover_api_methods tool with search="metric". Return ONLY the raw text output from the tool, nothing else.'
+      'Use the discover_commands tool with search="metric". Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.toLowerCase().includes('metric'),
@@ -253,7 +253,7 @@ async function run() {
 
   await test('discover: unknown category → helpful error', () => {
     const result = runClaude(
-      'Use the discover_api_methods tool with category="nonexistent_xyz". Return ONLY the raw text output from the tool, nothing else.'
+      'Use the discover_commands tool with category="nonexistent_xyz". Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('No methods found') || r.includes('not found'),
@@ -262,13 +262,13 @@ async function run() {
   });
 
   // ════════════════════════════════════════════════
-  // 2. get_api_method_docs
+  // 2. get_command_docs
   // ════════════════════════════════════════════════
-  console.log(`\n── get_api_method_docs ──`);
+  console.log(`\n── get_command_docs ──`);
 
   await test('docs: listExperiments → params table', () => {
     const result = runClaude(
-      'Use the get_api_method_docs tool with method_name="listExperiments". Return ONLY the raw text output from the tool, nothing else.'
+      'Use the get_command_docs tool with method_name="listExperiments". Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('listExperiments') && r.includes('Parameter') && r.includes('options'),
@@ -278,7 +278,7 @@ async function run() {
 
   await test('docs: deleteExperiment → danger warning', () => {
     const result = runClaude(
-      'Use the get_api_method_docs tool with method_name="deleteExperiment". Return ONLY the raw text output from the tool, nothing else.'
+      'Use the get_command_docs tool with method_name="deleteExperiment". Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('deleteExperiment') && (r.includes('WARNING') || r.includes('Destructive') || r.includes('dangerous')),
@@ -288,32 +288,32 @@ async function run() {
 
   await test('docs: unknown method → suggestions', () => {
     const result = runClaude(
-      'Use the get_api_method_docs tool with method_name="xyzNotARealMethod123". Return ONLY the raw text output from the tool, nothing else.'
+      'Use the get_command_docs tool with method_name="xyzNotARealMethod123". Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
-      r.includes('not found') || r.includes('Did you mean') || r.includes('discover_api_methods'),
+      r.includes('not found') || r.includes('Did you mean') || r.includes('discover_commands'),
       'missing suggestions for unknown method'
     );
   });
 
-  await test('docs: createMetric → usage example with execute_api_method', () => {
+  await test('docs: createMetric → usage example with execute_command', () => {
     const result = runClaude(
-      'Use the get_api_method_docs tool with method_name="createMetric". Return ONLY the raw text output from the tool, nothing else.'
+      'Use the get_command_docs tool with method_name="createMetric". Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
-      r.includes('execute_api_method') && r.includes('method_name'),
+      r.includes('execute_command') && r.includes('method_name'),
       'missing usage example'
     );
   });
 
   // ════════════════════════════════════════════════
-  // 3. execute_api_method — list operations
+  // 3. execute_command — list operations
   // ════════════════════════════════════════════════
-  console.log(`\n── execute_api_method: list operations ──`);
+  console.log(`\n── execute_command: list operations ──`);
 
   await test('exec: listTeams', () => {
     const result = runClaude(
-      'Use the execute_api_method tool with method_name="listTeams" and params={}. Return ONLY the raw text output from the tool, nothing else.'
+      'Use the execute_command tool with method_name="listTeams" and params={}. Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('"id"') && r.includes('"name"'),
@@ -323,7 +323,7 @@ async function run() {
 
   await test('exec: listApplications', () => {
     const result = runClaude(
-      'Use the execute_api_method tool with method_name="listApplications" and params={}. Return ONLY the raw text output from the tool, nothing else.'
+      'Use the execute_command tool with method_name="listApplications" and params={}. Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('"id"') && r.includes('"name"'),
@@ -333,7 +333,7 @@ async function run() {
 
   await test('exec: listUnitTypes', () => {
     const result = runClaude(
-      'Use the execute_api_method tool with method_name="listUnitTypes" and params={}. Return ONLY the raw text output from the tool, nothing else.'
+      'Use the execute_command tool with method_name="listUnitTypes" and params={}. Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('"id"') && r.includes('"name"'),
@@ -343,7 +343,7 @@ async function run() {
 
   await test('exec: listMetrics', () => {
     const result = runClaude(
-      'Use the execute_api_method tool with method_name="listMetrics" and params={"options": {"items": 2}}. Return ONLY the raw text output from the tool, nothing else.'
+      'Use the execute_command tool with method_name="listMetrics" and params={"options": {"items": 2}}. Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('"id"') && (r.includes('"type"') || r.includes('"name"')),
@@ -353,7 +353,7 @@ async function run() {
 
   await test('exec: listUsers', () => {
     const result = runClaude(
-      'Use the execute_api_method tool with method_name="listUsers" and params={"options": {"items": 2}}. Return ONLY the raw text output from the tool, nothing else.'
+      'Use the execute_command tool with method_name="listUsers" and params={"options": {"items": 2}}. Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('"id"') && r.includes('"email"'),
@@ -363,7 +363,7 @@ async function run() {
 
   await test('exec: listTags', () => {
     const result = runClaude(
-      'Use the execute_api_method tool with method_name="listTags" and params={}. Return ONLY the raw text output from the tool, nothing else.'
+      'Use the execute_command tool with method_name="listTags" and params={}. Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('[') || r.includes('"id"'),
@@ -373,7 +373,7 @@ async function run() {
 
   await test('exec: listSegments', () => {
     const result = runClaude(
-      'Use the execute_api_method tool with method_name="listSegments" and params={}. Return ONLY the raw text output from the tool, nothing else.'
+      'Use the execute_command tool with method_name="listSegments" and params={}. Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('[') || r.includes('"id"') || r.includes('Successfully'),
@@ -383,7 +383,7 @@ async function run() {
 
   await test('exec: listGoals', () => {
     const result = runClaude(
-      'Call the MCP tool execute_api_method with method_name="listGoals" and params={"limit": 3}. Do NOT use Read, Bash, or any local tools. Return ONLY the raw text output from the MCP tool.'
+      'Call the MCP tool execute_command with method_name="listGoals" and params={"limit": 3}. Do NOT use Read, Bash, or any local tools. Return ONLY the raw text output from the MCP tool.'
     );
     return assertToolResult(result, r =>
       r.includes('"id"') || r.includes('['),
@@ -392,13 +392,13 @@ async function run() {
   });
 
   // ════════════════════════════════════════════════
-  // 4. execute_api_method — read single entity
+  // 4. execute_command — read single entity
   // ════════════════════════════════════════════════
-  console.log(`\n── execute_api_method: read single entity ──`);
+  console.log(`\n── execute_command: read single entity ──`);
 
   await test('exec: getExperiment by id', () => {
     const result = runClaude(
-      'Call the MCP tool execute_api_method with method_name="listExperiments" and params={"options": {"items": 1}} to get one experiment. Note its id. Then call the MCP tool execute_api_method with method_name="getExperiment" and params={"id": <the numeric id>}. Do NOT use Read, Bash, or local tools. Return ONLY the raw text from the second MCP tool call.',
+      'Call the MCP tool execute_command with method_name="listExperiments" and params={"options": {"items": 1}} to get one experiment. Note its id. Then call the MCP tool execute_command with method_name="getExperiment" and params={"id": <the numeric id>}. Do NOT use Read, Bash, or local tools. Return ONLY the raw text from the second MCP tool call.',
       { maxBudget: '0.25' }
     );
     return assertToolResult(result, r =>
@@ -409,7 +409,7 @@ async function run() {
 
   await test('exec: getCurrentUser', () => {
     const result = runClaude(
-      'Use the execute_api_method tool with method_name="getCurrentUser" and params={}. Return ONLY the raw text output from the tool, nothing else.'
+      'Use the execute_command tool with method_name="getCurrentUser" and params={}. Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('"email"') || r.includes('"id"') || r.includes('"first_name"'),
@@ -418,23 +418,23 @@ async function run() {
   });
 
   // ════════════════════════════════════════════════
-  // 5. execute_api_method — error handling
+  // 5. execute_command — error handling
   // ════════════════════════════════════════════════
-  console.log(`\n── execute_api_method: error handling ──`);
+  console.log(`\n── execute_command: error handling ──`);
 
   await test('exec: unknown method → error', () => {
     const result = runClaude(
-      'Use the execute_api_method tool with method_name="totallyFakeMethod" and params={}. Return ONLY the raw text output from the tool, nothing else.'
+      'Use the execute_command tool with method_name="totallyFakeMethod" and params={}. Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
-      r.includes('Unknown method') || r.includes('not found') || r.includes('discover_api_methods'),
+      r.includes('Unknown method') || r.includes('not found') || r.includes('discover_commands'),
       'missing error for unknown method'
     );
   });
 
   await test('exec: missing required param → error', () => {
     const result = runClaude(
-      'Use the execute_api_method tool with method_name="getExperiment" and params={}. Return ONLY the raw text output from the tool, nothing else.'
+      'Use the execute_command tool with method_name="getExperiment" and params={}. Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('Missing required') || r.includes('Error') || r.includes('required'),
@@ -443,31 +443,31 @@ async function run() {
   });
 
   // ════════════════════════════════════════════════
-  // 6. Experiment lifecycle via execute_api_method
+  // 6. Experiment lifecycle via execute_command
   //    create → ready → dev → start → stop → archive
   // ════════════════════════════════════════════════
-  console.log(`\n── execute_api_method: experiment lifecycle ──`);
+  console.log(`\n── execute_command: experiment lifecycle ──`);
 
   const expTimestamp = Date.now();
 
   await test('lifecycle: create experiment → ready → dev → start → stop → archive', () => {
     const expName = `mcp_meta_test_${expTimestamp}`;
     const result = runClaude(
-`Do the following steps IN ORDER using ONLY the MCP tool execute_api_method. Do NOT use Read, Bash, or local tools.
+`Do the following steps IN ORDER using ONLY the MCP tool execute_command. Do NOT use Read, Bash, or local tools.
 
-1. Call execute_api_method with method_name="listApplications" and params={} to get applications. Note the first application's id.
-2. Call execute_api_method with method_name="listUnitTypes" and params={} to get unit types. Note the first unit type's id.
-3. Call execute_api_method with method_name="createExperiment" and params={"data": {"name": "${expName}", "applications": [{"application_id": <app_id>}], "unit_type": {"unit_type_id": <unit_type_id>}, "type": "test", "state": "created", "percentage_of_traffic": 100, "percentages": "50/50", "nr_variants": 2, "variants": [{"variant": 0, "name": "Control"}, {"variant": 1, "name": "Treatment"}], "owners": [], "teams": [], "experiment_tags": [], "secondary_metrics": [], "variant_screenshots": [], "custom_section_field_values": {}}}. Note the returned experiment id.
-4. Call execute_api_method with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "created".
-5. Call execute_api_method with method_name="updateExperiment" and params={"id": <experiment_id>, "changes": {"state": "ready"}}.
-6. Call execute_api_method with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "ready".
-7. Call execute_api_method with method_name="developmentExperiment" and params={"id": <experiment_id>, "note": "testing"}.
-8. Call execute_api_method with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "development".
-9. Call execute_api_method with method_name="startExperiment" and params={"id": <experiment_id>}.
-10. Call execute_api_method with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "running".
-11. Call execute_api_method with method_name="stopExperiment" and params={"id": <experiment_id>}.
-12. Call execute_api_method with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "stopped".
-13. Call execute_api_method with method_name="archiveExperiment" and params={"id": <experiment_id>}.
+1. Call execute_command with method_name="listApplications" and params={} to get applications. Note the first application's id.
+2. Call execute_command with method_name="listUnitTypes" and params={} to get unit types. Note the first unit type's id.
+3. Call execute_command with method_name="createExperiment" and params={"data": {"name": "${expName}", "applications": [{"application_id": <app_id>}], "unit_type": {"unit_type_id": <unit_type_id>}, "type": "test", "state": "created", "percentage_of_traffic": 100, "percentages": "50/50", "nr_variants": 2, "variants": [{"variant": 0, "name": "Control"}, {"variant": 1, "name": "Treatment"}], "owners": [], "teams": [], "experiment_tags": [], "secondary_metrics": [], "variant_screenshots": [], "custom_section_field_values": {}}}. Note the returned experiment id.
+4. Call execute_command with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "created".
+5. Call execute_command with method_name="updateExperiment" and params={"id": <experiment_id>, "changes": {"state": "ready"}}.
+6. Call execute_command with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "ready".
+7. Call execute_command with method_name="developmentExperiment" and params={"id": <experiment_id>, "note": "testing"}.
+8. Call execute_command with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "development".
+9. Call execute_command with method_name="startExperiment" and params={"id": <experiment_id>}.
+10. Call execute_command with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "running".
+11. Call execute_command with method_name="stopExperiment" and params={"id": <experiment_id>}.
+12. Call execute_command with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "stopped".
+13. Call execute_command with method_name="archiveExperiment" and params={"id": <experiment_id>}.
 
 After ALL steps, return ONLY a JSON object:
 {"experiment_id": <number>, "states": ["created","ready","development","running","stopped","archived"]}
@@ -501,26 +501,26 @@ The "states" array should contain the actual state observed after each getExperi
   });
 
   // ════════════════════════════════════════════════
-  // 7. Feature flag lifecycle via execute_api_method
+  // 7. Feature flag lifecycle via execute_command
   // ════════════════════════════════════════════════
 
   await test('lifecycle: create feature flag → ready → dev → start → stop → archive', () => {
     const flagName = `mcp_meta_flag_${expTimestamp}`;
     const result = runClaude(
-`Do the following steps IN ORDER using ONLY the MCP tool execute_api_method. Do NOT use Read, Bash, or local tools.
+`Do the following steps IN ORDER using ONLY the MCP tool execute_command. Do NOT use Read, Bash, or local tools.
 
-1. Call execute_api_method with method_name="listApplications" and params={} to get applications. Note the first application's id.
-2. Call execute_api_method with method_name="listUnitTypes" and params={} to get unit types. Note the first unit type's id.
-3. Call execute_api_method with method_name="createExperiment" and params={"data": {"name": "${flagName}", "applications": [{"application_id": <app_id>}], "unit_type": {"unit_type_id": <unit_type_id>}, "type": "feature", "state": "created", "percentage_of_traffic": 100, "percentages": "50/50", "nr_variants": 2, "variants": [{"variant": 0, "name": "Off"}, {"variant": 1, "name": "On"}], "owners": [], "teams": [], "experiment_tags": [], "secondary_metrics": [], "variant_screenshots": [], "custom_section_field_values": {}}}. Note the returned experiment id.
-4. Call execute_api_method with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "created".
-5. Call execute_api_method with method_name="updateExperiment" and params={"id": <experiment_id>, "changes": {"state": "ready"}}.
-6. Call execute_api_method with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "ready".
-7. Call execute_api_method with method_name="developmentExperiment" and params={"id": <experiment_id>, "note": "testing"}.
-8. Call execute_api_method with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "development".
-9. Call execute_api_method with method_name="startExperiment" and params={"id": <experiment_id>}.
-10. Call execute_api_method with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "running".
-11. Call execute_api_method with method_name="stopExperiment" and params={"id": <experiment_id>}.
-12. Call execute_api_method with method_name="archiveExperiment" and params={"id": <experiment_id>}.
+1. Call execute_command with method_name="listApplications" and params={} to get applications. Note the first application's id.
+2. Call execute_command with method_name="listUnitTypes" and params={} to get unit types. Note the first unit type's id.
+3. Call execute_command with method_name="createExperiment" and params={"data": {"name": "${flagName}", "applications": [{"application_id": <app_id>}], "unit_type": {"unit_type_id": <unit_type_id>}, "type": "feature", "state": "created", "percentage_of_traffic": 100, "percentages": "50/50", "nr_variants": 2, "variants": [{"variant": 0, "name": "Off"}, {"variant": 1, "name": "On"}], "owners": [], "teams": [], "experiment_tags": [], "secondary_metrics": [], "variant_screenshots": [], "custom_section_field_values": {}}}. Note the returned experiment id.
+4. Call execute_command with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "created".
+5. Call execute_command with method_name="updateExperiment" and params={"id": <experiment_id>, "changes": {"state": "ready"}}.
+6. Call execute_command with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "ready".
+7. Call execute_command with method_name="developmentExperiment" and params={"id": <experiment_id>, "note": "testing"}.
+8. Call execute_command with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "development".
+9. Call execute_command with method_name="startExperiment" and params={"id": <experiment_id>}.
+10. Call execute_command with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "running".
+11. Call execute_command with method_name="stopExperiment" and params={"id": <experiment_id>}.
+12. Call execute_command with method_name="archiveExperiment" and params={"id": <experiment_id>}.
 
 After ALL steps, return ONLY a JSON object:
 {"experiment_id": <number>, "type": "feature", "states": ["created","ready","development","running","stopped","archived"]}`,
@@ -558,20 +558,20 @@ After ALL steps, return ONLY a JSON object:
   await test('lifecycle: restart + full_on transitions', () => {
     const expName = `mcp_meta_fullon_${expTimestamp}`;
     const result = runClaude(
-`Do the following steps IN ORDER using ONLY the MCP tool execute_api_method. Do NOT use Read, Bash, or local tools.
+`Do the following steps IN ORDER using ONLY the MCP tool execute_command. Do NOT use Read, Bash, or local tools.
 
-1. Call execute_api_method with method_name="listApplications" and params={}. Note first app id.
-2. Call execute_api_method with method_name="listUnitTypes" and params={}. Note first unit type id.
-3. Call execute_api_method with method_name="createExperiment" and params={"data": {"name": "${expName}", "applications": [{"application_id": <app_id>}], "unit_type": {"unit_type_id": <unit_type_id>}, "type": "test", "state": "created", "percentage_of_traffic": 100, "percentages": "50/50", "nr_variants": 2, "variants": [{"variant": 0, "name": "Control"}, {"variant": 1, "name": "Treatment"}], "owners": [], "teams": [], "experiment_tags": [], "secondary_metrics": [], "variant_screenshots": [], "custom_section_field_values": {}}}.
-4. Call execute_api_method with method_name="updateExperiment" and params={"id": <experiment_id>, "changes": {"state": "ready"}}.
-5. Call execute_api_method with method_name="startExperiment" and params={"id": <experiment_id>}.
-6. Call execute_api_method with method_name="stopExperiment" and params={"id": <experiment_id>}.
-7. Call execute_api_method with method_name="restartExperiment" and params={"id": <experiment_id>}. IMPORTANT: The response contains a NEW experiment object with a new id. Use that new id for all subsequent steps.
-8. Call execute_api_method with method_name="getExperiment" and params={"id": <new_experiment_id>}. Note the state (should be "running").
-9. Call execute_api_method with method_name="fullOnExperiment" and params={"id": <new_experiment_id>, "fullOnVariant": 1, "note": "testing full on"}.
-10. Call execute_api_method with method_name="getExperiment" and params={"id": <new_experiment_id>}. Note the state (should be "full_on").
-11. Call execute_api_method with method_name="stopExperiment" and params={"id": <new_experiment_id>}.
-12. Call execute_api_method with method_name="archiveExperiment" and params={"id": <new_experiment_id>}.
+1. Call execute_command with method_name="listApplications" and params={}. Note first app id.
+2. Call execute_command with method_name="listUnitTypes" and params={}. Note first unit type id.
+3. Call execute_command with method_name="createExperiment" and params={"data": {"name": "${expName}", "applications": [{"application_id": <app_id>}], "unit_type": {"unit_type_id": <unit_type_id>}, "type": "test", "state": "created", "percentage_of_traffic": 100, "percentages": "50/50", "nr_variants": 2, "variants": [{"variant": 0, "name": "Control"}, {"variant": 1, "name": "Treatment"}], "owners": [], "teams": [], "experiment_tags": [], "secondary_metrics": [], "variant_screenshots": [], "custom_section_field_values": {}}}.
+4. Call execute_command with method_name="updateExperiment" and params={"id": <experiment_id>, "changes": {"state": "ready"}}.
+5. Call execute_command with method_name="startExperiment" and params={"id": <experiment_id>}.
+6. Call execute_command with method_name="stopExperiment" and params={"id": <experiment_id>}.
+7. Call execute_command with method_name="restartExperiment" and params={"id": <experiment_id>}. IMPORTANT: The response contains a NEW experiment object with a new id. Use that new id for all subsequent steps.
+8. Call execute_command with method_name="getExperiment" and params={"id": <new_experiment_id>}. Note the state (should be "running").
+9. Call execute_command with method_name="fullOnExperiment" and params={"id": <new_experiment_id>, "fullOnVariant": 1, "note": "testing full on"}.
+10. Call execute_command with method_name="getExperiment" and params={"id": <new_experiment_id>}. Note the state (should be "full_on").
+11. Call execute_command with method_name="stopExperiment" and params={"id": <new_experiment_id>}.
+12. Call execute_command with method_name="archiveExperiment" and params={"id": <new_experiment_id>}.
 
 After ALL steps, return ONLY a JSON object:
 {"experiment_id": <number>, "restarted_state": "<state after step 8>", "full_on_state": "<state after step 10>"}`,
@@ -604,9 +604,9 @@ After ALL steps, return ONLY a JSON object:
   await test('e2e: discover → docs → execute workflow', () => {
     const result = runClaude(
       `Do the following steps IN ORDER:
-1. Use discover_api_methods with category="teams" to find team-related methods.
-2. Use get_api_method_docs with method_name="listTeams" to get its documentation.
-3. Use execute_api_method with method_name="listTeams" and params={} to list teams.
+1. Use discover_commands with category="teams" to find team-related methods.
+2. Use get_command_docs with method_name="listTeams" to get its documentation.
+3. Use execute_command with method_name="listTeams" and params={} to list teams.
 
 After ALL steps, return ONLY a JSON object: {"categories_found": true, "docs_found": true, "teams_count": <number of teams returned>}`,
       { maxBudget: '0.25' }
@@ -641,7 +641,7 @@ After ALL steps, return ONLY a JSON object: {"categories_found": true, "docs_fou
     );
     if (!result.ok) throw new Error(`claude failed: ${result.error}`);
 
-    const expectedTools = ['discover_api_methods', 'get_api_method_docs', 'execute_api_method'];
+    const expectedTools = ['discover_commands', 'get_command_docs', 'execute_command'];
     for (const tool of expectedTools) {
       const found = result.output.includes(tool) ||
         result.toolSchemas.some(t => typeof t === 'string' ? t.includes(tool) : (t.name || '').includes(tool));

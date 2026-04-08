@@ -8,32 +8,11 @@ import { ABsmartlyOAuthHandler } from "./absmartly-oauth-handler";
 import { Env } from "./types";
 import { debug } from "./config";
 import { MCP_VERSION } from "./version";
-import {
-    APIClient,
-    summarizeExperiment,
-    summarizeExperimentRow,
-    summarizeMetric,
-    summarizeMetricRow,
-    summarizeGoal,
-    summarizeGoalRow,
-    summarizeTeam,
-    summarizeTeamRow,
-    summarizeUserDetail,
-    summarizeUserRow,
-    summarizeSegment,
-    summarizeSegmentRow,
-} from "@absmartly/cli/api-client";
+import { APIClient } from "@absmartly/cli/api-client";
 import type { CustomSectionField } from "@absmartly/cli/api-client";
 import { FetchHttpClient } from "./fetch-adapter";
-import {
-    API_CATEGORIES,
-    API_CATALOG,
-    searchCatalog,
-    getCatalogByCategory,
-    getMethodEntry,
-    getCategorySummary,
-} from "./api-catalog";
-import type { ApiMethodEntry } from "./api-catalog";
+import { setupTools } from "./tools";
+import type { ToolContext } from "./tools";
 import {
     ABsmartlyProps,
     DEFAULT_ABSMARTLY_ENDPOINT,
@@ -51,8 +30,6 @@ import {
     safeKvPut,
     safeKvGet,
 } from "./shared";
-
-const DEFAULT_LIST_ITEMS = 20;
 
 export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartlyProps> {
     server = new McpServer(
@@ -329,378 +306,37 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
         this.goals = [];
     }
 
-    private buildMethodArgs(entry: ApiMethodEntry, params: Record<string, unknown>): unknown[] {
-        return entry.params.map(p => {
-            const value = params[p.name];
-            if (value === undefined && p.required) {
-                throw new Error(`Missing required parameter: ${p.name}`);
-            }
-            return value;
-        }).filter(v => v !== undefined);
-    }
-
-    private static readonly EXPERIMENT_LIST_METHODS = new Set([
-        'listExperiments', 'searchExperiments',
-    ]);
-    private static readonly EXPERIMENT_SINGLE_METHODS = new Set([
-        'getExperiment', 'createExperiment', 'updateExperiment',
-        'startExperiment', 'stopExperiment', 'developmentExperiment',
-        'restartExperiment', 'fullOnExperiment',
-    ]);
-    private static readonly METRIC_LIST_METHODS = new Set(['listMetrics']);
-    private static readonly METRIC_SINGLE_METHODS = new Set(['getMetric', 'createMetric', 'updateMetric']);
-    private static readonly GOAL_LIST_METHODS = new Set(['listGoals']);
-    private static readonly GOAL_SINGLE_METHODS = new Set(['getGoal', 'createGoal', 'updateGoal']);
-    private static readonly TEAM_LIST_METHODS = new Set(['listTeams']);
-    private static readonly TEAM_SINGLE_METHODS = new Set(['getTeam', 'createTeam', 'updateTeam']);
-    private static readonly USER_LIST_METHODS = new Set(['listUsers']);
-    private static readonly USER_SINGLE_METHODS = new Set(['getUser', 'createUser', 'updateUser']);
-    private static readonly SEGMENT_LIST_METHODS = new Set(['listSegments']);
-    private static readonly SEGMENT_SINGLE_METHODS = new Set(['getSegment', 'createSegment', 'updateSegment']);
-
-    private static isSingleEntity(result: unknown): result is Record<string, unknown> {
-        return result !== null && typeof result === 'object' && !Array.isArray(result) && 'id' in result;
-    }
-
-    private getBaseUrl(): string {
-        return this.props?.absmartly_endpoint?.replace(/\/v\d+\/?$/, '') || '';
-    }
-
-    private summarizeResult(methodName: string, result: unknown, show: string[], exclude: string[]): unknown {
-        const baseUrl = this.getBaseUrl();
-        if (ABsmartlyMCP.EXPERIMENT_LIST_METHODS.has(methodName) && Array.isArray(result)) {
-            return result.map((exp: any) => {
-                const summary = summarizeExperimentRow(exp, show, exclude);
-                if (baseUrl) summary.link = `${baseUrl}/experiments/${exp.id}`;
-                return summary;
-            });
-        }
-        if (ABsmartlyMCP.EXPERIMENT_SINGLE_METHODS.has(methodName) && ABsmartlyMCP.isSingleEntity(result)) {
-            const summary = summarizeExperiment(result as Record<string, unknown>, show, exclude);
-            if (baseUrl) (summary as any).link = `${baseUrl}/experiments/${(result as any).id}`;
-            return summary;
-        }
-
-        if (ABsmartlyMCP.METRIC_LIST_METHODS.has(methodName) && Array.isArray(result)) {
-            return result.map((m: any) => summarizeMetricRow(m));
-        }
-        if (ABsmartlyMCP.METRIC_SINGLE_METHODS.has(methodName) && ABsmartlyMCP.isSingleEntity(result)) {
-            return summarizeMetric(result as Record<string, unknown>);
-        }
-
-        if (ABsmartlyMCP.GOAL_LIST_METHODS.has(methodName) && Array.isArray(result)) {
-            return result.map((g: any) => summarizeGoalRow(g));
-        }
-        if (ABsmartlyMCP.GOAL_SINGLE_METHODS.has(methodName) && ABsmartlyMCP.isSingleEntity(result)) {
-            return summarizeGoal(result as Record<string, unknown>);
-        }
-
-        if (ABsmartlyMCP.TEAM_LIST_METHODS.has(methodName) && Array.isArray(result)) {
-            return result.map((t: any) => summarizeTeamRow(t));
-        }
-        if (ABsmartlyMCP.TEAM_SINGLE_METHODS.has(methodName) && ABsmartlyMCP.isSingleEntity(result)) {
-            return summarizeTeam(result as Record<string, unknown>);
-        }
-
-        if (ABsmartlyMCP.USER_LIST_METHODS.has(methodName) && Array.isArray(result)) {
-            return result.map((u: any) => summarizeUserRow(u));
-        }
-        if (ABsmartlyMCP.USER_SINGLE_METHODS.has(methodName) && ABsmartlyMCP.isSingleEntity(result)) {
-            return summarizeUserDetail(result as Record<string, unknown>);
-        }
-
-        if (ABsmartlyMCP.SEGMENT_LIST_METHODS.has(methodName) && Array.isArray(result)) {
-            return result.map((s: any) => summarizeSegmentRow(s));
-        }
-        if (ABsmartlyMCP.SEGMENT_SINGLE_METHODS.has(methodName) && ABsmartlyMCP.isSingleEntity(result)) {
-            return summarizeSegment(result as Record<string, unknown>);
-        }
-
-        return result;
-    }
-
-    private static readonly USER_FIELD_TYPE = 'user';
-    private static readonly CREATE_EXPERIMENT_METHOD = 'createExperiment';
-
-    private autoPopulateCustomFields(data: Record<string, unknown>): void {
-        const existingValues = data.custom_section_field_values as Record<string, unknown> | undefined;
-        if (existingValues && Object.keys(existingValues).length > 0) {
-            return;
-        }
-
-        const experimentType = data.type as string | undefined;
-        const fieldValues: Record<string, { type: string; value: string }> = {};
-
-        for (const field of this._customFields as CustomSectionField[]) {
-            if (field.archived) continue;
-            if (!field.custom_section) continue;
-            if (field.custom_section.type !== experimentType) continue;
-            if (field.custom_section.archived) continue;
-
-            let value = field.default_value || '';
-            if (field.type === ABsmartlyMCP.USER_FIELD_TYPE && this.currentUserId) {
-                value = JSON.stringify({ selected: [{ userId: this.currentUserId }] });
-            }
-
-            fieldValues[String(field.id)] = { type: field.type, value };
-        }
-
-        const customFieldsByName = (data as any).custom_fields as Record<string, string> | undefined;
-        if (customFieldsByName) {
-            for (const [name, val] of Object.entries(customFieldsByName)) {
-                const matching = (this._customFields as CustomSectionField[]).find(
-                    f => f.name === name && !f.archived
-                );
-                if (matching) {
-                    fieldValues[String(matching.id)] = { type: matching.type, value: val };
-                }
-            }
-            delete (data as any).custom_fields;
-        }
-
-        data.custom_section_field_values = fieldValues;
-    }
-
     private setupTools() {
-        this.server.tool(
-            "get_auth_status",
-            "Get current authentication status and user information",
-            {},
-            { readOnlyHint: true },
-            async () => {
-                const hasApiAccess = !!this.apiClient;
-                const authType = this.props?.absmartly_api_key ? 'API Key' : (this.props?.oauth_jwt ? 'OAuth JWT' : 'None');
-                const status = hasApiAccess ? "✅ Authenticated with API access" : "⚠️ No API access available";
-
-                let statusText = `${status}\n\nEmail: ${this.props?.email || 'Unknown'}\nName: ${this.props?.name || 'Unknown'}\nEndpoint: ${this.props?.absmartly_endpoint || 'Not configured'}\nAuthentication Type: ${authType}\nAPI Access: ${hasApiAccess ? 'Available' : 'Not available'}`;
-
-                if (this.entityWarnings.length > 0) {
-                    statusText += `\n\n⚠️ Entity fetch warnings:\n${this.entityWarnings.map(w => `- ${w}`).join('\n')}`;
-                }
-
-                return {
-                    content: [{
-                        type: "text",
-                        text: statusText
-                    }]
-                };
-            }
-        );
-
-        this.server.tool(
-            "discover_api_methods",
-            "Discover available ABsmartly API methods. Use this to find what operations are available before calling execute_api_method. You can browse by category or search by keyword.",
-            {
-                category: z.string().optional().describe(`Browse by category. Available: ${API_CATEGORIES.join(', ')}`),
-                search: z.string().optional().describe("Search methods by keyword (matches method name, description, or category)"),
-            },
-            { readOnlyHint: true },
-            async (params) => {
-                if (!params.category && !params.search) {
-                    const summary = getCategorySummary();
-                    const lines = summary.map(s =>
-                        `**${s.category}** (${s.count}): ${s.methods.join(', ')}`
-                    );
-                    return {
-                        content: [{
-                            type: "text" as const,
-                            text: `# ABsmartly API — ${API_CATALOG.length} methods in ${summary.length} categories\n\nUse \`category\` to see details for a category, or \`search\` to find methods by keyword.\n\n${lines.join('\n\n')}`
-                        }]
-                    };
-                }
-
-                let results: ApiMethodEntry[];
-                if (params.category) {
-                    results = getCatalogByCategory(params.category);
-                    if (results.length === 0) {
-                        return { content: [{ type: "text" as const, text: `No methods found in category "${params.category}". Use discover_api_methods without params to see all categories.` }] };
+        const self = this;
+        const toolCtx: ToolContext = {
+            get apiClient() { return self.apiClient; },
+            get endpoint() { return self.props?.absmartly_endpoint || ''; },
+            authType: this.props?.absmartly_api_key ? 'API Key' : 'OAuth JWT',
+            get email() { return self.props?.email; },
+            get name() { return self.props?.name; },
+            get entityWarnings() { return self.entityWarnings; },
+            get customFields() { return self._customFields as CustomSectionField[]; },
+            get currentUserId() { return self.currentUserId; },
+            log: (level: string, message: string) => this.log(level as any, message),
+            elicitConfirmation: async (message: string) => {
+                const result = await this.server.server.elicitInput({
+                    message,
+                    requestedSchema: {
+                        type: "object" as const,
+                        properties: {
+                            confirm: {
+                                type: "string",
+                                title: "Confirm",
+                                description: "Type 'yes' to confirm this destructive action",
+                            }
+                        },
+                        required: ["confirm"]
                     }
-                } else {
-                    results = searchCatalog(params.search!);
-                    if (results.length === 0) {
-                        return { content: [{ type: "text" as const, text: `No methods found matching "${params.search}". Try a broader search or browse by category.` }] };
-                    }
-                }
-
-                const formatted = results.map(m => {
-                    const paramList = m.params.length > 0
-                        ? m.params.map(p => `  - \`${p.name}\` (${p.type}${p.required ? ', required' : ''}): ${p.description}`).join('\n')
-                        : '  (no parameters)';
-                    return `### ${m.method}\n${m.description}\n${m.dangerous ? '**WARNING: Destructive operation**\n' : ''}**Params:**\n${paramList}\n**Returns:** ${m.returns}`;
                 });
-
-                return {
-                    content: [{
-                        type: "text" as const,
-                        text: formatted.join('\n\n---\n\n')
-                    }]
-                };
-            }
-        );
-
-        this.server.tool(
-            "get_api_method_docs",
-            "Get detailed documentation for a specific ABsmartly API method. Use discover_api_methods first to find the method name.",
-            {
-                method_name: z.string().describe("Exact method name (e.g. 'createMetric', 'listTeamMembers')"),
+                return result.action === 'accept' && result.content?.confirm === 'yes';
             },
-            { readOnlyHint: true },
-            async (params) => {
-                const entry = getMethodEntry(params.method_name);
-                if (!entry) {
-                    const suggestions = searchCatalog(params.method_name).slice(0, 5);
-                    const sugText = suggestions.length > 0
-                        ? `\n\nDid you mean:\n${suggestions.map(s => `- ${s.method}: ${s.description}`).join('\n')}`
-                        : '\n\nUse discover_api_methods to browse available methods.';
-                    return { content: [{ type: "text" as const, text: `Method "${params.method_name}" not found.${sugText}` }] };
-                }
-
-                let doc = `# ${entry.method}\n\n**Category:** ${entry.category}\n**Description:** ${entry.description}\n`;
-                if (entry.dangerous) {
-                    doc += '**WARNING: This is a destructive/dangerous operation.**\n';
-                }
-                doc += `**Returns:** ${entry.returns}\n\n`;
-
-                if (entry.params.length > 0) {
-                    doc += '## Parameters\n\n';
-                    doc += '| Name | Type | Required | Description |\n|------|------|----------|-------------|\n';
-                    for (const p of entry.params) {
-                        doc += `| ${p.name} | ${p.type} | ${p.required ? 'Yes' : 'No'} | ${p.description} |\n`;
-                    }
-                } else {
-                    doc += '## Parameters\n\nNone.\n';
-                }
-
-                if (entry.example) {
-                    doc += `\n## Example\n\n\`\`\`json\n${JSON.stringify(entry.example, null, 2)}\n\`\`\`\n`;
-                }
-
-                doc += `\n## Usage with execute_api_method\n\n\`\`\`json\n{\n  "method_name": "${entry.method}",\n  "params": ${JSON.stringify(
-                    Object.fromEntries(entry.params.filter(p => p.required).map(p => [p.name, p.type === 'number' ? 1 : p.type === 'boolean' ? true : p.type === 'object' ? {} : p.type === 'array' ? [] : 'value'])),
-                    null, 2
-                )}\n}\n\`\`\``;
-
-                if (params.method_name === ABsmartlyMCP.CREATE_EXPERIMENT_METHOD && this._customFields.length > 0) {
-                    doc += '\n\n## Available Custom Fields\n\n';
-                    doc += 'Pass `custom_fields` (by name) in `params.data` to override defaults:\n\n';
-                    doc += '| Title | Type | Default Value | Section Type |\n|-------|------|---------------|-------------|\n';
-                    for (const f of this._customFields as CustomSectionField[]) {
-                        if (f.archived) continue;
-                        const sectionType = f.custom_section?.type || 'unknown';
-                        doc += `| ${f.name} | ${f.type} | ${f.default_value || ''} | ${sectionType} |\n`;
-                    }
-                }
-
-                return { content: [{ type: "text" as const, text: doc }] };
-            }
-        );
-
-        this.server.tool(
-            "execute_api_method",
-            "Execute any ABsmartly API method by name. Results for experiments, metrics, goals, teams, users, and segments are auto-summarized. Use 'show'/'exclude' for experiment field control. Pass 'raw: true' for unsummarized response. Some methods (delete, stop) are destructive.",
-            {
-                method_name: z.string().describe("Method name from the API catalog (e.g. 'getMetric', 'createTeam')"),
-                params: z.record(z.unknown()).optional().describe("Method parameters as a JSON object. Keys match the parameter names from the method docs. For createExperiment, pass 'custom_fields' by name to override defaults."),
-                show: z.array(z.string()).optional().describe("Extra fields to include in experiment summaries (e.g. ['audience', 'archived', 'experiment_report'])"),
-                exclude: z.array(z.string()).optional().describe("Fields to exclude from experiment summaries (e.g. ['owners', 'tags', 'teams'])"),
-                raw: z.boolean().optional().describe("Return full unsummarized response (default: false)"),
-                limit: z.number().optional().describe("Max items for list operations (default: 20). Convenience shortcut for passing items/limit in params."),
-            },
-            { destructiveHint: true },
-            async (params) => {
-                if (!this.apiClient) {
-                    return { content: [{ type: "text" as const, text: "API client not initialized. Check authentication status." }] };
-                }
-
-                const entry = getMethodEntry(params.method_name);
-                if (!entry) {
-                    return { content: [{ type: "text" as const, text: `Unknown method "${params.method_name}". Use discover_api_methods to find available methods.` }] };
-                }
-
-                const methodFn = (this.apiClient as any)[params.method_name];
-                if (typeof methodFn !== 'function') {
-                    return { content: [{ type: "text" as const, text: `Method "${params.method_name}" exists in catalog but is not available on the API client.` }] };
-                }
-
-                if (entry.dangerous) {
-                    try {
-                        const elicitResult = await this.server.server.elicitInput({
-                            message: `Are you sure you want to ${entry.description.toLowerCase()}?`,
-                            requestedSchema: {
-                                type: "object" as const,
-                                properties: {
-                                    confirm: {
-                                        type: "string",
-                                        title: "Confirm",
-                                        description: "Type 'yes' to confirm this destructive action",
-                                    }
-                                },
-                                required: ["confirm"]
-                            }
-                        });
-
-                        if (elicitResult.action !== 'accept' || elicitResult.content?.confirm !== 'yes') {
-                            this.log('info', `Destructive action cancelled: ${params.method_name}`);
-                            return { content: [{ type: "text" as const, text: `Action cancelled: ${params.method_name} was not confirmed by user.` }] };
-                        }
-                    } catch (_) {
-                        debug("Elicitation not supported by client, proceeding without confirmation");
-                    }
-                }
-
-                try {
-                    const methodParams = params.params || {};
-                    if (params.method_name === ABsmartlyMCP.CREATE_EXPERIMENT_METHOD && methodParams.data) {
-                        this.autoPopulateCustomFields(methodParams.data as Record<string, unknown>);
-                    }
-
-                    const itemsLimit = params.limit ?? DEFAULT_LIST_ITEMS;
-                    if (params.method_name.startsWith('list') || params.method_name.startsWith('search')) {
-                        if (entry.params.some(ep => ep.name === 'options')) {
-                            if (!methodParams.options) methodParams.options = {};
-                            if (typeof methodParams.options === 'object' && !(methodParams.options as any).items) {
-                                (methodParams.options as any).items = itemsLimit;
-                            }
-                        }
-                        if (entry.params.some(ep => ep.name === 'limit') && methodParams.limit === undefined) {
-                            methodParams.limit = itemsLimit;
-                        }
-                        if (entry.params.some(ep => ep.name === 'items') && methodParams.items === undefined) {
-                            methodParams.items = itemsLimit;
-                        }
-                    }
-
-                    const args = this.buildMethodArgs(entry, methodParams);
-                    const result = await methodFn.apply(this.apiClient, args);
-
-                    if (result === undefined || result === null) {
-                        return { content: [{ type: "text" as const, text: `Successfully executed ${params.method_name}.` }] };
-                    }
-
-                    const showFields = params.show || [];
-                    const excludeFields = params.exclude || [];
-                    const output = params.raw
-                        ? result
-                        : this.summarizeResult(params.method_name, result, showFields, excludeFields);
-
-                    return {
-                        content: [{
-                            type: "text" as const,
-                            text: JSON.stringify(output, null, 2)
-                        }]
-                    };
-                } catch (error) {
-                    const errorMsg = error instanceof Error ? error.message : String(error);
-                    this.log('error', `${params.method_name} failed: ${errorMsg}`);
-                    return {
-                        content: [{
-                            type: "text" as const,
-                            text: `Error executing ${params.method_name}: ${errorMsg}`
-                        }]
-                    };
-                }
-            }
-        );
+        };
+        setupTools(this.server, toolCtx);
     }
 
 
@@ -782,7 +418,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                             type: "text" as const,
                             text: `Create a new ${expType === 'feature' ? 'feature flag' : 'A/B test'} experiment named "${args.name}".
 
-Use the execute_api_method tool with method_name "createExperiment" to create it. Use the context below to fill in valid IDs for applications, unit types, metrics, teams, and custom fields.
+Use the execute_command tool with group "experiments" and command "createExperimentFromTemplate". Read the absmartly://docs/templates resource for the markdown template format. Fill in the template with the context below, then pass the filled template as the "templateContent" parameter.
 
 ${entityContext}
 
@@ -814,7 +450,7 @@ Requirements:
                             type: "text" as const,
                             text: `Create a new feature flag named "${args.name}".
 
-Use the execute_api_method tool with method_name "createExperiment" to create it with type "feature". Feature flags typically have two variants: "off" (control) and "on" (treatment).
+Use the execute_command tool with group "experiments" and command "createExperimentFromTemplate". Read the absmartly://docs/templates resource for the feature flag template. Fill it in with type "feature", two variants (off/on), and the context below, then pass as "templateContent".
 
 ${entityContext}
 
@@ -843,7 +479,7 @@ Requirements:
                         text: `Analyze experiment with ID ${args.id}.
 
 Steps:
-1. Use execute_api_method with method_name "getExperiment" and params { "id": ${args.id} } to fetch the experiment details (use show: ["experiment_report", "audience"] for full data)
+1. Use execute_command with group "experiments", command "getExperiment", params { "experimentId": ${args.id}, "show": ["experiment_report", "audience"] }
 2. Check the experiment state (created, running, stopped, etc.)
 3. If running, check for alerts (SRM, audience mismatch, sample size reached)
 4. Review the traffic split and variant configuration
@@ -865,7 +501,7 @@ Steps:
                         text: `Review all running experiments and identify any that need attention.
 
 Steps:
-1. Use execute_api_method with method_name "listExperiments" and params { "options": { "state": "running" } } with show: ["experiment_report"]
+1. Use execute_command with group "experiments", command "listExperiments", params { "state": "running", "show": ["experiment_report"] }
 2. For each running experiment, check for:
    - SRM alerts (alert_srm)
    - Audience mismatch alerts

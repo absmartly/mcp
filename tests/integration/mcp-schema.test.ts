@@ -60,7 +60,7 @@ async function run() {
     assert(caps?.resources?.subscribe === true, 'resources.subscribe is true');
 
     console.log('\n-- Tool Registration --\n');
-    const expectedTools = ['get_auth_status', 'discover_api_methods', 'get_api_method_docs', 'execute_api_method'];
+    const expectedTools = ['get_auth_status', 'discover_commands', 'get_command_docs', 'execute_command'];
     for (const name of expectedTools) {
         assert(tools.tools.some(t => t.name === name), `${name} is registered`);
     }
@@ -71,23 +71,23 @@ async function run() {
     const authProps = Object.keys(authTool.inputSchema?.properties || {});
     assert(authProps.length === 0, 'get_auth_status has no params');
 
-    console.log('\n-- discover_api_methods schema --\n');
-    const discoverTool = tools.tools.find(t => t.name === 'discover_api_methods')!;
+    console.log('\n-- discover_commands schema --\n');
+    const discoverTool = tools.tools.find(t => t.name === 'discover_commands')!;
     const discoverProps = Object.keys(discoverTool.inputSchema?.properties || {});
     assert(discoverProps.includes('category'), 'has category param');
     assert(discoverProps.includes('search'), 'has search param');
     assert(discoverProps.length === 2, `exactly 2 params`, `got: ${discoverProps.join(', ')}`);
 
-    console.log('\n-- get_api_method_docs schema --\n');
-    const docsTool = tools.tools.find(t => t.name === 'get_api_method_docs')!;
+    console.log('\n-- get_command_docs schema --\n');
+    const docsTool = tools.tools.find(t => t.name === 'get_command_docs')!;
     const docsProps = Object.keys(docsTool.inputSchema?.properties || {});
     assert(docsProps.includes('method_name'), 'has method_name param');
     assert(docsProps.length === 1, `exactly 1 param`, `got: ${docsProps.join(', ')}`);
     const docsRequired = (docsTool.inputSchema as any)?.required || [];
     assert(docsRequired.includes('method_name'), 'method_name is required');
 
-    console.log('\n-- execute_api_method schema --\n');
-    const execTool = tools.tools.find(t => t.name === 'execute_api_method')!;
+    console.log('\n-- execute_command schema --\n');
+    const execTool = tools.tools.find(t => t.name === 'execute_command')!;
     const execProps = Object.keys(execTool.inputSchema?.properties || {});
     assert(execProps.includes('method_name'), 'has method_name param');
     assert(execProps.includes('params'), 'has params param');
@@ -106,17 +106,17 @@ async function run() {
     const authText = (authResult.content as any[])[0]?.text || '';
     assert(authText.includes('Authenticated') || authText.includes('Email'), 'get_auth_status returns auth info');
 
-    const discoverResult = await client.callTool({ name: 'discover_api_methods', arguments: {} });
+    const discoverResult = await client.callTool({ name: 'discover_commands', arguments: {} });
     const discoverText = (discoverResult.content as any[])[0]?.text || '';
-    assert(discoverText.includes('experiments') && discoverText.includes('methods'), 'discover_api_methods returns catalog');
+    assert(discoverText.includes('experiments') && discoverText.includes('methods'), 'discover_commands returns catalog');
 
-    const docsResult = await client.callTool({ name: 'get_api_method_docs', arguments: { method_name: 'listTeams' } });
+    const docsResult = await client.callTool({ name: 'get_command_docs', arguments: { group: 'teams', command: 'listTeams' } });
     const docsText = (docsResult.content as any[])[0]?.text || '';
-    assert(docsText.includes('listTeams') && docsText.includes('Parameter'), 'get_api_method_docs returns method docs');
+    assert(docsText.includes('listTeams') && docsText.includes('Parameter'), 'get_command_docs returns method docs');
 
-    const execResult = await client.callTool({ name: 'execute_api_method', arguments: { method_name: 'listTeams', params: {} } });
+    const execResult = await client.callTool({ name: 'execute_command', arguments: { group: 'teams', command: 'listTeams', params: {} } });
     const execText = (execResult.content as any[])[0]?.text || '';
-    assert(execText.includes('"id"') && execText.includes('"name"'), 'execute_api_method returns data');
+    assert(execText.includes('"id"') && execText.includes('"name"'), 'execute_command returns data');
 
     console.log('\n-- Resources --\n');
 

@@ -229,6 +229,24 @@ export class ABsmartlyResources {
                 };
             }
         );
+
+        this.mcpServer.server.resource(
+            "Experiment Markdown Templates",
+            "absmartly://docs/templates",
+            {
+                description: "Markdown templates for creating experiments: basic A/B test, feature flag, Group Sequential Test (GST), screenshots, custom fields, multi-variant"
+            },
+            async () => {
+                const content = await this.readMarkdownFile('templates.md');
+                return {
+                    contents: [{
+                        uri: "absmartly://docs/templates",
+                        mimeType: "text/markdown",
+                        text: content
+                    }]
+                };
+            }
+        );
     }
     private setupEntityResources() {
         const entityConfigs: Array<{

@@ -1,11 +1,11 @@
 import {
-  API_CATALOG,
-  API_CATEGORIES,
-  searchCatalog,
-  getCatalogByCategory,
-  getMethodEntry,
-  getCategorySummary,
-} from '../../src/api-catalog';
+  CLI_GROUPS,
+  searchCommands,
+  getGroupCommands,
+  getCommandEntry,
+  getGroupSummary,
+  getTotalCommandCount,
+} from '../../src/cli-catalog';
 
 export default async function runTests() {
   let passed = 0;
@@ -22,72 +22,80 @@ export default async function runTests() {
     }
   }
 
-  assert(API_CATALOG.length > 150, 'catalog has 150+ entries', `Got ${API_CATALOG.length}`);
+  const totalCommands = getTotalCommandCount();
+  assert(totalCommands > 150, 'catalog has 150+ commands', `Got ${totalCommands}`);
 
-  for (const entry of API_CATALOG) {
-    assert(!!entry.method, `entry has method: ${entry.method}`, 'Missing method');
-    assert(!!entry.category, `${entry.method} has category`, 'Missing category');
-    assert(!!entry.description, `${entry.method} has description`, 'Missing description');
-    assert(Array.isArray(entry.params), `${entry.method} has params array`, 'params not array');
-    assert(!!entry.returns, `${entry.method} has returns`, 'Missing returns');
-  }
+  // All groups have commands with required fields
+  for (const group of CLI_GROUPS) {
+    const commands = getGroupCommands(group);
+    assert(commands.length > 0, `group "${group}" has commands`, `${group} has 0`);
 
-  const methodNames = API_CATALOG.map(e => e.method);
-  const uniqueNames = new Set(methodNames);
-  assert(methodNames.length === uniqueNames.size, 'no duplicate method names', `${methodNames.length} total vs ${uniqueNames.size} unique`);
-
-  for (const cat of API_CATEGORIES) {
-    const count = API_CATALOG.filter(e => e.category === cat).length;
-    assert(count > 0, `category "${cat}" has entries`, `${cat} has 0 entries`);
-  }
-
-  const metricResults = searchCatalog('createMetric');
-  assert(metricResults.some(r => r.method === 'createMetric'), 'search finds createMetric');
-
-  const archiveResults = searchCatalog('archive');
-  assert(archiveResults.length > 5, 'search "archive" finds multiple results', `Got ${archiveResults.length}`);
-
-  const teamMethods = getCatalogByCategory('teams');
-  assert(teamMethods.length >= 5, 'teams category has 5+ methods', `Got ${teamMethods.length}`);
-
-  const entry = getMethodEntry('listExperiments');
-  assert(entry !== undefined, 'getMethodEntry finds listExperiments');
-  assert(entry?.category === 'experiments', 'listExperiments is in experiments category');
-  assert(entry?.params.length === 1, 'listExperiments has 1 options param', `Got ${entry?.params.length}`);
-  assert(entry?.params[0]?.name === 'options', 'listExperiments param is options', `Got ${entry?.params[0]?.name}`);
-  assert(entry?.params[0]?.type === 'object', 'listExperiments options is object type');
-
-  assert(getMethodEntry('nonExistentMethod') === undefined, 'getMethodEntry returns undefined for unknown');
-
-  const summary = getCategorySummary();
-  assert(summary.length === API_CATEGORIES.length, 'summary has all categories', `Got ${summary.length} vs ${API_CATEGORIES.length}`);
-  assert(summary.every(s => s.count > 0), 'every category in summary has methods');
-
-  const dangerousMethods = API_CATALOG.filter(e => e.dangerous);
-  assert(dangerousMethods.length > 0, 'some methods are marked dangerous');
-  assert(dangerousMethods.some(m => m.method === 'deleteExperiment'), 'deleteExperiment is dangerous');
-
-  for (const entry of API_CATALOG) {
-    for (const param of entry.params) {
-      assert(!!param.name, `${entry.method}.${param.name} has name`, 'Missing param name');
-      assert(!!param.type, `${entry.method}.${param.name} has type`, 'Missing param type');
-      assert(typeof param.required === 'boolean', `${entry.method}.${param.name} has boolean required`, 'required not boolean');
-      assert(!!param.description, `${entry.method}.${param.name} has description`, 'Missing param description');
+    for (const cmd of commands) {
+      assert(!!cmd.command, `${group}.${cmd.command} has command name`);
+      assert(!!cmd.group, `${group}.${cmd.command} has group`);
+      assert(!!cmd.description, `${group}.${cmd.command} has description`);
+      assert(Array.isArray(cmd.params), `${group}.${cmd.command} has params array`);
+      assert(!!cmd.returns, `${group}.${cmd.command} has returns`);
     }
   }
 
-  const resolveEntry = getMethodEntry('resolveMetrics');
-  assert(resolveEntry !== undefined, 'resolveMetrics exists in catalog');
-  assert(resolveEntry?.category === 'resolve-helpers', 'resolveMetrics in resolve-helpers category');
+  // No duplicate command names within a group
+  for (const group of CLI_GROUPS) {
+    const commands = getGroupCommands(group);
+    const names = commands.map(c => c.command);
+    const unique = new Set(names);
+    assert(names.length === unique.size, `no duplicate commands in "${group}"`, `${names.length} total vs ${unique.size} unique`);
+  }
 
-  const corsEntry = getMethodEntry('getCorsOrigin');
-  assert(corsEntry !== undefined, 'getCorsOrigin exists in catalog');
+  // Search works
+  const searchResults = searchCommands('createMetric');
+  assert(searchResults.some(r => r.command === 'createMetric'), 'search finds createMetric');
 
-  const goalTagEntry = getMethodEntry('getGoalTag');
-  assert(goalTagEntry !== undefined, 'getGoalTag exists in catalog');
+  const archiveResults = searchCommands('archive');
+  assert(archiveResults.length > 3, 'search "archive" finds multiple results', `Got ${archiveResults.length}`);
 
-  const metricTagEntry = getMethodEntry('getMetricTag');
-  assert(metricTagEntry !== undefined, 'getMetricTag exists in catalog');
+  // Get group commands
+  const teamCommands = getGroupCommands('teams');
+  assert(teamCommands.length >= 5, 'teams group has 5+ commands', `Got ${teamCommands.length}`);
+
+  // Get specific command entry
+  const entry = getCommandEntry('experiments', 'listExperiments');
+  assert(entry !== undefined, 'getCommandEntry finds experiments.listExperiments');
+  assert(entry?.group === 'experiments', 'listExperiments is in experiments group');
+
+  assert(getCommandEntry('experiments', 'nonExistentCommand') === undefined, 'getCommandEntry returns undefined for unknown command');
+  assert(getCommandEntry('nonExistentGroup', 'list') === undefined, 'getCommandEntry returns undefined for unknown group');
+
+  // Summary
+  const summary = getGroupSummary();
+  assert(summary.length === CLI_GROUPS.length, 'summary has all groups', `Got ${summary.length} vs ${CLI_GROUPS.length}`);
+  assert(summary.every(s => s.commands.length > 0), 'every group in summary has commands');
+
+  // Dangerous commands
+  const allCommands = CLI_GROUPS.flatMap(g => getGroupCommands(g));
+  const dangerousCommands = allCommands.filter(c => c.dangerous);
+  assert(dangerousCommands.length > 0, 'some commands are marked dangerous');
+  assert(dangerousCommands.some(c => c.command === 'archiveExperiment'), 'archiveExperiment is dangerous');
+
+  // Param validation
+  for (const cmd of allCommands) {
+    for (const param of cmd.params) {
+      assert(!!param.name, `${cmd.group}.${cmd.command}.${param.name} has name`);
+      assert(!!param.type, `${cmd.group}.${cmd.command}.${param.name} has type`);
+      assert(typeof param.required === 'boolean', `${cmd.group}.${cmd.command}.${param.name} has boolean required`);
+      assert(!!param.description, `${cmd.group}.${cmd.command}.${param.name} has description`);
+    }
+  }
+
+  // Specific entries exist
+  const corsEntry = getCommandEntry('cors', 'getCorsOrigin');
+  assert(corsEntry !== undefined, 'cors.getCorsOrigin exists');
+
+  const goalTagEntry = getCommandEntry('goaltags', 'getGoalTag');
+  assert(goalTagEntry !== undefined, 'goaltags.getGoalTag exists');
+
+  const metricTagEntry = getCommandEntry('metrictags', 'getMetricTag');
+  assert(metricTagEntry !== undefined, 'metrictags.getMetricTag exists');
 
   return {
     success: failed === 0,

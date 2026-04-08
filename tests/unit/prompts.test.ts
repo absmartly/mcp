@@ -128,7 +128,7 @@ export default async function runTests() {
     const expName = 'my_test_experiment';
     const expType = 'test';
     const entityContext = buildEntityContext(sampleEntities);
-    const createExpPromptText = `Create a new ${expType === 'feature' ? 'feature flag' : 'A/B test'} experiment named "${expName}".\n\nUse the execute_api_method tool with method_name "createExperiment" to create it.\n\n${entityContext}`;
+    const createExpPromptText = `Create a new ${expType === 'feature' ? 'feature flag' : 'A/B test'} experiment named "${expName}".\n\nUse the execute_command tool with method_name "createExperiment" to create it.\n\n${entityContext}`;
     assertContains(createExpPromptText, 'A/B test', 'create-experiment prompt includes A/B test for type=test');
     assertContains(createExpPromptText, `"${expName}"`, 'create-experiment prompt includes experiment name');
     assertContains(createExpPromptText, 'createExperiment', 'create-experiment prompt references createExperiment method');
@@ -136,17 +136,17 @@ export default async function runTests() {
 
     const featureName = 'my_feature_flag';
     const featureType = 'feature';
-    const createFeatureText = `Create a new ${featureType === 'feature' ? 'feature flag' : 'A/B test'} experiment named "${featureName}".\n\nUse the execute_api_method tool with method_name "createExperiment" to create it with type "feature".\n\n${entityContext}`;
+    const createFeatureText = `Create a new ${featureType === 'feature' ? 'feature flag' : 'A/B test'} experiment named "${featureName}".\n\nUse the execute_command tool with method_name "createExperiment" to create it with type "feature".\n\n${entityContext}`;
     assertContains(createFeatureText, 'feature flag', 'create-feature-flag prompt includes feature flag');
     assertContains(createFeatureText, `"${featureName}"`, 'create-feature-flag prompt includes name');
     assertContains(createFeatureText, 'type "feature"', 'create-feature-flag prompt sets type=feature');
 
     const experimentId = '42';
-    const analyzeText = `Analyze experiment with ID ${experimentId}.\n\n1. Use execute_api_method with method_name "getExperiment" and params { "id": ${experimentId} }`;
+    const analyzeText = `Analyze experiment with ID ${experimentId}.\n\n1. Use execute_command with method_name "getExperiment" and params { "id": ${experimentId} }`;
     assertContains(analyzeText, experimentId, 'analyze-experiment prompt includes experiment ID');
     assertContains(analyzeText, 'getExperiment', 'analyze-experiment prompt references getExperiment');
 
-    const reviewText = `Review all running experiments and identify any that need attention.\n\n1. Use execute_api_method with method_name "listExperiments" and params { "options": { "state": "running" } }`;
+    const reviewText = `Review all running experiments and identify any that need attention.\n\n1. Use execute_command with method_name "listExperiments" and params { "options": { "state": "running" } }`;
     assertContains(reviewText, 'listExperiments', 'experiment-review prompt references listExperiments');
     assertContains(reviewText, '"state": "running"', 'experiment-review prompt filters for running state');
     assertContains(reviewText, 'attention', 'experiment-review prompt mentions attention');

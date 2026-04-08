@@ -5,7 +5,7 @@
  *
  * These tests use conversational prompts (not tool-specific instructions) to
  * validate the full chain: user prompt → Claude discovers methods → calls
- * execute_api_method → returns useful response.
+ * execute_command → returns useful response.
  *
  * Credentials come from the ABsmartly CLI test-1 profile:
  *   - Endpoint: ~/.config/absmartly/config.yaml
@@ -185,8 +185,8 @@ function extractExperimentId(result, expName) {
   }
 
   const createCalls = result.toolCalls.filter(tc =>
-    tc.tool.includes('execute_api_method') &&
-    tc.input?.method_name === 'createExperiment'
+    tc.tool.includes('execute_command') &&
+    (tc.input?.command === 'createExperiment' || tc.input?.command === 'createExperimentFromTemplate' || tc.input?.method_name === 'createExperiment')
   );
   if (createCalls.length > 0) {
     const createIdx = result.toolCalls.indexOf(createCalls[createCalls.length - 1]);
@@ -197,8 +197,8 @@ function extractExperimentId(result, expName) {
     ]);
     for (let i = createIdx + 1; i < result.toolCalls.length; i++) {
       const tc = result.toolCalls[i];
-      if (tc.tool.includes('execute_api_method') && experimentMethods.has(tc.input?.method_name)) {
-        const id = tc.input?.params?.id;
+      if (tc.tool.includes('execute_command') && (experimentMethods.has(tc.input?.command) || experimentMethods.has(tc.input?.method_name))) {
+        const id = tc.input?.params?.id || tc.input?.params?.experimentId;
         if (typeof id === 'number') return id;
       }
     }
@@ -211,8 +211,8 @@ function extractExperimentId(result, expName) {
     'restartExperiment', 'fullOnExperiment',
   ]);
   for (const tc of result.toolCalls) {
-    if (tc.tool.includes('execute_api_method') && experimentMethods.has(tc.input?.method_name)) {
-      const id = tc.input?.params?.id;
+    if (tc.tool.includes('execute_command') && (experimentMethods.has(tc.input?.command) || experimentMethods.has(tc.input?.method_name))) {
+      const id = tc.input?.params?.id || tc.input?.params?.experimentId;
       if (typeof id === 'number') experimentMethodIds.push(id);
     }
   }
@@ -242,9 +242,9 @@ function assertUsedMcpTool(result, label) {
   if (!result.ok) throw new Error(`claude failed: ${result.error}`);
 
   const mcpTools = result.toolCalls.filter(c =>
-    c.tool.includes('discover_api_methods') ||
-    c.tool.includes('get_api_method_docs') ||
-    c.tool.includes('execute_api_method') ||
+    c.tool.includes('discover_commands') ||
+    c.tool.includes('get_command_docs') ||
+    c.tool.includes('execute_command') ||
     c.tool.includes('get_auth_status')
   );
 
@@ -302,7 +302,7 @@ async function run() {
     const result = runClaude(
       'Using the ABsmartly API, what operations can you help me with? Give me a high-level summary of the categories.',
     );
-    assertUsedMcpTool(result, 'should use discover_api_methods');
+    assertUsedMcpTool(result, 'should use discover_commands');
     return assertOutput(result, t =>
       t.toLowerCase().includes('experiment') && t.toLowerCase().includes('metric'),
       'response should mention experiments and metrics'
@@ -313,7 +313,7 @@ async function run() {
     const result = runClaude(
       'How do I create a new experiment? What parameters do I need?'
     );
-    assertUsedMcpTool(result, 'should use get_api_method_docs');
+    assertUsedMcpTool(result, 'should use get_command_docs');
     return assertOutput(result, t =>
       t.toLowerCase().includes('createexperiment') || t.toLowerCase().includes('create') && t.toLowerCase().includes('name'),
       'response should explain createExperiment'
@@ -324,7 +324,7 @@ async function run() {
     const result = runClaude(
       'Can I archive things in ABsmartly? What can be archived?'
     );
-    assertUsedMcpTool(result, 'should use discover_api_methods');
+    assertUsedMcpTool(result, 'should use discover_commands');
     return assertOutput(result, t =>
       t.toLowerCase().includes('archive'),
       'response should mention archive methods'
@@ -340,7 +340,7 @@ async function run() {
     const result = runClaude(
       'Show me all the teams we have in ABsmartly.'
     );
-    assertUsedMcpTool(result, 'should use execute_api_method');
+    assertUsedMcpTool(result, 'should use execute_command');
     return assertOutput(result, t =>
       t.includes('id') && t.toLowerCase().includes('name'),
       'response should list teams with ids and names'
@@ -351,8 +351,8 @@ async function run() {
     const result = runClaude(
       'What applications are configured in our ABsmartly instance?'
     );
-    const tools = assertUsedMcpTool(result, 'should use execute_api_method');
-    const execCalls = tools.filter(t => t.tool.includes('execute_api_method'));
+    const tools = assertUsedMcpTool(result, 'should use execute_command');
+    const execCalls = tools.filter(t => t.tool.includes('execute_command'));
     if (execCalls.length > 0) {
       const input = execCalls[0].input;
       if (input.method_name && !input.method_name.toLowerCase().includes('application')) {
@@ -369,7 +369,7 @@ async function run() {
     const result = runClaude(
       'What metrics do we have? Show me the first few.'
     );
-    assertUsedMcpTool(result, 'should use execute_api_method');
+    assertUsedMcpTool(result, 'should use execute_command');
     return assertOutput(result, t =>
       t.includes('id'),
       'response should list metrics'
@@ -380,7 +380,7 @@ async function run() {
     const result = runClaude(
       'What unit types are available for experiments?'
     );
-    assertUsedMcpTool(result, 'should use execute_api_method');
+    assertUsedMcpTool(result, 'should use execute_command');
     return assertOutput(result, t =>
       t.includes('id'),
       'response should list unit types'
@@ -402,7 +402,7 @@ async function run() {
     const result = runClaude(
       'Using the ABsmartly API, get experiment with ID 1. Tell me its name and state.',
     );
-    assertUsedMcpTool(result, 'should use execute_api_method');
+    assertUsedMcpTool(result, 'should use execute_command');
     return assertOutput(result, t =>
       t.toLowerCase().includes('name') || t.toLowerCase().includes('state') || t.includes('"id"'),
       'response should show experiment info'
@@ -413,7 +413,7 @@ async function run() {
     const result = runClaude(
       'Are there any experiments currently running?'
     );
-    assertUsedMcpTool(result, 'should use execute_api_method');
+    assertUsedMcpTool(result, 'should use execute_command');
     return result;
   });
 
@@ -432,7 +432,7 @@ async function run() {
 After creating it, tell me the experiment ID and its current state.`,
       { timeoutMs: LIFECYCLE_TIMEOUT_MS }
     );
-    assertUsedMcpTool(result, 'should use execute_api_method');
+    assertUsedMcpTool(result, 'should use execute_command');
 
     state.expId = extractExperimentId(result, state.expName);
     if (!state.expId) throw new Error(`Could not find experiment ID in response: ${result.output.substring(0, 300)}`);
@@ -450,7 +450,7 @@ After creating it, tell me the experiment ID and its current state.`,
     const result = runClaude(
       `Show me the details of experiment ${state.expId}. What state is it in?`
     );
-    assertUsedMcpTool(result, 'should use execute_api_method');
+    assertUsedMcpTool(result, 'should use execute_command');
     return assertOutput(result, t =>
       t.includes(String(state.expId)) && (t.toLowerCase().includes('created') || t.toLowerCase().includes('state')),
       'response should show experiment details with state'
@@ -462,7 +462,7 @@ After creating it, tell me the experiment ID and its current state.`,
     const result = runClaude(
       `Move experiment ${state.expId} to the "ready" state. Then confirm what state it's in now.`,
     );
-    assertUsedMcpTool(result, 'should use execute_api_method');
+    assertUsedMcpTool(result, 'should use execute_command');
     return assertOutput(result, t =>
       t.toLowerCase().includes('ready'),
       'response should confirm ready state'
@@ -474,7 +474,7 @@ After creating it, tell me the experiment ID and its current state.`,
     const result = runClaude(
       `Put experiment ${state.expId} into development mode. Add a note saying "testing in dev".`,
     );
-    assertUsedMcpTool(result, 'should use execute_api_method');
+    assertUsedMcpTool(result, 'should use execute_command');
     return assertOutput(result, t =>
       t.toLowerCase().includes('development') || t.toLowerCase().includes('dev'),
       'response should confirm development state'
@@ -486,7 +486,7 @@ After creating it, tell me the experiment ID and its current state.`,
     const result = runClaude(
       `Start experiment ${state.expId}. Is it running now?`,
     );
-    assertUsedMcpTool(result, 'should use execute_api_method');
+    assertUsedMcpTool(result, 'should use execute_command');
     return assertOutput(result, t =>
       t.toLowerCase().includes('running') || t.toLowerCase().includes('started'),
       'response should confirm running state'
@@ -498,7 +498,7 @@ After creating it, tell me the experiment ID and its current state.`,
     const result = runClaude(
       `Stop experiment ${state.expId}. What's the state now?`,
     );
-    assertUsedMcpTool(result, 'should use execute_api_method');
+    assertUsedMcpTool(result, 'should use execute_command');
     return assertOutput(result, t =>
       t.toLowerCase().includes('stopped') || t.toLowerCase().includes('stop'),
       'response should confirm stopped state'
@@ -510,7 +510,7 @@ After creating it, tell me the experiment ID and its current state.`,
     const result = runClaude(
       `Archive experiment ${state.expId}. Confirm it's archived.`,
     );
-    assertUsedMcpTool(result, 'should use execute_api_method');
+    assertUsedMcpTool(result, 'should use execute_command');
     return assertOutput(result, t =>
       t.toLowerCase().includes('archived') || t.toLowerCase().includes('archive'),
       'response should confirm archived'
@@ -530,7 +530,7 @@ After creating it, tell me the experiment ID and its current state.`,
 Tell me the experiment ID.`,
       { timeoutMs: LIFECYCLE_TIMEOUT_MS }
     );
-    assertUsedMcpTool(result, 'should use execute_api_method');
+    assertUsedMcpTool(result, 'should use execute_command');
 
     state.flagId = extractExperimentId(result, state.flagName);
     if (!state.flagId) throw new Error(`Could not find feature flag ID in response: ${result.output.substring(0, 300)}`);
@@ -549,7 +549,7 @@ Tell me the experiment ID.`,
       `Take feature flag ${state.flagId} through these states in order: ready, then development (note: "testing"), then start it. Tell me the final state.`,
       { timeoutMs: LIFECYCLE_TIMEOUT_MS }
     );
-    assertUsedMcpTool(result, 'should use execute_api_method');
+    assertUsedMcpTool(result, 'should use execute_command');
     return assertOutput(result, t =>
       t.toLowerCase().includes('running') || t.toLowerCase().includes('started'),
       'response should confirm running state'
@@ -562,7 +562,7 @@ Tell me the experiment ID.`,
       `Stop feature flag ${state.flagId} and then archive it.`,
       { timeoutMs: LIFECYCLE_TIMEOUT_MS }
     );
-    assertUsedMcpTool(result, 'should use execute_api_method');
+    assertUsedMcpTool(result, 'should use execute_command');
     return assertOutput(result, t =>
       t.toLowerCase().includes('archived') || t.toLowerCase().includes('stopped'),
       'response should confirm stopped/archived'
@@ -580,7 +580,7 @@ Tell me the experiment ID.`,
       `Create an experiment called "${state.advName}" with type "test", first available application and unit type, Control and Treatment variants, 50/50 split, in "created" state. Then move it to ready, start it, and stop it. Tell me the experiment ID and final state.`,
       { timeoutMs: LIFECYCLE_TIMEOUT_MS }
     );
-    assertUsedMcpTool(result, 'should use execute_api_method');
+    assertUsedMcpTool(result, 'should use execute_command');
 
     state.advId = extractExperimentId(result, state.advName);
     if (!state.advId) throw new Error(`Could not find experiment ID: ${result.output.substring(0, 300)}`);
@@ -600,7 +600,7 @@ Tell me the experiment ID.`,
       `Restart experiment ${state.advId}. Note: restarting creates a new experiment — use the new ID from the response. Then set the new experiment to full-on with variant 1 (note: "going full on"). Tell me the new experiment ID and confirm it's in full_on state.`,
       { timeoutMs: LIFECYCLE_TIMEOUT_MS }
     );
-    assertUsedMcpTool(result, 'should use execute_api_method');
+    assertUsedMcpTool(result, 'should use execute_command');
 
     const allText = [result.output, ...result.toolResults].join('\n').toLowerCase();
     const fullOnMatch = allText.includes('full_on') || allText.includes('full on');
@@ -633,7 +633,7 @@ Tell me the experiment ID.`,
     const result = runClaude(
       'What tags are available for experiments? List them for me.',
     );
-    assertUsedMcpTool(result, 'should use execute_api_method');
+    assertUsedMcpTool(result, 'should use execute_command');
     return result;
   });
 
@@ -641,7 +641,7 @@ Tell me the experiment ID.`,
     const result = runClaude(
       'Show me the goals configured in ABsmartly.',
     );
-    assertUsedMcpTool(result, 'should use execute_api_method');
+    assertUsedMcpTool(result, 'should use execute_command');
     return result;
   });
 
@@ -649,7 +649,7 @@ Tell me the experiment ID.`,
     const result = runClaude(
       'What audience segments do we have?',
     );
-    assertUsedMcpTool(result, 'should use execute_api_method');
+    assertUsedMcpTool(result, 'should use execute_command');
     return result;
   });
 
@@ -657,7 +657,7 @@ Tell me the experiment ID.`,
     const result = runClaude(
       `Search for experiments with "ux_test" in the name.`,
     );
-    assertUsedMcpTool(result, 'should use execute_api_method');
+    assertUsedMcpTool(result, 'should use execute_command');
     return result;
   });
 
@@ -683,7 +683,7 @@ Tell me the experiment ID.`,
 After all steps, tell me: the original experiment ID, the new experiment ID after restart, and confirm it ended up archived.`,
       { timeoutMs: LIFECYCLE_TIMEOUT_MS }
     );
-    assertUsedMcpTool(result, 'should use execute_api_method');
+    assertUsedMcpTool(result, 'should use execute_command');
 
     const allText = [result.output, ...result.toolResults].join('\n').toLowerCase();
     if (!allText.includes('full_on') && !allText.includes('full on')) {
