@@ -89,9 +89,9 @@ class TestRunner {
       const unitTestDir = join(__dirname, 'unit');
       try {
         const unitTests = await readdir(unitTestDir);
-        const jsTests = unitTests.filter(file => file.endsWith('.js'));
-        
-        for (const testFile of jsTests) {
+        const testFiles = unitTests.filter(file => file.endsWith('.test.js') || file.endsWith('.test.ts'));
+
+        for (const testFile of testFiles) {
           await this.runTest(testFile, join(unitTestDir, testFile));
         }
       } catch (error) {
@@ -105,9 +105,9 @@ class TestRunner {
       const integrationTestDir = join(__dirname, 'integration');
       try {
         const integrationTests = await readdir(integrationTestDir);
-        const jsTests = integrationTests.filter(file => file.endsWith('.js'));
+        const testFiles = integrationTests.filter(file => file.endsWith('.test.js') || file.endsWith('.test.ts'));
         
-        for (const testFile of jsTests) {
+        for (const testFile of testFiles) {
           await this.runTest(testFile, join(integrationTestDir, testFile));
         }
       } catch (error) {

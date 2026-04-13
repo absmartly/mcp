@@ -1,9 +1,17 @@
 {
-  "name": "absmartly-mcp",
+  "name": "@absmartly/mcp",
   "version": "1.0.0",
-  "description": "Remote MCP server for ABsmartly API on Cloudflare Workers",
+  "description": "MCP server for ABsmartly — experimentation platform API access for AI assistants",
   "main": "src/index.ts",
   "type": "module",
+  "bin": {
+    "absmartly-mcp": "./bin/absmartly-mcp.mjs"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "public/docs/"
+  ],
   "scripts": {
     "prebuild": "node scripts/sync-version.js",
     "build": "tsc",
@@ -17,10 +25,11 @@
     "typecheck": "tsc --noEmit",
     "start": "wrangler dev",
     "bridge": "node mcp-bridge.js",
-    "test": "node tests/test-runner.js --unit-only",
-    "test:unit": "node tests/test-runner.js --unit-only",
-    "test:integration": "node tests/test-runner.js --integration-only",
-    "test:all": "node tests/test-runner.js",
+    "local-server": "tsx src/local-server.ts",
+    "test": "tsx tests/test-runner.js --unit-only",
+    "test:unit": "tsx tests/test-runner.js --unit-only",
+    "test:integration": "tsx tests/test-runner.js --integration-only",
+    "test:all": "tsx tests/test-runner.js",
     "test:resources": "node tests/unit/resources-prompts.test.js",
     "test:legacy": "npm run test:api && npm run test:server && npm run test:bridge",
     "test:server": "node test-server.js",
@@ -46,7 +55,7 @@
   "license": "MIT",
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^0.0.5",
-    "@modelcontextprotocol/sdk": "^1.13.0",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "agents": "^0.0.95",
     "dotenv": "^17.0.0",
     "hono": "^4.8.5",
@@ -54,9 +63,11 @@
     "zod": "^3.25.67"
   },
   "devDependencies": {
+    "@absmartly/cli": "^1.0.0",
     "@cloudflare/workers-types": "^4.20241106.0",
     "@types/node": "^20.11.0",
     "jsonwebtoken": "^9.0.2",
+    "tsx": "^4.21.0",
     "typescript": "^5.3.3",
     "wrangler": "^4.22.0"
   }

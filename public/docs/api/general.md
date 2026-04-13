@@ -1,7 +1,29 @@
 # ABsmartly API Documentation
 
+## MCP Server Tools
+
+This server exposes the ABsmartly API through 3 meta-tools:
+
+- **discover_api_methods** — Browse 34 categories or search 208 methods by keyword
+- **get_api_method_docs** — Get detailed parameter docs for any method
+- **execute_api_method** — Execute any method by name with auto-summarization
+
+Use `discover_api_methods` first to find the right method, then `execute_api_method` to call it.
+
+## Auto-Summarization
+
+Results for experiments, metrics, goals, teams, users, and segments are auto-summarized. Use `show` to include extra fields, `exclude` to hide fields, or `raw: true` for full responses.
+
+## Pagination
+
+List methods return 20 items by default. Use `limit` to control, or pass `items`/`page` in the method params.
+
+## Custom Fields
+
+When creating experiments, custom fields are auto-populated with defaults. Override by passing `custom_fields` by name in the data object.
+
 ## Base URL
-https://sandbox.absmartly.com/v1
+{{ABSMARTLY_ENDPOINT}}
 
 ## Authentication
 
@@ -11,7 +33,7 @@ https://sandbox.absmartly.com/v1
 - Full access to all endpoints
 
 ### JWT Token Authentication (OAuth)
-- Pass JWT as `Authorization: Bearer <token>` header  
+- Pass JWT as `Authorization: Bearer <token>` header
 - Used for user-authenticated requests
 - Access based on user permissions
 
@@ -19,9 +41,9 @@ https://sandbox.absmartly.com/v1
 All API responses follow this structure:
 ```json
 {
-  "ok": true/false   // Whether the request was successful
-  "data": { ... },   // Response data
-  "errors": [ ... ]  // Array of error messages
+  "ok": true,
+  "data": { ... },
+  "errors": [ ... ]
 }
 ```
 
@@ -35,10 +57,9 @@ All API responses follow this structure:
 
 ## Rate Limiting
 - 1000 requests per minute per API key
-- Rate limit headers included in responses:
-  - `X-RateLimit-Limit`
-  - `X-RateLimit-Remaining`
-  - `X-RateLimit-Reset`
+- Rate limit headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`
 
 ## Custom Fields
-Custom fields can be configured per organization to extend experiment metadata and provide additional context for analysis.
+Custom fields can be configured per organization to extend experiment metadata. Available fields for this instance:
+
+{{CUSTOM_FIELDS}}

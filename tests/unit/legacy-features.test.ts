@@ -4,12 +4,17 @@
  * Migrated from individual test scripts to ensure backwards compatibility
  */
 
-export default function runLegacyFeaturesTests() {
+export default function runLegacyFeaturesTests(): {
+  success: boolean;
+  message: string;
+  testCount: number;
+  details: Array<{ name: string; status: string; error?: string }>;
+} {
   let passed = 0;
   let failed = 0;
-  const results = [];
+  const results: Array<{ name: string; status: string; error?: string }> = [];
 
-  function test(name, testFn) {
+  function test(name: string, testFn: () => unknown): void {
     try {
       const result = testFn();
       if (result) {
@@ -21,18 +26,18 @@ export default function runLegacyFeaturesTests() {
       }
     } catch (error) {
       failed++;
-      results.push({ name, status: 'FAIL', error: error.message });
+      results.push({ name, status: 'FAIL', error: (error as Error).message });
     }
   }
 
-  function assertEquals(actual, expected, message = '') {
+  function assertEquals(actual: unknown, expected: unknown, message: string = ''): boolean {
     if (JSON.stringify(actual) !== JSON.stringify(expected)) {
       throw new Error(`${message}\nExpected: ${JSON.stringify(expected)}\nActual: ${JSON.stringify(actual)}`);
     }
     return true;
   }
 
-  function assertTrue(condition, message = '') {
+  function assertTrue(condition: unknown, message: string = ''): boolean {
     if (!condition) {
       throw new Error(message || 'Assertion failed');
     }
@@ -93,14 +98,14 @@ export default function runLegacyFeaturesTests() {
     // Test cross-type field (Purpose exists in both test and feature)
     const testPurposeField = getFieldForExperimentType('purpose', 'test', mockCustomFields);
     const featurePurposeField = getFieldForExperimentType('purpose', 'feature', mockCustomFields);
-    
+
     assertTrue(testPurposeField && testPurposeField.id === 1, 'Should find test Purpose field');
     assertTrue(featurePurposeField && featurePurposeField.id === 2, 'Should find feature Purpose field');
 
     // Test type-specific field
     const featureConfigField = getFieldForExperimentType('feature_config', 'feature', mockCustomFields);
     const testConfigField = getFieldForExperimentType('feature_config', 'test', mockCustomFields);
-    
+
     assertTrue(featureConfigField && featureConfigField.id === 5, 'Should find feature config field');
     assertTrue(testConfigField === null, 'Should not find feature config in test type');
 
@@ -114,7 +119,7 @@ export default function runLegacyFeaturesTests() {
     function validateExperimentData(experiment) {
       const required = ['name', 'type'];
       const missing = required.filter(field => !experiment[field]);
-      
+
       if (missing.length > 0) {
         throw new Error(`Missing required fields: ${missing.join(', ')}`);
       }
@@ -152,7 +157,7 @@ export default function runLegacyFeaturesTests() {
       validateExperimentData(invalidFeatureExp);
       throw new Error('Should have thrown validation error');
     } catch (error) {
-      assertTrue(error.message.includes('analysis_type should not be specified'), 'Should reject analysis_type for feature');
+      assertTrue((error as Error).message.includes('analysis_type should not be specified'), 'Should reject analysis_type for feature');
     }
 
     return true;
@@ -207,35 +212,35 @@ export default function runLegacyFeaturesTests() {
 
     // Test required field validation
     const requiredField = { title: 'Required Field', required: true, type: 'string' };
-    
+
     try {
       validateCustomFieldValue(requiredField, '');
       throw new Error('Should have thrown required field error');
     } catch (error) {
-      assertTrue(error.message.includes('is required'), 'Should validate required fields');
+      assertTrue((error as Error).message.includes('is required'), 'Should validate required fields');
     }
 
     // Test JSON field validation
     const jsonField = { title: 'JSON Field', required: false, type: 'json' };
     assertTrue(validateCustomFieldValue(jsonField, '{"valid": "json"}'), 'Should accept valid JSON');
-    
+
     try {
       validateCustomFieldValue(jsonField, '{invalid json}');
       throw new Error('Should have thrown JSON validation error');
     } catch (error) {
-      assertTrue(error.message.includes('must be valid JSON'), 'Should validate JSON format');
+      assertTrue((error as Error).message.includes('must be valid JSON'), 'Should validate JSON format');
     }
 
     // Test boolean field validation
     const booleanField = { title: 'Boolean Field', required: false, type: 'boolean' };
     assertTrue(validateCustomFieldValue(booleanField, 'true'), 'Should accept true');
     assertTrue(validateCustomFieldValue(booleanField, 'false'), 'Should accept false');
-    
+
     try {
       validateCustomFieldValue(booleanField, 'maybe');
       throw new Error('Should have thrown boolean validation error');
     } catch (error) {
-      assertTrue(error.message.includes('must be \'true\' or \'false\''), 'Should validate boolean format');
+      assertTrue((error as Error).message.includes('must be \'true\' or \'false\''), 'Should validate boolean format');
     }
 
     return true;

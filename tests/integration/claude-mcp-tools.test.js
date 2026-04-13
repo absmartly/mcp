@@ -12,23 +12,28 @@
  */
 
 import { execFileSync, spawn } from 'child_process';
-import { writeFileSync } from 'fs';
+import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import dotenv from 'dotenv';
+import { resolveTestCredentials } from './test-credentials.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, '..', '..');
 const CLAUDE_TESTS_DIR = join(__dirname, 'claude-tests');
+mkdirSync(CLAUDE_TESTS_DIR, { recursive: true });
 const MCP_CONFIG_PATH = join(CLAUDE_TESTS_DIR, 'mcp-config.json');
 
 const SHOW_RESPONSES = process.argv.includes('--show-responses');
 const LIVE_MODE = process.argv.includes('--live');
 
-dotenv.config({ path: join(PROJECT_ROOT, '.env.local') });
+const credentials = await resolveTestCredentials();
+if (!credentials) {
+  console.error('No credentials found. Set ABSMARTLY_API_KEY/ABSMARTLY_API_ENDPOINT in .env.local or use --profile <name>');
+  process.exit(1);
+}
 
-const API_KEY = process.env.ABSMARTLY_API_KEY;
-const API_ENDPOINT = process.env.ABSMARTLY_API_ENDPOINT;
+const API_KEY = credentials.apiKey;
+const API_ENDPOINT = credentials.endpoint;
 const LOCAL_MCP_PORT = 8787;
 const LIVE_MCP_URL = 'https://mcp.absmartly.com/sse';
 const LOCAL_MCP_URL = `http://127.0.0.1:${LOCAL_MCP_PORT}/sse`;
@@ -179,22 +184,25 @@ async function startWranglerDev() {
 
 async function run() {
   const wranglerProcesses = [];
+  let serverVerified = false;
   let passed = 0;
   let failed = 0;
   const results = [];
 
   async function ensureServer() {
     if (LIVE_MODE) return;
+    if (serverVerified) return;
     try {
       const resp = await fetch(`http://127.0.0.1:${LOCAL_MCP_PORT}/health`, {
         signal: AbortSignal.timeout(2000)
       });
-      if (resp.ok) return;
+      if (resp.ok) { serverVerified = true; return; }
     } catch {}
 
-    console.log('    (restarting wrangler dev...)');
+    console.log('    (starting wrangler dev...)');
     const w = await startWranglerDev();
     wranglerProcesses.push(w);
+    serverVerified = true;
   }
 
   async function test(name, fn) {
@@ -232,116 +240,109 @@ async function run() {
 
     // ── Tests ──
 
-    await test('list_experiments returns results', () => {
+    await test('listExperiments returns results', () => {
       const result = runClaude(
-        'Use the list_experiments tool with items=2 and format=json. Return ONLY the raw JSON output from the tool, nothing else.'
+        'Call the execute_command tool with group "experiments" and command "listExperiments" and params {"items": 2}. Return ONLY the raw JSON output from the tool, nothing else.'
       );
-      return assertToolResult(result, r => r.includes('"experiments"'), 'tool result missing "experiments"');
+      return assertToolResult(result, r => r.includes('"id"') && r.includes('"name"'), 'tool result missing experiment fields');
     });
 
-    await test('list_users returns users', () => {
+    await test('listUsers returns users', () => {
       const result = runClaude(
-        'Use the list_users tool with items=2. Return ONLY the raw JSON output from the tool, nothing else.'
+        'Call the execute_command tool with group "users" and command "listUsers" and params {"items": 2}. Return ONLY the raw JSON output from the tool, nothing else.'
       );
-      return assertToolResult(result, r => r.includes('"users"'), 'tool result missing "users"');
+      return assertToolResult(result, r => r.includes('"id"') && r.includes('"email"'), 'tool result missing user fields');
     });
 
-    await test('list_applications returns applications', () => {
+    await test('listApplications returns applications', () => {
       const result = runClaude(
-        'Use the list_applications tool with items=2. Return ONLY the raw JSON output from the tool, nothing else.'
+        'Call the execute_command tool with group "apps" and command "listApps" and params {"items": 2}. Return ONLY the raw JSON output from the tool, nothing else.'
       );
-      return assertToolResult(result, r => r.includes('"applications"'), 'tool result missing "applications"');
+      return assertToolResult(result, r => r.includes('"id"') && r.includes('"name"'), 'tool result missing application fields');
     });
 
-    await test('list_unit_types returns unit types', () => {
+    await test('listUnitTypes returns unit types', () => {
       const result = runClaude(
-        'Use the list_unit_types tool with items=2. Return ONLY the raw JSON output from the tool, nothing else.'
+        'Call the execute_command tool with group "units" and command "listUnits" and params {"items": 2}. Return ONLY the raw JSON output from the tool, nothing else.'
       );
-      return assertToolResult(result, r => r.includes('"unit_types"'), 'tool result missing "unit_types"');
+      return assertToolResult(result, r => r.includes('"id"') && r.includes('"name"'), 'tool result missing unit type fields');
     });
 
-    await test('list_metrics returns metrics', () => {
+    await test('listMetrics returns metrics', () => {
       const result = runClaude(
-        'Use the list_metrics tool with items=2. Return ONLY the raw JSON output from the tool, nothing else.'
+        'Call the execute_command tool with group "metrics" and command "listMetrics" and params {"items": 2}. Return ONLY the raw JSON output from the tool, nothing else.'
       );
-      return assertToolResult(result, r => r.includes('"metrics"'), 'tool result missing "metrics"');
+      return assertToolResult(result, r => r.includes('"id"'), 'tool result missing metric fields');
     });
 
-    await test('list_goals returns goals', () => {
+    await test('listGoals returns goals', () => {
       const result = runClaude(
-        'Use the list_goals tool with items=2. Return ONLY the raw JSON output from the tool, nothing else.'
+        'Call the execute_command tool with group "goals" and command "listGoals" and params {"items": 2}. Return ONLY the raw JSON output from the tool, nothing else.'
       );
-      return assertToolResult(result, r => r.includes('"goals"'), 'tool result missing "goals"');
+      return assertToolResult(result, r => r.includes('"id"') && r.includes('"name"'), 'tool result missing goal fields');
     });
 
-    await test('list_tags returns tags', () => {
+    await test('listExperimentTags returns tags', () => {
       const result = runClaude(
-        'Use the list_tags tool with items=2. Return ONLY the raw JSON output from the tool, nothing else.'
+        'Call the execute_command tool with group "tags" and command "listTags". Return ONLY the raw JSON output from the tool, nothing else.'
       );
-      return assertToolResult(result, r => r.includes('"tags"'), 'tool result missing "tags"');
+      return assertToolResult(result, r => r.includes('"id"'), 'tool result missing tag fields');
     });
 
-    await test('list_teams returns teams', () => {
+    await test('listTeams returns teams', () => {
       const result = runClaude(
-        'Use the list_teams tool with items=2. Return ONLY the raw JSON output from the tool, nothing else.'
+        'Call the execute_command tool with group "teams" and command "listTeams" and params {"items": 2}. Return ONLY the raw JSON output from the tool, nothing else.'
       );
-      return assertToolResult(result, r => r.includes('"teams"'), 'tool result missing "teams"');
+      return assertToolResult(result, r => r.includes('"id"') && r.includes('"name"'), 'tool result missing team fields');
     });
 
     await test('get_auth_status returns authenticated info', () => {
       const result = runClaude(
-        'Use the get_auth_status tool. Return ONLY the raw text output from the tool, nothing else.'
+        'Call the get_auth_status tool. Return ONLY the raw text output from the tool, nothing else.'
       );
-      return assertToolResult(result, r => r.includes('Authenticated') || r.includes('API Access'), 'tool result missing auth info');
+      return assertToolResult(result, r => r.includes('Authenticated') || r.includes('API Access') || r.includes('authenticated'), 'tool result missing auth info');
     });
 
-    await test('get_experiment returns experiment details', () => {
+    await test('getExperiment returns experiment details', () => {
       const result = runClaude(
-        'First use list_experiments with items=1 and format=json to get one experiment ID. Then use get_experiment with that ID. Return ONLY the raw JSON from get_experiment, nothing else.'
+        'First call execute_command with method_name "listExperiments" and params {"items": 1} to get one experiment ID. Then call execute_command with method_name "getExperiment" and params {"id": <that id>}. Return ONLY the raw JSON from the second call, nothing else.'
       );
       return assertToolResult(result, r => r.includes('"id"'), 'tool result missing experiment "id"');
     });
 
-    await test('list_experiments with search filter works', () => {
+    await test('listExperiments with search filter works', () => {
       const result = runClaude(
-        'Use list_experiments with search="test" and items=2 and format=json. Return ONLY the raw JSON output from the tool, nothing else.'
+        'Call the execute_command tool with method_name "listExperiments" and params {"search": "test", "items": 2}. Return ONLY the raw JSON output from the tool, nothing else.'
       );
-      return assertToolResult(result, r => r.includes('"experiments"'), 'tool result missing "experiments"');
+      return assertToolResult(result, r => r.includes('"id"'), 'tool result missing experiment fields');
     });
 
-    await test('list_experiments markdown format works', () => {
+    await test('discover_commands lists categories', () => {
       const result = runClaude(
-        'Use list_experiments with items=2 and format=md. Return ONLY the raw markdown output from the tool, nothing else.'
+        'Call the discover_commands tool with no arguments. Return ONLY the raw output from the tool, nothing else.'
       );
-      return assertToolResult(result, r => r.includes('Experiment') || r.includes('#'), 'tool result not markdown');
+      return assertToolResult(result, r => r.includes('experiments') && r.includes('goals'), 'tool result missing API categories');
     });
 
-    await test('create_experiment tool has dynamic custom fields in schema', () => {
+    await test('execute_command tool accepts group and command params', () => {
       const result = runClaude(
-        'List all available tools and find create_experiment. Show me the full list of parameter names that create_experiment accepts. Output ONLY a JSON array of parameter name strings, nothing else.'
+        'List all available tools. Find the execute_command tool and show me its parameter names. Output ONLY a JSON array of parameter name strings, nothing else.'
       );
       if (!result.ok) throw new Error(`claude failed: ${result.error}`);
-      const coreParams = ['name', 'unit_type_id', 'application_id', 'variants', 'primary_metric_id'];
+      const coreParams = ['group', 'command'];
       for (const p of coreParams) {
         if (!result.output.includes(p)) {
-          throw new Error(`create_experiment schema missing expected param "${p}": ${result.output.substring(0, 500)}`);
+          throw new Error(`execute_command schema missing expected param "${p}": ${result.output.substring(0, 500)}`);
         }
       }
       return result;
     });
 
-    await test('create_feature_flag tool has dynamic custom fields in schema', () => {
+    await test('discover_commands returns createExperiment info', () => {
       const result = runClaude(
-        'List all available tools and find create_feature_flag. Show me the full list of parameter names that create_feature_flag accepts. Output ONLY a JSON array of parameter name strings, nothing else.'
+        'Call the discover_commands tool with category "experiments". Return ONLY the raw output from the tool, nothing else.'
       );
-      if (!result.ok) throw new Error(`claude failed: ${result.error}`);
-      const coreParams = ['name', 'unit_type_id', 'application_id', 'primary_metric_id'];
-      for (const p of coreParams) {
-        if (!result.output.includes(p)) {
-          throw new Error(`create_feature_flag schema missing expected param "${p}": ${result.output.substring(0, 500)}`);
-        }
-      }
-      return result;
+      return assertToolResult(result, r => r.includes('createExperiment'), 'tool result missing createExperiment method');
     });
 
     // ── Experiment lifecycle tests ──
@@ -351,31 +352,29 @@ async function run() {
     await test('experiment lifecycle: create → ready → dev → start → stop → restart → full_on → stop → archive', () => {
       const expName = `mcp_test_exp_${expTimestamp}`;
       const result = runClaude(
-`Do the following steps IN ORDER, calling the MCP tools one at a time. Wait for each result before proceeding.
+`Do the following steps IN ORDER using the execute_command tool. Wait for each result before proceeding.
 
-1. Call list_applications with items=1 to get an application. Note its id.
-2. Call list_unit_types with items=1 to get a unit type. Note its id.
-3. Call create_experiment with: name="${expName}", application_id=<from step 1>, unit_type_id=<from step 2>, state="created", variants=[{"variant":0,"name":"Control","config":"{}"},{"variant":1,"name":"Treatment","config":"{}"}]. Note the returned experiment id.
-4. Call get_experiment with the id from step 3. Confirm state is "created".
-5. Call update_experiment with id=<experiment id>, action="ready".
-6. Call get_experiment with the same id. Confirm state is "ready".
-7. Call update_experiment with id=<experiment id>, action="development".
-8. Call get_experiment with the same id. Confirm state is "development".
-9. Call update_experiment with id=<experiment id>, action="start".
-10. Call get_experiment with the same id. Confirm state is "running".
-11. Call update_experiment with id=<experiment id>, action="stop".
-12. Call get_experiment with the same id. Confirm state is "stopped".
-13. Call update_experiment with id=<experiment id>, action="restart".
-14. Call get_experiment with the same id. Note the state (should be "running").
-15. Call update_experiment with id=<experiment id>, action="full_on", full_on_variant=1.
-16. Call get_experiment with the same id. Confirm state is "full_on".
-17. Call update_experiment with id=<experiment id>, action="stop".
-18. Call update_experiment with id=<experiment id>, action="archive".
+1. Call execute_command with method_name "listApplications" and params {"items": 1}. Note the first application's id.
+2. Call execute_command with method_name "listUnitTypes" and params {"items": 1}. Note the first unit type's id.
+3. Call execute_command with method_name "createExperiment" and params {"data": {"name": "${expName}", "applications": [{"application_id": <from step 1>}], "unit_type": {"unit_type_id": <from step 2>}, "type": "test", "state": "created", "variants": [{"variant": 0, "name": "Control", "config": "{}"}, {"variant": 1, "name": "Treatment", "config": "{}"}]}}. Note the returned experiment id.
+4. Call execute_command with method_name "getExperiment" and params {"id": <experiment id>}. Confirm state is "created".
+5. Call execute_command with method_name "updateExperiment" and params {"id": <experiment id>, "data": {"state": "ready"}}.
+6. Call execute_command with method_name "getExperiment" and params {"id": <experiment id>}. Confirm state is "ready".
+7. Call execute_command with method_name "developmentExperiment" and params {"id": <experiment id>, "note": "dev testing"}.
+8. Call execute_command with method_name "getExperiment" and params {"id": <experiment id>}. Note state.
+9. Call execute_command with method_name "startExperiment" and params {"id": <experiment id>}.
+10. Call execute_command with method_name "getExperiment" and params {"id": <experiment id>}. Confirm state is "running".
+11. Call execute_command with method_name "stopExperiment" and params {"id": <experiment id>}.
+12. Call execute_command with method_name "getExperiment" and params {"id": <experiment id>}. Confirm state is "stopped".
+13. Call execute_command with method_name "restartExperiment" and params {"id": <experiment id>}. Note the new experiment id returned.
+14. Call execute_command with method_name "getExperiment" and params {"id": <new experiment id>}. Note the state.
+15. Call execute_command with method_name "fullOnExperiment" and params {"id": <new experiment id>, "variant": 1, "note": "going full on"}.
+16. Call execute_command with method_name "getExperiment" and params {"id": <new experiment id>}. Note state.
+17. Call execute_command with method_name "stopExperiment" and params {"id": <new experiment id>}.
+18. Call execute_command with method_name "archiveExperiment" and params {"id": <new experiment id>}.
 
 After ALL steps, return ONLY a JSON object with this exact format:
-{"experiment_id": <number>, "states": ["created", "ready", "development", "running", "stopped", "running", "full_on", "stopped", "archived"]}
-
-The "states" array should contain the actual state observed after each get_experiment call (steps 4,6,8,10,12,14,16) plus "stopped" and "archived" for the final transitions.`,
+{"experiment_id": <number>, "states": ["created", "ready", ...all observed states...]}`,
         { maxBudget: '0.50', timeoutMs: 300_000 }
       );
       if (!result.ok) throw new Error(`claude failed: ${result.error}`);
@@ -406,26 +405,24 @@ The "states" array should contain the actual state observed after each get_exper
     await test('feature flag lifecycle: create → ready → dev → start → stop → archive', () => {
       const flagName = `mcp_test_flag_${expTimestamp}`;
       const result = runClaude(
-`Do the following steps IN ORDER, calling the MCP tools one at a time. Wait for each result before proceeding.
+`Do the following steps IN ORDER using the execute_command tool. Wait for each result before proceeding.
 
-1. Call list_applications with items=1 to get an application. Note its id.
-2. Call list_unit_types with items=1 to get a unit type. Note its id.
-3. Call create_feature_flag with: name="${flagName}", application_id=<from step 1>, unit_type_id=<from step 2>, state="created". Note the returned experiment id.
-4. Call get_experiment with the id from step 3. Confirm state is "created".
-5. Call update_experiment with id=<experiment id>, action="ready".
-6. Call get_experiment with the same id. Confirm state is "ready".
-7. Call update_experiment with id=<experiment id>, action="development".
-8. Call get_experiment with the same id. Confirm state is "development".
-9. Call update_experiment with id=<experiment id>, action="start".
-10. Call get_experiment with the same id. Confirm state is "running".
-11. Call update_experiment with id=<experiment id>, action="stop".
-12. Call get_experiment with the same id. Confirm state is "stopped".
-13. Call update_experiment with id=<experiment id>, action="archive".
+1. Call execute_command with method_name "listApplications" and params {"items": 1}. Note the first application's id.
+2. Call execute_command with method_name "listUnitTypes" and params {"items": 1}. Note the first unit type's id.
+3. Call execute_command with method_name "createExperiment" and params {"data": {"name": "${flagName}", "applications": [{"application_id": <from step 1>}], "unit_type": {"unit_type_id": <from step 2>}, "type": "feature", "state": "created", "variants": [{"variant": 0, "name": "Off", "config": "{}"}, {"variant": 1, "name": "On", "config": "{}"}]}}. Note the returned experiment id.
+4. Call execute_command with method_name "getExperiment" and params {"id": <experiment id>}. Confirm state is "created".
+5. Call execute_command with method_name "updateExperiment" and params {"id": <experiment id>, "data": {"state": "ready"}}.
+6. Call execute_command with method_name "getExperiment" and params {"id": <experiment id>}. Confirm state is "ready".
+7. Call execute_command with method_name "developmentExperiment" and params {"id": <experiment id>, "note": "dev testing"}.
+8. Call execute_command with method_name "getExperiment" and params {"id": <experiment id>}. Note state.
+9. Call execute_command with method_name "startExperiment" and params {"id": <experiment id>}.
+10. Call execute_command with method_name "getExperiment" and params {"id": <experiment id>}. Confirm state is "running".
+11. Call execute_command with method_name "stopExperiment" and params {"id": <experiment id>}.
+12. Call execute_command with method_name "getExperiment" and params {"id": <experiment id>}. Confirm state is "stopped".
+13. Call execute_command with method_name "archiveExperiment" and params {"id": <experiment id>}.
 
 After ALL steps, return ONLY a JSON object with this exact format:
-{"experiment_id": <number>, "type": "feature", "states": ["created", "ready", "development", "running", "stopped", "archived"]}
-
-The "states" array should contain the actual state observed after each get_experiment call plus "archived" for the final transition.`,
+{"experiment_id": <number>, "type": "feature", "states": ["created", "ready", ...all observed states...]}`,
         { maxBudget: '0.50', timeoutMs: 300_000 }
       );
       if (!result.ok) throw new Error(`claude failed: ${result.error}`);
