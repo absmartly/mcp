@@ -63,7 +63,7 @@
     "zod": "^3.25.67"
   },
   "devDependencies": {
-    "@absmartly/cli": "^0.1.0",
+    "@absmartly/cli": "^1.0.0",
     "@cloudflare/workers-types": "^4.20241106.0",
     "@types/node": "^20.11.0",
     "jsonwebtoken": "^9.0.2",
