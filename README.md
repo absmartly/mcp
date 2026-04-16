@@ -1,6 +1,6 @@
 # ABsmartly MCP Server
 
-A [Model Context Protocol](https://modelcontextprotocol.io/) server that provides full access to the ABsmartly experimentation platform through the CLI core library — 300+ commands across 35 groups including experiment lifecycle, metrics, goals, teams, and more.
+A [Model Context Protocol](https://modelcontextprotocol.io/) server that provides full access to the ABsmartly experimentation platform through the CLI core library — 230+ commands across 33 groups including experiment lifecycle, metrics, goals, teams, and more.
 
 ## How It Works
 
@@ -437,7 +437,7 @@ Read the `absmartly://docs/templates` resource for complete examples including:
 | `datasources` | Data source config | list, test, introspect |
 | `exportconfigs` | Export configuration | list, create, pause |
 
-Plus: `goaltags`, `metrictags`, `metriccategories`, `apikeys`, `permissions`, `assetroles`, `notifications`, `favorites`, `cors`, `updateschedules`, `customsections`, `customfields`, `platformconfig`, `activity`, `statistics`, `events`, `storageconfigs`, `actiondialogfields`.
+Plus: `goaltags`, `metrictags`, `metriccategories`, `apikeys`, `permissions`, `assetroles`, `notifications`, `favorites`, `cors`, `updateschedules`, `customsections`, `platformconfig`, `activity`, `statistics`, `events`, `storageconfigs`, `actiondialogfields`.
 
 ---
 
@@ -500,7 +500,7 @@ npx @absmartly/mcp              # Run stdio server
 ### Testing
 
 ```bash
-npm run test:unit     # Unit tests (3155 tests)
+npm run test:unit     # Unit tests
 npm run typecheck     # TypeScript type checking
 ```
 

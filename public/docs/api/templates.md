@@ -2,7 +2,7 @@
 
 These templates can be used with the `createExperimentFromTemplate` command.
 Fill in the values in the YAML frontmatter and markdown body, then pass the
-content as the `template` parameter.
+content as the `templateContent` parameter.
 
 ---
 

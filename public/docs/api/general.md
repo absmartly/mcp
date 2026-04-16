@@ -2,13 +2,14 @@
 
 ## MCP Server Tools
 
-This server exposes the ABsmartly API through 3 meta-tools:
+This server exposes the ABsmartly API through 4 tools:
 
-- **discover_api_methods** — Browse 34 categories or search 208 methods by keyword
-- **get_api_method_docs** — Get detailed parameter docs for any method
-- **execute_api_method** — Execute any method by name with auto-summarization
+- **discover_commands** — Browse command groups or search by keyword
+- **get_command_docs** — Get detailed parameter docs for any command
+- **execute_command** — Execute any command by group and name with auto-summarization
+- **get_auth_status** — Check authentication status
 
-Use `discover_api_methods` first to find the right method, then `execute_api_method` to call it.
+Use `discover_commands` first to find the right group and command, then `execute_command` to call it. To create experiments, use `execute_command` with group "experiments" and command "createExperimentFromTemplate".
 
 ## Auto-Summarization
 
