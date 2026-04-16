@@ -328,7 +328,8 @@ async function main() {
                 let content: string;
                 try {
                     content = readFileSync(filePath, 'utf-8');
-                } catch {
+                } catch (e) {
+                    console.error(`Failed to read doc resource ${doc.file} from ${filePath}:`, e);
                     content = `# Error\n\nCould not load ${doc.file} from ${filePath}`;
                 }
                 return { contents: [{ uri: doc.uri, mimeType: "text/markdown", text: content }] };
