@@ -530,7 +530,7 @@ npm run build:dxt       # Build DXT extension
 src/
 ├── index.ts              # Cloudflare Worker (OAuth, auth, resources, prompts)
 ├── local-server.ts       # Standalone stdio server
-├── cli-catalog.ts        # 300+ commands mapped to CLI core functions
+├── cli-catalog.ts        # 230+ commands mapped to CLI core functions
 ├── tools.ts              # Shared MCP tool setup (4 tools)
 ├── fetch-adapter.ts      # HTTP client bridging APIClient to fetch
 ├── resources.ts          # MCP resources (docs + entity data)
