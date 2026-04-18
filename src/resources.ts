@@ -1,7 +1,16 @@
 import type { ABsmartlyMCP } from './index';
 import type { CustomSectionField } from '@absmartly/cli/api-client';
+import {
+    summarizeExperiment,
+    summarizeMetric,
+    summarizeGoal,
+    summarizeTeam,
+    summarizeUserDetail,
+    summarizeSegment,
+} from '@absmartly/cli/api-client';
 import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { debug } from './config';
+import { DEFAULT_ABSMARTLY_ENDPOINT } from './shared';
 export class ABsmartlyResources {
     private resourcesRegistered: boolean = false;
     constructor(private mcpServer: ABsmartlyMCP) {}
@@ -46,7 +55,7 @@ export class ABsmartlyResources {
             },
             async () => {
                 let content = await this.readMarkdownFile('general.md');
-                const endpoint = this.mcpServer.props?.absmartly_endpoint || 'https://sandbox.absmartly.com/v1';
+                const endpoint = this.mcpServer.props?.absmartly_endpoint || `${DEFAULT_ABSMARTLY_ENDPOINT}/v1`;
                 content = content.replace('{{ABSMARTLY_ENDPOINT}}', endpoint);
                 const fields = this.mcpServer.customFields || [];
                 const activeFields = fields.filter((f: any) => !f.archived);
@@ -380,15 +389,6 @@ export class ABsmartlyResources {
     }
 
     private setupResourceTemplates() {
-        const {
-            summarizeExperiment,
-            summarizeMetric,
-            summarizeGoal,
-            summarizeTeam,
-            summarizeUserDetail,
-            summarizeSegment,
-        } = require("@absmartly/cli/api-client");
-
         this.mcpServer.server.resource(
             "Experiment by ID",
             new ResourceTemplate("absmartly://experiments/{id}", {

@@ -260,12 +260,23 @@ To create experiments, use group "experiments", command "createExperimentFromTem
               ctx.log?.('info', `Destructive action cancelled: ${params.group}.${params.command}`);
               return { content: [{ type: "text" as const, text: `Action cancelled: ${params.group}.${params.command} was not confirmed by user.` }] };
             }
-          } catch (_) {
-            // Elicitation not supported (e.g. claude -p) — tell LLM to auto-retry
+          } catch (elicitError: any) {
+            const msg = elicitError?.message || String(elicitError);
+            // Only treat "not supported" / "method not found" as expected (e.g. claude -p)
+            if (msg.includes('not supported') || msg.includes('Method not found') || msg.includes('elicit')) {
+              return {
+                content: [{
+                  type: "text" as const,
+                  text: `This is a destructive action: ${entry.description}. You MUST call execute_command again with the exact same group, command, and params, but add confirmed: true to proceed. Do not ask the user — just retry with confirmed: true now.`
+                }]
+              };
+            }
+            // Unexpected error — do NOT auto-confirm
+            ctx.log?.('error', `Elicitation failed unexpectedly: ${msg}`);
             return {
               content: [{
                 type: "text" as const,
-                text: `This is a destructive action: ${entry.description}. You MUST call execute_command again with the exact same group, command, and params, but add confirmed: true to proceed. Do not ask the user — just retry with confirmed: true now.`
+                text: `Failed to request confirmation for ${params.group}.${params.command}: ${msg}. The action was NOT executed. Please try again.`
               }]
             };
           }

@@ -1,44 +1,75 @@
 # ABsmartly MCP Server
 
-A [Model Context Protocol](https://modelcontextprotocol.io/) server that provides full access to the ABsmartly experimentation platform through **3 meta-tools** that expose 208 API methods across 34 categories.
+A [Model Context Protocol](https://modelcontextprotocol.io/) server that provides full access to the ABsmartly experimentation platform through the CLI core library — 230+ commands across 33 groups including experiment lifecycle, metrics, goals, teams, and more.
 
-## Architecture
+## How It Works
 
-Instead of registering hundreds of individual tools, the server uses a catalog-based approach:
+The server exposes 4 tools that give AI assistants access to the full ABsmartly CLI:
+
+| Tool | Purpose |
+|------|---------|
+| `discover_commands` | Browse command groups or search by keyword |
+| `get_command_docs` | Get detailed docs for a specific command |
+| `execute_command` | Execute any command with typed parameters |
+| `get_auth_status` | Check authentication status |
 
 ```
-discover_api_methods  →  Browse/search the 208-method catalog
-get_api_method_docs   →  Get detailed docs for any method
-execute_api_method    →  Execute any method by name
-get_auth_status       →  Check authentication status
+"What experiments are running?"
+  → discover_commands(group: "experiments")
+  → execute_command(group: "experiments", command: "listExperiments", params: {state: "running"})
 ```
 
-All API responses for experiments, metrics, goals, teams, users, and segments are **auto-summarized** to reduce token usage. Use `show`/`exclude` to control experiment fields, or `raw: true` for full responses.
+---
 
-## Quick Start
+## Setup
 
-### Option 1: DXT Extension (Easiest)
+### Authentication Methods
 
-1. Download from [mcp.absmartly.com/absmartly-mcp.dxt](https://mcp.absmartly.com/absmartly-mcp.dxt)
-2. Double-click to install in Claude Desktop
-3. Enter your ABsmartly endpoint when prompted
+The MCP server supports two authentication methods:
 
-### Option 2: Remote MCP (Claude Pro/Teams)
+| Method | Best for | How it works |
+|--------|----------|--------------|
+| **API Key** | Programmatic access, CI/CD, headless | Pass key in headers or CLI config |
+| **OAuth** | Interactive use in Claude Desktop/web | Browser-based login via ABsmartly SAML |
 
-Add in Claude Desktop Settings → Remote MCP Servers:
-- **URL**: `https://mcp.absmartly.com/sse?absmartly-endpoint=https://your-instance.absmartly.com`
-- Complete the OAuth flow when prompted
+### Option 1: Claude Desktop
 
-### Option 3: Local Server (stdio)
+#### With OAuth (recommended)
 
-Uses the ABsmartly CLI config and macOS Keychain for credentials:
+Add as a Remote MCP Server in Claude Desktop:
 
-```bash
-npx @absmartly/mcp
-npx @absmartly/mcp --profile=production
+**URL:**
+```
+https://mcp.absmartly.com/sse?absmartly-endpoint=https://your-instance.absmartly.com
 ```
 
-Claude Desktop config (`claude_desktop_config.json`):
+Claude Desktop will open your browser for ABsmartly login (SAML/credentials). After authentication, the MCP connection is established automatically.
+
+#### With API Key (via mcp-remote)
+
+Claude Desktop doesn't support custom headers natively for remote servers. Use the `mcp-remote` bridge:
+
+**`~/Library/Application Support/Claude/claude_desktop_config.json`** (macOS):
+```json
+{
+  "mcpServers": {
+    "absmartly": {
+      "command": "npx",
+      "args": [
+        "mcp-remote@latest",
+        "https://mcp.absmartly.com/sse",
+        "--header", "Authorization:YOUR_API_KEY",
+        "--header", "x-absmartly-endpoint:https://your-instance.absmartly.com"
+      ]
+    }
+  }
+}
+```
+
+#### With Local Server (stdio)
+
+Uses your ABsmartly CLI config and macOS Keychain credentials:
+
 ```json
 {
   "mcpServers": {
@@ -50,30 +81,10 @@ Claude Desktop config (`claude_desktop_config.json`):
 }
 ```
 
-### Option 4: Local Bridge (mcp-remote)
+### Option 2: Claude Code
 
-Works with any Claude version via the mcp-remote proxy:
+#### Remote with API Key
 
-```json
-{
-  "mcpServers": {
-    "absmartly": {
-      "command": "npx",
-      "args": [
-        "mcp-remote", "https://mcp.absmartly.com/sse",
-        "--header", "Authorization:YOUR_API_KEY",
-        "--header", "x-absmartly-endpoint:https://your-instance.absmartly.com"
-      ]
-    }
-  }
-}
-```
-
-### Option 5: Claude Code
-
-#### Using `claude mcp add` (quickest)
-
-**Remote SSE (API key):**
 ```bash
 claude mcp add --transport sse --scope user absmartly \
   https://mcp.absmartly.com/sse \
@@ -81,24 +92,29 @@ claude mcp add --transport sse --scope user absmartly \
   -H "x-absmartly-endpoint:https://your-instance.absmartly.com"
 ```
 
-**Remote SSE (subdomain shorthand):**
+**Subdomain shorthand** — auto-constructs `https://<subdomain>.absmartly.com/v1`:
 ```bash
 claude mcp add --transport sse --scope user absmartly \
   https://mcp.absmartly.com/sse \
-  -H "Authorization:<your-subdomain> YOUR_API_KEY"
+  -H "Authorization:my-subdomain YOUR_API_KEY"
 ```
 
-This auto-constructs the endpoint as `https://<your-subdomain>.absmartly.com/v1`.
+#### Remote with OAuth
 
-**Local stdio server:**
 ```bash
-claude mcp add --scope user absmartly \
-  npx @absmartly/mcp --profile=production
+claude mcp add --transport sse --scope user absmartly \
+  "https://mcp.absmartly.com/sse?absmartly-endpoint=https://your-instance.absmartly.com"
 ```
 
-Use `--scope project` instead of `--scope user` to limit to the current project.
+Then run `/mcp` in Claude Code to authenticate when prompted.
 
-#### Using `.mcp.json` (project config)
+#### Local Server (stdio)
+
+```bash
+claude mcp add --scope user absmartly -- npx @absmartly/mcp --profile=production
+```
+
+#### Project Config (`.mcp.json`)
 
 ```json
 {
@@ -115,18 +131,184 @@ Use `--scope project` instead of `--scope user` to limit to the current project.
 }
 ```
 
-Or with the local stdio server:
+Use `--scope project` instead of `--scope user` to write to `.mcp.json` (shared via VCS).
+
+### Option 3: Cursor
+
+#### With API Key
+
+**`.cursor/mcp.json`** (project) or **`~/.cursor/mcp.json`** (global):
+```json
+{
+  "mcpServers": {
+    "absmartly": {
+      "url": "https://mcp.absmartly.com/sse",
+      "headers": {
+        "Authorization": "YOUR_API_KEY",
+        "x-absmartly-endpoint": "https://your-instance.absmartly.com"
+      }
+    }
+  }
+}
+```
+
+#### With OAuth
+
+```json
+{
+  "mcpServers": {
+    "absmartly": {
+      "url": "https://mcp.absmartly.com/sse?absmartly-endpoint=https://your-instance.absmartly.com"
+    }
+  }
+}
+```
+
+Cursor will detect the OAuth requirement and open your browser for login.
+
+#### Local Server (stdio)
 
 ```json
 {
   "mcpServers": {
     "absmartly": {
       "command": "npx",
-      "args": ["tsx", "/path/to/src/local-server.ts", "--profile=production"]
+      "args": ["@absmartly/mcp", "--profile=production"]
     }
   }
 }
 ```
+
+### Option 4: Windsurf
+
+**`~/.codeium/windsurf/mcp_config.json`**:
+
+#### With API Key
+
+```json
+{
+  "mcpServers": {
+    "absmartly": {
+      "serverUrl": "https://mcp.absmartly.com/sse",
+      "headers": {
+        "Authorization": "YOUR_API_KEY",
+        "x-absmartly-endpoint": "https://your-instance.absmartly.com"
+      }
+    }
+  }
+}
+```
+
+> Note: Windsurf uses `"serverUrl"` instead of `"url"`.
+
+#### With OAuth
+
+```json
+{
+  "mcpServers": {
+    "absmartly": {
+      "serverUrl": "https://mcp.absmartly.com/sse?absmartly-endpoint=https://your-instance.absmartly.com"
+    }
+  }
+}
+```
+
+#### Local Server (stdio)
+
+```json
+{
+  "mcpServers": {
+    "absmartly": {
+      "command": "npx",
+      "args": ["@absmartly/mcp", "--profile=production"]
+    }
+  }
+}
+```
+
+### Option 5: VS Code (GitHub Copilot)
+
+**`.vscode/mcp.json`** (workspace) or via Command Palette → **MCP: Open User Configuration**:
+
+> Note: VS Code uses `"servers"` as root key, not `"mcpServers"`.
+
+#### With API Key
+
+```json
+{
+  "servers": {
+    "absmartly": {
+      "type": "sse",
+      "url": "https://mcp.absmartly.com/sse",
+      "headers": {
+        "Authorization": "${input:absmartly-api-key}",
+        "x-absmartly-endpoint": "https://your-instance.absmartly.com"
+      }
+    }
+  },
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "absmartly-api-key",
+      "description": "ABsmartly API Key",
+      "password": true
+    }
+  ]
+}
+```
+
+#### With OAuth
+
+```json
+{
+  "servers": {
+    "absmartly": {
+      "type": "sse",
+      "url": "https://mcp.absmartly.com/sse?absmartly-endpoint=https://your-instance.absmartly.com"
+    }
+  }
+}
+```
+
+VS Code will detect the OAuth requirement and show an **Auth** CodeLens to trigger the flow.
+
+#### Local Server (stdio)
+
+```json
+{
+  "servers": {
+    "absmartly": {
+      "command": "npx",
+      "args": ["@absmartly/mcp", "--profile=production"]
+    }
+  }
+}
+```
+
+> MCP tools only appear in **Agent mode** in VS Code, not in Ask or Edit mode.
+
+### Option 6: DXT Extension
+
+1. Download from [mcp.absmartly.com/absmartly-mcp.dxt](https://mcp.absmartly.com/absmartly-mcp.dxt)
+2. Double-click to install in Claude Desktop
+3. Enter your ABsmartly endpoint when prompted
+
+---
+
+## Authorization Header Formats
+
+When using API key authentication, these header formats are all supported:
+
+| Format | Example |
+|--------|---------|
+| Simple API key | `Authorization: BxYKd1U2...` |
+| Explicit Api-Key | `Authorization: Api-Key BxYKd1U2...` |
+| Subdomain shorthand | `Authorization: demo-1 BxYKd1U2...` |
+| Full domain | `Authorization: demo-1.absmartly.com BxYKd1U2...` |
+
+The subdomain shorthand auto-constructs the endpoint as `https://<subdomain>.absmartly.com/v1`.
+
+---
 
 ## Usage Examples
 
@@ -140,7 +322,7 @@ What ABsmartly operations can you help me with?
 Show me all running experiments
 ```
 
-**Create an experiment:**
+**Create an experiment from a template:**
 ```
 Create a new A/B test called "checkout_cta_test" with Control and Blue Button variants
 ```
@@ -155,92 +337,156 @@ Create an experiment, move it to ready, start it, then show me its details
 Create a feature flag called "dark_mode" and start it
 ```
 
-## Key Features
-
-### Auto-Summarization
-
-API responses are automatically summarized using the same summarizers as the ABsmartly CLI. Experiment lists return compact rows; single experiments return detailed summaries with links to the web console.
-
-Control with `show`/`exclude` (experiments only):
-```json
-{ "method_name": "listExperiments", "show": ["experiment_report"], "exclude": ["tags"] }
+**Clone and modify:**
+```
+Clone experiment 42 as "checkout_v2" and update the traffic split to 70/30
 ```
 
-### Custom Fields
+**Compare experiments:**
+```
+Show me the differences between experiments 42 and 43
+```
 
-When creating experiments, custom fields (Hypothesis, Next Steps, etc.) are **auto-populated** with defaults. Override by name:
+---
+
+## Tools Reference
+
+### discover_commands
+
+Browse available command groups or search by keyword. Call without parameters to see all groups.
+
+```json
+{ "group": "experiments" }
+{ "search": "archive" }
+```
+
+### get_command_docs
+
+Get detailed documentation for a specific command including parameters, types, and examples.
+
+```json
+{ "group": "experiments", "command": "createExperimentFromTemplate" }
+```
+
+### execute_command
+
+Execute any ABsmartly command. Common commands are listed in the tool description; use `discover_commands` for the full list.
 
 ```json
 {
-  "method_name": "createExperiment",
+  "group": "experiments",
+  "command": "listExperiments",
+  "params": { "state": "running", "items": 10 }
+}
+```
+
+**Parameters:**
+- `group` (required) — command group (e.g. `experiments`, `metrics`, `goals`)
+- `command` (required) — command name (e.g. `listExperiments`, `createExperimentFromTemplate`)
+- `params` (optional) — command parameters as JSON object
+- `confirmed` (optional) — set to `true` to confirm destructive actions
+- `raw` (optional) — return full CommandResult with rows/detail/warnings/pagination
+- `limit` (optional) — max items for list operations (default: 20)
+
+**Destructive actions** (start, stop, archive, delete) require confirmation. The server returns a confirmation prompt; call again with `confirmed: true` to proceed.
+
+### Creating Experiments with Templates
+
+The recommended way to create experiments is with markdown templates:
+
+```json
+{
+  "group": "experiments",
+  "command": "createExperimentFromTemplate",
   "params": {
-    "data": {
-      "name": "my_test",
-      "type": "test",
-      "custom_fields": { "Hypothesis": "Blue CTA increases conversions by 5%" }
-    }
+    "templateContent": "---\nname: my_experiment\ntype: test\npercentages: \"50/50\"\nunit_type: user_id\napplication: www\n---\n\n## Variants\n\n### variant_0\n\nname: control\nconfig: {}\n\n---\n\n### variant_1\n\nname: treatment\nconfig: {}\n"
   }
 }
 ```
 
-### Pagination
+Templates use YAML frontmatter for configuration and markdown for variants, audience, and description. Names for applications, unit types, metrics, teams, tags, and owners are **automatically resolved to IDs**.
 
-List methods default to 20 items. Use `limit` for quick control:
-```json
-{ "method_name": "listExperiments", "limit": 5 }
-```
+Read the `absmartly://docs/templates` resource for complete examples including:
+- Basic A/B test
+- Feature flags
+- Group Sequential Tests (GST)
+- Screenshots
+- Custom fields
+- Multi-variant (A/B/C) tests
 
-### Argument Completions
+---
 
-Tool parameters (`method_name`, `category`) support auto-completion, helping LLMs discover the right method names.
+## Command Groups
 
-### Elicitation
+| Group | Description | Key Commands |
+|-------|-------------|--------------|
+| `experiments` | Experiment lifecycle | list, get, create, start, stop, archive, clone, diff, export, bulk |
+| `metrics` | Metric definitions and review | list, get, create, review, access |
+| `goals` | Goal definitions | list, get, create, access |
+| `segments` | Audience segments | list, get, create, delete |
+| `teams` | Team management | list, get, create, members |
+| `users` | User management | list, get, create, api-keys |
+| `apps` | Applications | list, get, create, archive |
+| `envs` | Environments | list, get, create |
+| `units` | Unit types | list, get, create |
+| `tags` | Experiment tags | list, get, create, delete |
+| `auth` | Authentication | whoami, api-keys |
+| `insights` | Analytics | velocity, decisions |
+| `webhooks` | Webhook management | list, get, create, delete |
+| `roles` | Role management | list, get, create |
+| `datasources` | Data source config | list, test, introspect |
+| `exportconfigs` | Export configuration | list, create, pause |
 
-Destructive operations (delete, archive) trigger a confirmation prompt via MCP elicitation before executing.
+Plus: `goaltags`, `metrictags`, `metriccategories`, `apikeys`, `permissions`, `assetroles`, `notifications`, `favorites`, `cors`, `updateschedules`, `customsections`, `platformconfig`, `activity`, `statistics`, `events`, `storageconfigs`, `actiondialogfields`.
 
-### Resources
+---
 
-| Type | URIs | Description |
-|------|------|-------------|
-| Entity data | `absmartly://entities/*` | Live cached data for apps, unit types, teams, users, metrics, goals, tags, custom fields |
-| Experiment lookup | `absmartly://experiments/{id}` | Fetch and summarize any experiment |
-| API docs | `absmartly://docs/*` | API reference documentation |
+## Resources
 
-### Prompts
+| URI | Description |
+|-----|-------------|
+| `absmartly://entities/applications` | Cached applications list |
+| `absmartly://entities/unit-types` | Available unit types |
+| `absmartly://entities/teams` | Teams list |
+| `absmartly://entities/users` | Users list |
+| `absmartly://entities/metrics` | Metrics list |
+| `absmartly://entities/goals` | Goals list |
+| `absmartly://entities/tags` | Experiment tags |
+| `absmartly://entities/custom-fields` | Custom field definitions |
+| `absmartly://docs/templates` | Markdown template examples and reference |
+| `absmartly://docs/api` | API documentation |
+| `absmartly://docs/experiments` | Experiment management docs |
+| `absmartly://docs/metrics` | Metrics docs |
+| `absmartly://docs/goals` | Goals docs |
+| `absmartly://docs/segments` | Segments docs |
+| `absmartly://docs/analytics` | Analytics docs |
+| `absmartly://examples/api-requests` | Common request patterns |
+
+## Prompts
 
 | Prompt | Description |
 |--------|-------------|
-| `create-experiment` | Guided experiment creation with full entity context |
+| `experiment-status` | Quick overview of all running experiments |
+| `create-experiment` | Guided experiment creation with entity context |
 | `create-feature-flag` | Simplified feature flag creation |
 | `analyze-experiment` | Deep analysis of a specific experiment |
-| `experiment-review` | Review all running experiments for issues |
+| `experiment-review` | Review running experiments for issues |
 
-## Authorization Formats
-
-The server supports multiple Authorization header formats:
-
-| Format | Example |
-|--------|---------|
-| Simple API key | `Authorization: BxYKd1U2...` |
-| Explicit Api-Key | `Authorization: Api-Key BxYKd1U2...` |
-| Subdomain shorthand | `Authorization: demo-1 BxYKd1U2...` |
-| Full domain | `Authorization: demo-1.absmartly.com BxYKd1U2...` |
-
-All formats auto-add `/v1` suffix and strip `Bearer` prefix if present.
+---
 
 ## Development
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 22+
 - Cloudflare account (for remote deployment)
 - ABsmartly account and API key
 
 ### Setup
 
 ```bash
-git clone <repository-url>
-cd absmartly-mcp
+git clone https://github.com/absmartly/mcp.git
+cd mcp
 npm install
 ```
 
@@ -248,16 +494,28 @@ npm install
 
 ```bash
 npx wrangler dev --port 8787    # Run Worker locally
-npx @absmartly/mcp               # Run stdio server
+npx @absmartly/mcp              # Run stdio server
 ```
 
 ### Testing
 
 ```bash
-npm test                                                    # Unit tests (2977 tests)
-node tests/integration/claude-user-experience.test.js       # Natural language UX tests
-node tests/integration/claude-tool-discovery.test.js        # Tool-level integration tests
+npm run test:unit     # Unit tests
+npm run typecheck     # TypeScript type checking
 ```
+
+Integration tests (require credentials):
+```bash
+node tests/integration/claude-mcp-tools.test.js --profile test-1
+node tests/integration/claude-user-experience.test.js --profile test-1
+node tests/integration/claude-tool-discovery.test.js --profile test-1
+```
+
+### CI/CD
+
+GitHub Actions runs automatically:
+- **CI** (every push/PR): typecheck + unit tests
+- **Deploy** (push to main): tests + Cloudflare Workers deployment
 
 ### Deployment
 
@@ -270,9 +528,10 @@ npm run build:dxt       # Build DXT extension
 
 ```
 src/
-├── index.ts              # Main Cloudflare Worker (tools, resources, prompts)
-├── local-server.ts       # Standalone stdio server for local use
-├── api-catalog.ts        # 208-method API catalog with categories
+├── index.ts              # Cloudflare Worker (OAuth, auth, resources, prompts)
+├── local-server.ts       # Standalone stdio server
+├── cli-catalog.ts        # 230+ commands mapped to CLI core functions
+├── tools.ts              # Shared MCP tool setup (4 tools)
 ├── fetch-adapter.ts      # HTTP client bridging APIClient to fetch
 ├── resources.ts          # MCP resources (docs + entity data)
 ├── absmartly-oauth-handler.ts  # OAuth flow handler
@@ -280,17 +539,15 @@ src/
 └── types.ts              # TypeScript types
 ```
 
-## Documentation
-
-- [MCP Features Reference](docs/mcp-features.md) — Complete reference for tools, resources, prompts, summarization, custom fields, and protocol features
-- [OAuth Flow](docs/oauth-flow-diagram.md) — OAuth implementation details
+---
 
 ## Security
 
-- No server-side secrets — credentials provided by the MCP client
-- Session-based isolation — each connection has its own credentials
-- OAuth discovery protection — API key sessions block OAuth endpoints
-- Elicitation — destructive actions require user confirmation
+- **No server-side secrets** — credentials provided by the MCP client
+- **Session isolation** — each connection has its own credentials
+- **OAuth protection** — API key sessions block OAuth discovery to prevent auth method confusion
+- **Destructive action confirmation** — start, stop, archive, and delete operations require explicit confirmation
+- **API error surfacing** — validation errors from the API are returned with full detail for correction
 
 ## License
 

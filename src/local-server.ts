@@ -83,15 +83,21 @@ function readProfileConfig(profileName: string): ProfileConfig {
         : `${KEYCHAIN_ACCOUNT_PREFIX}-${resolvedProfile}`;
 
     let apiKey: string | undefined;
+    let keychainError: string | undefined;
 
-    try {
-        apiKey = execFileSync('security', [
-            'find-generic-password',
-            '-s', KEYCHAIN_SERVICE,
-            '-a', accountName,
-            '-w',
-        ], { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-    } catch {}
+    if (process.platform === 'darwin') {
+        try {
+            apiKey = execFileSync('security', [
+                'find-generic-password',
+                '-s', KEYCHAIN_SERVICE,
+                '-a', accountName,
+                '-w',
+            ], { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+        } catch (e) {
+            keychainError = e instanceof Error ? e.message : String(e);
+            console.error(`Keychain lookup failed for ${accountName}: ${keychainError}`);
+        }
+    }
 
     if (!apiKey) {
         const credentialsPath = join(homedir(), CREDENTIALS_FILE_PATH);
@@ -99,12 +105,15 @@ function readProfileConfig(profileName: string): ProfileConfig {
             try {
                 const creds = JSON.parse(readFileSync(credentialsPath, 'utf-8'));
                 apiKey = creds[accountName] || undefined;
-            } catch {}
+            } catch (e) {
+                console.error(`Failed to read credentials file ${credentialsPath}:`, e);
+            }
         }
     }
 
     if (!apiKey) {
-        throw new Error(`No API key found for profile "${resolvedProfile}". Run 'abs auth login' first.`);
+        const details = keychainError ? ` (keychain error: ${keychainError})` : '';
+        throw new Error(`No API key found for profile "${resolvedProfile}"${details}. Run 'abs auth login' first.`);
     }
 
     return { endpoint, apiKey };
@@ -197,7 +206,9 @@ async function main() {
         const user = await apiClient.getCurrentUser();
         currentUserId = user?.id || null;
     } catch (e) {
-        entityWarnings.push(`Failed to fetch current user: ${e}`);
+        const msg = `Failed to fetch current user: ${e}`;
+        entityWarnings.push(msg);
+        console.error(msg);
     }
 
     const [
@@ -298,6 +309,31 @@ async function main() {
                     text: JSON.stringify(cfg.getData(), null, 2),
                 }]
             })
+        );
+    }
+
+    // ── Documentation resources (read from local filesystem) ────────────────
+    const docsDir = join(new URL('.', import.meta.url).pathname, '..', 'public', 'docs', 'api');
+    const docResources = [
+        { name: "Experiment Templates", uri: "absmartly://docs/templates", file: "templates.md", description: "Markdown templates for creating experiments: A/B test, feature flag, GST, screenshots, custom fields" },
+        { name: "API Examples", uri: "absmartly://examples/api-requests", file: "examples.md", description: "Common API request examples and patterns" },
+    ];
+    for (const doc of docResources) {
+        const filePath = join(docsDir, doc.file);
+        mcpServer.resource(
+            doc.name,
+            doc.uri,
+            { description: doc.description },
+            async () => {
+                let content: string;
+                try {
+                    content = readFileSync(filePath, 'utf-8');
+                } catch (e) {
+                    console.error(`Failed to read doc resource ${doc.file} from ${filePath}:`, e);
+                    content = `# Error\n\nCould not load ${doc.file} from ${filePath}`;
+                }
+                return { contents: [{ uri: doc.uri, mimeType: "text/markdown", text: content }] };
+            }
         );
     }
 

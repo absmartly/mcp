@@ -78,7 +78,9 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
         debug(message);
         try {
             this.server.server.sendLoggingMessage({ level, data: message });
-        } catch {}
+        } catch (e) {
+            console.warn(`MCP logging failed (level=${level}):`, e);
+        }
     }
 
     async init() {
