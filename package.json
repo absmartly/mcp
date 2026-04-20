@@ -54,6 +54,7 @@
   "author": "ABsmartly",
   "license": "MIT",
   "dependencies": {
+    "@absmartly/cli": "^1.0.0",
     "@cloudflare/workers-oauth-provider": "^0.0.5",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "agents": "^0.0.95",
@@ -63,7 +64,6 @@
     "zod": "^3.25.67"
   },
   "devDependencies": {
-    "@absmartly/cli": "^1.0.0",
     "@cloudflare/workers-types": "^4.20241106.0",
     "@types/node": "^20.11.0",
     "jsonwebtoken": "^9.0.2",

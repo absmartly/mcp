@@ -340,7 +340,7 @@ export class ABsmartlyOAuthHandler extends Hono {
     const absmartlyOAuthUrl = new URL(`${cleanEndpoint}/auth/oauth/authorize`);
     absmartlyOAuthUrl.searchParams.set('client_id', env.ABSMARTLY_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID);
     absmartlyOAuthUrl.searchParams.set('redirect_uri', `${url.origin}/oauth/callback`);
-    absmartlyOAuthUrl.searchParams.set('scope', 'api:read api:write');
+    absmartlyOAuthUrl.searchParams.set('scope', 'mcp:access user:info');
     absmartlyOAuthUrl.searchParams.set('response_type', 'code');
     absmartlyOAuthUrl.searchParams.set('state', stateToken);
 
@@ -349,8 +349,8 @@ export class ABsmartlyOAuthHandler extends Hono {
 
   private getScopeDescription(scope: string): string {
     const descriptions: Record<string, string> = {
-      'api:read': 'Read access to your ABsmartly experiments and data',
-      'api:write': 'Create and modify experiments in your ABsmartly account'
+      'mcp:access': 'Access ABsmartly via the MCP server (read and modify experiments)',
+      'user:info': 'Read your basic ABsmartly profile (name and email)'
     };
     return descriptions[scope] || scope;
   }
