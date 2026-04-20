@@ -340,7 +340,7 @@ export class ABsmartlyOAuthHandler extends Hono {
     const absmartlyOAuthUrl = new URL(`${cleanEndpoint}/auth/oauth/authorize`);
     absmartlyOAuthUrl.searchParams.set('client_id', env.ABSMARTLY_OAUTH_CLIENT_ID || DEFAULT_OAUTH_CLIENT_ID);
     absmartlyOAuthUrl.searchParams.set('redirect_uri', `${url.origin}/oauth/callback`);
-    absmartlyOAuthUrl.searchParams.set('scope', 'mcp:access user:info');
+    absmartlyOAuthUrl.searchParams.set('scope', 'mcp:access');
     absmartlyOAuthUrl.searchParams.set('response_type', 'code');
     absmartlyOAuthUrl.searchParams.set('state', stateToken);
 
