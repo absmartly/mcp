@@ -185,6 +185,30 @@ export default async function run() {
     if (r.status !== 400) throw new Error(`expected 400, got ${r.status}`);
   });
 
+  await test('userinfo endpoint exists and is advertised in discovery', async () => {
+    const r = await fetchWithTimeout(`${BACKEND}/auth/oauth/.well-known/oauth-authorization-server`);
+    const body = await r.json();
+    if (!body.userinfo_endpoint) {
+      throw new Error(`userinfo_endpoint missing from discovery: ${JSON.stringify(body)}`);
+    }
+  });
+
+  await test('userinfo without bearer token → 401', async () => {
+    const r = await fetchWithTimeout(`${BACKEND}/auth/oauth/userinfo`);
+    if (r.status !== 401) {
+      throw new Error(`expected 401 for unauthenticated userinfo, got ${r.status}: ${await r.text()}`);
+    }
+  });
+
+  await test('userinfo with bogus bearer token → 401', async () => {
+    const r = await fetchWithTimeout(`${BACKEND}/auth/oauth/userinfo`, {
+      headers: { 'Authorization': 'Bearer not-a-real-token' },
+    });
+    if (r.status !== 401) {
+      throw new Error(`expected 401 for bogus token, got ${r.status}: ${await r.text()}`);
+    }
+  });
+
   return {
     success: failed === 0,
     message: `${passed} passed, ${failed} failed (live: ${BACKEND})`,
