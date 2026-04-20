@@ -237,59 +237,42 @@ export class ABsmartlyOAuthHandler extends Hono {
       const tokenData = await tokenResponse.json() as { access_token: string; api_key?: string; absmartly_api_key?: string };
       debug('Token exchange successful');
 
-      let userInfo: any = {};
+      const userInfoUrl = `${cleanEndpoint}/auth/oauth/userinfo`;
+      let userInfo: any;
       try {
-        debug('🔍 JWT analysis - token type:', typeof tokenData.access_token);
-        debug('🔍 JWT analysis - token preview:', tokenData.access_token?.substring(0, 50) + '...');
-
-        const jwtParts = tokenData.access_token.split('.');
-        debug('🔍 JWT analysis - parts count:', jwtParts.length);
-
-        if (jwtParts.length === 3) {
-          const base64 = jwtParts[1].replace(/-/g, '+').replace(/_/g, '/');
-          const payload = atob(base64);
-          debug('🔍 JWT payload raw:', payload);
-          userInfo = JSON.parse(payload);
-          debug('🔍 JWT decoded user info:', userInfo);
-        } else {
-          debug('🔍 JWT does not have 3 parts, cannot decode');
-        }
-      } catch (error) {
-        debug('Failed to decode JWT:', error);
-        return c.text('Failed to decode authentication token', 500);
-      }
-
-      let finalEmail: string;
-      let finalName: string;
-      let finalUserId: string;
-
-      const isReferenceToken = userInfo?.token && !userInfo?.email && !userInfo?.sub;
-
-      if (isReferenceToken) {
-        debug('Detected reference token system - JWT contains token reference, not user info');
-        return c.text('Authentication failed: no user identity found in token', 400);
-      } else {
-        debug('Extracting user info from JWT payload:', {
-          email: userInfo?.email,
-          sub: userInfo?.sub,
-          name: userInfo?.name,
-          given_name: userInfo?.given_name,
-          absmartly_user_id: userInfo?.absmartly_user_id,
-          allKeys: Object.keys(userInfo || {})
+        const userInfoResponse = await fetch(userInfoUrl, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${tokenData.access_token}`,
+            'Accept': 'application/json',
+          },
         });
-
-        finalEmail = userInfo?.email || userInfo?.sub;
-        finalName = userInfo?.name || userInfo?.given_name || finalEmail;
-        finalUserId = userInfo?.sub || userInfo?.absmartly_user_id?.toString() || finalEmail;
-
-        if (!finalEmail) {
-          debug('No email found in JWT payload');
-          debug('Full userInfo object:', userInfo);
-          return c.text('Authentication failed: no user identity found in token', 400);
+        if (!userInfoResponse.ok) {
+          const errorText = await userInfoResponse.text();
+          debug('userinfo request failed:', userInfoResponse.status, errorText);
+          return c.text('Failed to fetch user identity from ABsmartly', 500);
         }
-
-        debug('Extracted user details:', { email: finalEmail, name: finalName, userId: finalUserId });
+        userInfo = await userInfoResponse.json();
+        debug('userinfo response keys:', Object.keys(userInfo || {}));
+      } catch (error) {
+        debug('userinfo request error:', error);
+        return c.text('Failed to fetch user identity from ABsmartly', 500);
       }
+
+      const finalEmail: string = userInfo?.email || userInfo?.sub;
+      const finalName: string = userInfo?.name ||
+        [userInfo?.given_name, userInfo?.family_name].filter(Boolean).join(' ').trim() ||
+        finalEmail;
+      const finalUserId: string = userInfo?.sub ||
+        (userInfo?.absmartly_user_id != null ? String(userInfo.absmartly_user_id) : '') ||
+        finalEmail;
+
+      if (!finalEmail) {
+        debug('No email/sub in userinfo response:', userInfo);
+        return c.text('Authentication failed: no user identity found', 400);
+      }
+
+      debug('Extracted user details:', { email: finalEmail, name: finalName, userId: finalUserId });
 
       const apiEndpoint = cleanEndpoint.endsWith('/v1') ? cleanEndpoint : `${cleanEndpoint}/v1`;
 
