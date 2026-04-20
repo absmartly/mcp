@@ -51,7 +51,9 @@ https://mcp.absmartly.com/sse?absmartly-endpoint=https://your-instance.absmartly
 
 Click **Add**, then **Connect**. Claude Desktop will open your browser for ABsmartly login (SAML/credentials). After authentication, the MCP connection is established automatically.
 
-> The `absmartly-endpoint` query parameter is optional. If omitted, the OAuth flow will prompt you to enter the URL of your ABsmartly instance in the browser before login.
+> The `absmartly-endpoint` query parameter is optional. If omitted, the OAuth flow will prompt you to enter the URL of your ABsmartly instance in the browser before login:
+>
+> ![Connect to ABsmartly endpoint prompt](docs/images/oauth-endpoint-prompt.png)
 
 #### With API Key
 
