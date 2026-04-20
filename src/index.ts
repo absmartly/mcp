@@ -546,7 +546,7 @@ const oauthProvider = new OAuthProvider({
     tokenEndpoint: "/token",
     clientRegistrationEndpoint: "/register",
     accessTokenTTL: 3600,
-    scopesSupported: ["api:read", "api:write"],
+    scopesSupported: ["mcp:access", "user:info"],
     disallowPublicClientRegistration: false,
     defaultHandler: oauthHandler,
     clientLookup: async (clientId: string, env: any) => {

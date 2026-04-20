@@ -36,18 +36,35 @@ The MCP server supports two authentication methods:
 
 #### With OAuth (recommended)
 
-Add as a Remote MCP Server in Claude Desktop:
+Open **Settings → Connectors**, scroll to the bottom, and click **Add custom connector**:
+
+![Claude Desktop Connectors settings](docs/images/claude-desktop-connectors.png)
+
+In the dialog, give the connector a **Name** (e.g. "ABsmartly") and paste the URL into **Remote MCP server URL**:
+
+![Add custom connector dialog](docs/images/claude-desktop-add-custom-connector.png)
 
 **URL:**
 ```
 https://mcp.absmartly.com/sse?absmartly-endpoint=https://your-instance.absmartly.com
 ```
 
-Claude Desktop will open your browser for ABsmartly login (SAML/credentials). After authentication, the MCP connection is established automatically.
+Click **Add**, then **Connect**. Claude Desktop will open your browser for ABsmartly login (SAML/credentials). After authentication, the MCP connection is established automatically.
+
+> The `absmartly-endpoint` query parameter is optional. If omitted, the OAuth flow will prompt you to enter the URL of your ABsmartly instance in the browser before login.
+
+#### With API Key
+
+Pass the API key directly in the URL — no `mcp-remote` bridge needed:
+
+**URL:**
+```
+https://mcp.absmartly.com/sse?api_key=YOUR_API_KEY&absmartly-endpoint=https://your-instance.absmartly.com
+```
 
 #### With API Key (via mcp-remote)
 
-Claude Desktop doesn't support custom headers natively for remote servers. Use the `mcp-remote` bridge:
+If you'd rather pass the key via headers instead of the URL, use the `mcp-remote` bridge — Claude Desktop doesn't support custom headers natively for remote servers:
 
 **`~/Library/Application Support/Claude/claude_desktop_config.json`** (macOS):
 ```json
@@ -106,7 +123,7 @@ claude mcp add --transport sse --scope user absmartly \
   "https://mcp.absmartly.com/sse?absmartly-endpoint=https://your-instance.absmartly.com"
 ```
 
-Then run `/mcp` in Claude Code to authenticate when prompted.
+Then run `/mcp` in Claude Code to authenticate when prompted. The `absmartly-endpoint` query parameter is optional — omit it and the OAuth flow will prompt you for the instance URL in the browser.
 
 #### Local Server (stdio)
 
@@ -164,7 +181,7 @@ Use `--scope project` instead of `--scope user` to write to `.mcp.json` (shared 
 }
 ```
 
-Cursor will detect the OAuth requirement and open your browser for login.
+Cursor will detect the OAuth requirement and open your browser for login. The `absmartly-endpoint` query parameter is optional — omit it and the OAuth flow will prompt for the instance URL.
 
 #### Local Server (stdio)
 
@@ -270,7 +287,7 @@ Cursor will detect the OAuth requirement and open your browser for login.
 }
 ```
 
-VS Code will detect the OAuth requirement and show an **Auth** CodeLens to trigger the flow.
+VS Code will detect the OAuth requirement and show an **Auth** CodeLens to trigger the flow. The `absmartly-endpoint` query parameter is optional — omit it and the OAuth flow will prompt for the instance URL.
 
 #### Local Server (stdio)
 
