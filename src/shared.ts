@@ -65,6 +65,21 @@ export function buildQueryString(params: Record<string, unknown>): string {
   return qs ? `?${qs}` : '';
 }
 
+function base64UrlEncode(bytes: Uint8Array): string {
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+export async function generatePkcePair(): Promise<{ codeVerifier: string; codeChallenge: string }> {
+  const verifierBytes = new Uint8Array(32);
+  crypto.getRandomValues(verifierBytes);
+  const codeVerifier = base64UrlEncode(verifierBytes);
+  const challengeBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(codeVerifier));
+  const codeChallenge = base64UrlEncode(new Uint8Array(challengeBuffer));
+  return { codeVerifier, codeChallenge };
+}
+
 export const HTML_ESCAPE_MAP: Record<string, string> = {
   "&": "&amp;",
   "<": "&lt;",

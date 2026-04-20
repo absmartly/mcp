@@ -8,6 +8,7 @@ import {
   APPROVAL_COOKIE_MAX_AGE_SECONDS,
   safeKvGet,
   escapeHtml,
+  generatePkcePair,
 } from './shared';
 
 interface OAuthEnv extends Env {
@@ -208,6 +209,10 @@ export class ABsmartlyOAuthHandler extends Hono {
         redirect_uri: `${url.origin}/oauth/callback`,
       });
 
+      if (oauthReqInfo.codeVerifier) {
+        tokenBody.set('code_verifier', oauthReqInfo.codeVerifier);
+      }
+
       if (env.ABSMARTLY_OAUTH_CLIENT_SECRET) {
         tokenBody.set('client_secret', env.ABSMARTLY_OAUTH_CLIENT_SECRET);
       }
@@ -320,10 +325,12 @@ export class ABsmartlyOAuthHandler extends Hono {
     debug(`ABsmartly endpoint for OAuth redirect: ${absmartlyEndpoint}`);
 
     const cleanEndpoint = absmartlyEndpoint.replace(/\/+$/, '');
+    const { codeVerifier, codeChallenge } = await generatePkcePair();
     const stateToken = crypto.randomUUID();
     const stateData = {
       authRequest,
-      absmartlyEndpoint: cleanEndpoint
+      absmartlyEndpoint: cleanEndpoint,
+      codeVerifier,
     };
 
     try {
@@ -343,6 +350,8 @@ export class ABsmartlyOAuthHandler extends Hono {
     absmartlyOAuthUrl.searchParams.set('scope', 'mcp:access');
     absmartlyOAuthUrl.searchParams.set('response_type', 'code');
     absmartlyOAuthUrl.searchParams.set('state', stateToken);
+    absmartlyOAuthUrl.searchParams.set('code_challenge', codeChallenge);
+    absmartlyOAuthUrl.searchParams.set('code_challenge_method', 'S256');
 
     return c.redirect(absmartlyOAuthUrl.toString());
   }
