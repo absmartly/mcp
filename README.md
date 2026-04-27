@@ -409,6 +409,8 @@ Execute any ABsmartly command. Common commands are listed in the tool descriptio
 
 **Destructive actions** (start, stop, archive, delete) require confirmation. The server returns a confirmation prompt; call again with `confirmed: true` to proceed.
 
+**Experiment creation from templates** also requires confirmation. The first call to `createExperimentFromTemplate` returns a *preview* — the resolved API payload (with names mapped to IDs) plus any warnings — without creating the experiment. Show the preview to the user, then call again with `confirmed: true` to actually create.
+
 ### Creating Experiments with Templates
 
 The recommended way to create experiments is with markdown templates:
