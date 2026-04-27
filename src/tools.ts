@@ -298,41 +298,47 @@ To create experiments, use group "experiments", command "createExperimentFromTem
           !params.confirmed
         ) {
           const templateContent = (commandParams.templateContent as string) || '';
-          if (templateContent.trim()) {
-            try {
-              const template = parseExperimentMarkdown(templateContent);
-              if (commandParams.name) template.name = commandParams.name as string;
-              if (commandParams.displayName) (template as any).display_name = commandParams.displayName as string;
-              const { payload, warnings } = await buildPayloadFromTemplate(
-                ctx.apiClient,
-                template,
-                (commandParams.defaultType as string) || 'test',
-              );
-              const lines: string[] = [];
-              lines.push('**Preview — experiment NOT YET created.**');
+          if (!templateContent.trim()) {
+            return {
+              content: [{
+                type: "text" as const,
+                text: 'Template is empty — provide a non-empty markdown template in `params.templateContent`. See absmartly://docs/templates for examples. No experiment was created.',
+              }],
+            };
+          }
+          try {
+            const template = parseExperimentMarkdown(templateContent);
+            if (commandParams.name) template.name = commandParams.name as string;
+            if (commandParams.displayName) (template as any).display_name = commandParams.displayName as string;
+            const { payload, warnings } = await buildPayloadFromTemplate(
+              ctx.apiClient,
+              template,
+              (commandParams.defaultType as string) || 'test',
+            );
+            const lines: string[] = [];
+            lines.push('**Preview — experiment NOT YET created.**');
+            lines.push('');
+            lines.push('Resolved payload that would be sent to the API:');
+            lines.push('');
+            lines.push('```json');
+            lines.push(JSON.stringify(payload, null, 2));
+            lines.push('```');
+            if (warnings && warnings.length > 0) {
               lines.push('');
-              lines.push('Resolved payload that would be sent to the API:');
-              lines.push('');
-              lines.push('```json');
-              lines.push(JSON.stringify(payload, null, 2));
-              lines.push('```');
-              if (warnings && warnings.length > 0) {
-                lines.push('');
-                lines.push('**Warnings:**');
-                for (const w of warnings) lines.push(`- ${w}`);
-              }
-              lines.push('');
-              lines.push('Show this preview to the user. If they confirm, call `execute_command` again with the same `group`, `command`, and `params`, plus `confirmed: true`, to actually create the experiment.');
-              return { content: [{ type: "text" as const, text: lines.join('\n') }] };
-            } catch (previewError: any) {
-              const msg = previewError?.message || String(previewError);
-              return {
-                content: [{
-                  type: "text" as const,
-                  text: `Failed to parse/resolve template (no experiment was created):\n${msg}\n\nFix the template (see absmartly://docs/templates) and try again.`,
-                }],
-              };
+              lines.push('**Warnings:**');
+              for (const w of warnings) lines.push(`- ${w}`);
             }
+            lines.push('');
+            lines.push('Show this preview to the user. If they confirm, call `execute_command` again with the same `group`, `command`, and `params`, plus `confirmed: true`, to actually create the experiment.');
+            return { content: [{ type: "text" as const, text: lines.join('\n') }] };
+          } catch (previewError: any) {
+            const msg = previewError?.message || String(previewError);
+            return {
+              content: [{
+                type: "text" as const,
+                text: `Failed to parse/resolve template (no experiment was created):\n${msg}\n\nFix the template (see absmartly://docs/templates) and try again.`,
+              }],
+            };
           }
         }
 

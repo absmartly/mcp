@@ -80,6 +80,9 @@ export default async function run() {
       endpoint: 'https://demo.absmartly.com',
       authType: 'api-key',
       email: 'test@example.com',
+      entityWarnings: [],
+      customFields: [],
+      currentUserId: null,
     };
     setupTools(makeMockServer(captured), ctx);
     const entry = captured.tools.get('execute_command');
@@ -132,6 +135,25 @@ export default async function run() {
     assert.strictEqual(client._createExperimentCalls, 1, 'createExperiment should have been called once');
     const text = res.content[0].text as string;
     assert.ok(!text.includes('Preview'), 'response after confirmed:true should not be a preview');
+    // The mocked createExperiment returns { id: 99, name: 'test_exp', type: 'test' };
+    // the response should surface those so the model can echo the created entity to the user.
+    assert.ok(text.includes('99'),
+      `expected created experiment id (99) in response, got: ${text.slice(0, 300)}`);
+    assert.ok(text.includes('test_exp'),
+      `expected created experiment name (test_exp) in response, got: ${text.slice(0, 300)}`);
+  });
+
+  await asyncTest('empty templateContent without confirmed → explicit error, no creation', async () => {
+    const client = makeApiClient({});
+    const handler = getExecuteHandler(client);
+    const res = await callExecute(handler, {
+      group: 'experiments',
+      command: 'createExperimentFromTemplate',
+      params: { templateContent: '   \n  \n' },
+    });
+    const text = res.content[0].text as string;
+    assert.ok(/empty/i.test(text), `expected empty-template error, got: ${text.slice(0, 300)}`);
+    assert.strictEqual(client._createExperimentCalls, 0, 'empty template must not fall through to creation');
   });
 
   await asyncTest('preview surfaces parse errors instead of creating', async () => {
