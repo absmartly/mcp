@@ -4,6 +4,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { APIClient, CustomSectionField } from "@absmartly/cli/api-client";
+import { parseExperimentMarkdown, buildPayloadFromTemplate } from "@absmartly/cli/api-client";
 import {
   CLI_GROUPS,
   getGroupSummary,
@@ -228,12 +229,12 @@ Common commands:
 - apps: listApps
 - segments: listSegments
 
-To create experiments, use group "experiments", command "createExperimentFromTemplate", and pass a markdown template as params.templateContent. Read absmartly://docs/templates for template format.`,
+To create experiments, use group "experiments", command "createExperimentFromTemplate", and pass a markdown template as params.templateContent. By default this returns a PREVIEW (resolved payload + warnings) without creating anything — show the preview to the user, then call again with confirmed: true to actually create. Read absmartly://docs/templates for template format.`,
     {
       group: z.string().describe("Command group (e.g. 'experiments', 'metrics'). Use discover_commands to find available groups."),
       command: z.string().describe("Command name within the group (e.g. 'listExperiments', 'cloneExperiment')"),
       params: z.record(z.unknown()).optional().describe("Command parameters as a JSON object. Keys match the parameter names from command docs."),
-      confirmed: z.boolean().optional().describe("Set to true to confirm a destructive action (start, stop, archive, delete). If a destructive command is called without confirmed=true, it will return a confirmation prompt instead of executing."),
+      confirmed: z.boolean().optional().describe("Set to true to confirm a destructive action (start, stop, archive, delete) OR to confirm createExperimentFromTemplate after the user has reviewed the preview. Without confirmed=true, destructive commands return a confirmation prompt and createExperimentFromTemplate returns a resolved-payload preview."),
       raw: z.boolean().optional().describe("Return the raw CommandResult instead of just .data (includes .rows, .detail, .warnings, .pagination)"),
       limit: z.number().optional().describe("Max items for list operations (default: 20). Sets 'items' in params if not already set."),
     },
@@ -285,6 +286,61 @@ To create experiments, use group "experiments", command "createExperimentFromTem
 
       try {
         const commandParams = { ...(params.params || {}) };
+
+        // Preview-then-confirm for createExperimentFromTemplate.
+        // Resolve the template through the same parser/builder the CLI core
+        // uses, return the resolved payload + any warnings, and stop. The
+        // model is expected to show the preview to the user and call again
+        // with confirmed: true to actually create.
+        if (
+          params.group === 'experiments' &&
+          params.command === 'createExperimentFromTemplate' &&
+          !params.confirmed
+        ) {
+          const templateContent = (commandParams.templateContent as string) || '';
+          if (!templateContent.trim()) {
+            return {
+              content: [{
+                type: "text" as const,
+                text: 'Template is empty — provide a non-empty markdown template in `params.templateContent`. See absmartly://docs/templates for examples. No experiment was created.',
+              }],
+            };
+          }
+          try {
+            const template = parseExperimentMarkdown(templateContent);
+            if (commandParams.name) template.name = commandParams.name as string;
+            if (commandParams.displayName) (template as any).display_name = commandParams.displayName as string;
+            const { payload, warnings } = await buildPayloadFromTemplate(
+              ctx.apiClient,
+              template,
+              (commandParams.defaultType as string) || 'test',
+            );
+            const lines: string[] = [];
+            lines.push('**Preview — experiment NOT YET created.**');
+            lines.push('');
+            lines.push('Resolved payload that would be sent to the API:');
+            lines.push('');
+            lines.push('```json');
+            lines.push(JSON.stringify(payload, null, 2));
+            lines.push('```');
+            if (warnings && warnings.length > 0) {
+              lines.push('');
+              lines.push('**Warnings:**');
+              for (const w of warnings) lines.push(`- ${w}`);
+            }
+            lines.push('');
+            lines.push('Show this preview to the user. If they confirm, call `execute_command` again with the same `group`, `command`, and `params`, plus `confirmed: true`, to actually create the experiment.');
+            return { content: [{ type: "text" as const, text: lines.join('\n') }] };
+          } catch (previewError: any) {
+            const msg = previewError?.message || String(previewError);
+            return {
+              content: [{
+                type: "text" as const,
+                text: `Failed to parse/resolve template (no experiment was created):\n${msg}\n\nFix the template (see absmartly://docs/templates) and try again.`,
+              }],
+            };
+          }
+        }
 
         // Auto-populate custom fields for createExperiment
         if (params.command === 'createExperiment' && commandParams.data) {
