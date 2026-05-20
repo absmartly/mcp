@@ -535,13 +535,20 @@ async function verifyApiKey(apiKey: string, endpoint: string): Promise<{ ok: boo
     }
 }
 
-const baseMcpHandler = ABsmartlyMCP.mount("/sse");
+const sseMcpHandler = ABsmartlyMCP.serveSSE("/sse", {
+    corsOptions: { origin: "*", methods: "GET, POST, OPTIONS", headers: "Content-Type, Authorization, Accept" }
+});
+
+const streamableMcpHandler = ABsmartlyMCP.serve("/mcp", {
+    corsOptions: { origin: "*", methods: "GET, POST, OPTIONS", headers: "Content-Type, Authorization, Accept" }
+});
 
 const oauthHandler = new ABsmartlyOAuthHandler();
 
 const oauthProvider = new OAuthProvider({
     apiHandlers: {
-        "/sse": baseMcpHandler
+        "/sse": sseMcpHandler,
+        "/mcp": streamableMcpHandler
     },
     authorizeEndpoint: "/authorize",
     tokenEndpoint: "/token",
@@ -707,7 +714,7 @@ export default {
                     });
 
                     ctx.props = props;
-                    return await baseMcpHandler.fetch(request, env, ctx);
+                    return await sseMcpHandler.fetch(request, env, ctx);
 
                 } catch (error) {
                     console.error("Error during API key authentication:", error);
