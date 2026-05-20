@@ -194,6 +194,30 @@ export default async function run() {
     assert.strictEqual(result.endpoint, DEFAULT_ABSMARTLY_ENDPOINT);
   });
 
+  test('detectApiKey extracts endpoint from /mcp path with Authorization header', () => {
+    const request = new Request('https://mcp.absmartly.com/mcp/demo-1', {
+      headers: { 'Authorization': 'BxYKd1U2_abc123' }
+    });
+    const result = detectApiKey(request);
+    assert.strictEqual(result.apiKey, 'BxYKd1U2_abc123');
+    assert.strictEqual(result.endpoint, `https://demo-1.${DEFAULT_ABSMARTLY_DOMAIN}`);
+  });
+
+  test('detectApiKey extracts endpoint from /mcp path with api_key query param', () => {
+    const request = new Request('https://mcp.absmartly.com/mcp/demo-1?api_key=BxYKd1U2_abc123');
+    const result = detectApiKey(request);
+    assert.strictEqual(result.apiKey, 'BxYKd1U2_abc123');
+    assert.strictEqual(result.endpoint, `https://demo-1.${DEFAULT_ABSMARTLY_DOMAIN}`);
+  });
+
+  test('detectApiKey still extracts endpoint from /sse path (regression guard)', () => {
+    const request = new Request('https://mcp.absmartly.com/sse/demo-1', {
+      headers: { 'Authorization': 'BxYKd1U2_abc123' }
+    });
+    const result = detectApiKey(request);
+    assert.strictEqual(result.endpoint, `https://demo-1.${DEFAULT_ABSMARTLY_DOMAIN}`);
+  });
+
   await asyncTest('safeKvPut does nothing when kv is undefined', async () => {
     await safeKvPut(undefined, 'key', 'value');
   });
