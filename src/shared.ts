@@ -103,7 +103,7 @@ export function detectApiKey(
   const url = new URL(request.url);
   const authHeader = request.headers.get("Authorization");
 
-  const endpointFromPath = extractEndpointFromPath(url.pathname, '/sse');
+  const endpointFromPath = extractEndpointFromPath(url.pathname, ['/sse', '/mcp']);
 
   const apiKeyFromQuery = url.searchParams.get("api_key") || url.searchParams.get("apikey");
   if (apiKeyFromQuery) {
