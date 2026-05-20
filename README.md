@@ -321,7 +321,52 @@ VS Code will detect the OAuth requirement and show an **Auth** CodeLens to trigg
 
 > MCP tools only appear in **Agent mode** in VS Code, not in Ask or Edit mode.
 
-### Option 6: ChatGPT (Developer Mode)
+### Option 6: Gemini (CLI + Code Assist)
+
+Works for **Gemini CLI** (terminal) and **Gemini Code Assist** (VS Code / JetBrains / Android Studio agent mode). Both read `~/.gemini/settings.json` (user-wide) or `.gemini/settings.json` (per-project). JetBrains IDEs use `mcp.json` instead.
+
+#### With OAuth
+
+```json
+{
+  "mcpServers": {
+    "absmartly": {
+      "url": "https://mcp.absmartly.com/sse?absmartly-endpoint=https://your-instance.absmartly.com"
+    }
+  }
+}
+```
+
+Gemini auto-discovers the OAuth requirement. In Gemini CLI, run `/mcp auth absmartly` when prompted; in Code Assist agent mode the browser opens automatically.
+
+#### With API Key
+
+```json
+{
+  "mcpServers": {
+    "absmartly": {
+      "url": "https://mcp.absmartly.com/sse",
+      "headers": {
+        "Authorization": "YOUR_API_KEY",
+        "x-absmartly-endpoint": "https://your-instance.absmartly.com"
+      }
+    }
+  }
+}
+```
+
+#### One-liner via Gemini CLI
+
+```bash
+gemini mcp add --transport sse --scope user absmartly \
+  https://mcp.absmartly.com/sse \
+  -H "Authorization: YOUR_API_KEY" \
+  -H "x-absmartly-endpoint: https://your-instance.absmartly.com"
+```
+
+> Reload the IDE window after editing settings (VS Code: Command Palette → **Developer: Reload Window**). MCP support in Code Assist requires **agent preview mode** — set `"geminicodeassist.updateChannel": "Insiders"` in VS Code settings if not already enabled.
+
+### Option 7: ChatGPT (Developer Mode)
 
 ChatGPT does not support one-click install deeplinks — you connect remote MCP servers via the **Custom Connectors** UI. Requires a Pro, Team, Enterprise, or Edu plan, and Developer Mode enabled (Settings → **Connectors** → **Advanced** → **Developer mode**).
 
@@ -334,7 +379,7 @@ ChatGPT does not support one-click install deeplinks — you connect remote MCP 
 
 > Workspace admins must first enable **Custom MCP connectors** in **Workspace Settings → Permissions & Roles → Connected Data**.
 
-### Option 7: DXT Extension
+### Option 8: DXT Extension
 
 1. Download from [mcp.absmartly.com/absmartly-mcp.dxt](https://mcp.absmartly.com/absmartly-mcp.dxt)
 2. Double-click to install in Claude Desktop
