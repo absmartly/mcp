@@ -32,6 +32,12 @@ import {
     safeKvGet,
 } from "./shared";
 
+const MCP_CORS_OPTIONS = {
+    origin: "*",
+    methods: "GET, POST, OPTIONS",
+    headers: "Content-Type, Authorization, Accept",
+} as const;
+
 export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartlyProps> {
     server = new McpServer(
         {
@@ -536,11 +542,11 @@ async function verifyApiKey(apiKey: string, endpoint: string): Promise<{ ok: boo
 }
 
 const sseMcpHandler = ABsmartlyMCP.serveSSE("/sse", {
-    corsOptions: { origin: "*", methods: "GET, POST, OPTIONS", headers: "Content-Type, Authorization, Accept" }
+    corsOptions: MCP_CORS_OPTIONS
 });
 
 const streamableMcpHandler = ABsmartlyMCP.serve("/mcp", {
-    corsOptions: { origin: "*", methods: "GET, POST, OPTIONS", headers: "Content-Type, Authorization, Accept" }
+    corsOptions: MCP_CORS_OPTIONS
 });
 
 const oauthHandler = new ABsmartlyOAuthHandler();
