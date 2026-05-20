@@ -40,7 +40,7 @@
     "test:dynamic:full": "./run-dynamic-fields-test.sh",
     "precommit": "npm run test",
     "clean-whitespace": "find src -name '*.ts' -exec sed -i '' 's/^[[:space:]]*$//' {} +",
-    "build:dxt": "dxt pack",
+    "build:dxt": "mkdir -p public && dxt pack . public/absmartly-mcp.dxt",
     "upload:dxt": "./scripts/build-dxt.sh",
     "install:dxt": "npm install -g @anthropic-ai/dxt"
   },

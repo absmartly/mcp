@@ -2,6 +2,12 @@
 
 A [Model Context Protocol](https://modelcontextprotocol.io/) server that provides full access to the ABsmartly experimentation platform through the CLI core library — 230+ commands across 33 groups including experiment lifecycle, metrics, goals, teams, and more.
 
+### Quick install for Claude Desktop
+
+[![Install DXT for Claude Desktop](https://img.shields.io/badge/Claude_Desktop-Install_DXT_Extension-D97757?style=for-the-badge&logo=anthropic&logoColor=white)](https://mcp.absmartly.com/absmartly-mcp.dxt)
+
+Download and double-click the file to install. For other clients (Cursor, VS Code, Windsurf, ChatGPT, Claude Code), see [Setup](#setup) below.
+
 ## How It Works
 
 The server exposes 4 tools that give AI assistants access to the full ABsmartly CLI:
@@ -154,6 +160,10 @@ Use `--scope project` instead of `--scope user` to write to `.mcp.json` (shared 
 
 ### Option 3: Cursor
 
+[![Add to Cursor](https://img.shields.io/badge/Cursor-Add_ABsmartly_MCP-00A4DC?style=flat-square&logo=cursor&logoColor=white)](cursor://anysphere.cursor-deeplink/mcp/install?name=absmartly&config=eyJ1cmwiOiJodHRwczovL21jcC5hYnNtYXJ0bHkuY29tL3NzZSJ9)
+
+Click the badge above to install with one click (OAuth). After Cursor prompts you for the ABsmartly instance URL in the browser, the flow completes automatically. Or configure manually:
+
 #### With API Key
 
 **`.cursor/mcp.json`** (project) or **`~/.cursor/mcp.json`** (global):
@@ -247,6 +257,11 @@ Cursor will detect the OAuth requirement and open your browser for login. The `a
 
 ### Option 5: VS Code (GitHub Copilot)
 
+[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_ABsmartly_MCP-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](vscode:mcp/install?%7B%22name%22%3A%22absmartly%22%2C%22type%22%3A%22sse%22%2C%22url%22%3A%22https%3A%2F%2Fmcp.absmartly.com%2Fsse%22%7D)
+[![Install in VS Code Insiders](https://img.shields.io/badge/VS_Code_Insiders-Install_ABsmartly_MCP-24bfa5?style=flat-square&logo=visualstudiocode&logoColor=white)](vscode-insiders:mcp/install?%7B%22name%22%3A%22absmartly%22%2C%22type%22%3A%22sse%22%2C%22url%22%3A%22https%3A%2F%2Fmcp.absmartly.com%2Fsse%22%7D)
+
+Click a badge above for one-click install (OAuth). You'll be prompted for your ABsmartly instance URL in the browser. Or configure manually:
+
 **`.vscode/mcp.json`** (workspace) or via Command Palette → **MCP: Open User Configuration**:
 
 > Note: VS Code uses `"servers"` as root key, not `"mcpServers"`.
@@ -306,7 +321,20 @@ VS Code will detect the OAuth requirement and show an **Auth** CodeLens to trigg
 
 > MCP tools only appear in **Agent mode** in VS Code, not in Ask or Edit mode.
 
-### Option 6: DXT Extension
+### Option 6: ChatGPT (Developer Mode)
+
+ChatGPT does not support one-click install deeplinks — you connect remote MCP servers via the **Custom Connectors** UI. Requires a Pro, Team, Enterprise, or Edu plan, and Developer Mode enabled (Settings → **Connectors** → **Advanced** → **Developer mode**).
+
+1. Go to **Settings → Connectors → Create**.
+2. Fill in:
+   - **Name:** `ABsmartly`
+   - **MCP Server URL:** `https://mcp.absmartly.com/sse?absmartly-endpoint=https://your-instance.absmartly.com`
+   - **Authentication:** OAuth
+3. Save. In a new chat, click **+** → **Developer mode** → select the **ABsmartly** connector to add it as a tool source.
+
+> Workspace admins must first enable **Custom MCP connectors** in **Workspace Settings → Permissions & Roles → Connected Data**.
+
+### Option 7: DXT Extension
 
 1. Download from [mcp.absmartly.com/absmartly-mcp.dxt](https://mcp.absmartly.com/absmartly-mcp.dxt)
 2. Double-click to install in Claude Desktop
