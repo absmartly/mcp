@@ -124,6 +124,17 @@ claude mcp add --transport sse --scope user absmartly \
   -H "Authorization:my-subdomain YOUR_API_KEY"
 ```
 
+#### Remote with API Key (Streamable HTTP — recommended for new installs)
+
+```bash
+claude mcp add --transport http --scope user absmartly \
+  https://mcp.absmartly.com/mcp \
+  -H "Authorization:YOUR_API_KEY" \
+  -H "x-absmartly-endpoint:https://your-instance.absmartly.com"
+```
+
+> Streamable HTTP is the modern MCP transport (the MCP spec deprecated SSE in March 2025). The `/sse` URL still works for older clients.
+
 #### Remote with OAuth
 
 ```bash
@@ -172,6 +183,23 @@ Click the badge above to install with one click (OAuth). After Cursor prompts yo
   "mcpServers": {
     "absmartly": {
       "url": "https://mcp.absmartly.com/sse",
+      "headers": {
+        "Authorization": "YOUR_API_KEY",
+        "x-absmartly-endpoint": "https://your-instance.absmartly.com"
+      }
+    }
+  }
+}
+```
+
+**Or with Streamable HTTP transport (modern, recommended):**
+
+```json
+{
+  "mcpServers": {
+    "absmartly": {
+      "type": "http",
+      "url": "https://mcp.absmartly.com/mcp",
       "headers": {
         "Authorization": "YOUR_API_KEY",
         "x-absmartly-endpoint": "https://your-instance.absmartly.com"
@@ -230,6 +258,22 @@ Cursor will detect the OAuth requirement and open your browser for login. The `a
 
 > Note: Windsurf uses `"serverUrl"` instead of `"url"`.
 
+**Or with Streamable HTTP transport:**
+
+```json
+{
+  "mcpServers": {
+    "absmartly": {
+      "serverUrl": "https://mcp.absmartly.com/mcp",
+      "headers": {
+        "Authorization": "YOUR_API_KEY",
+        "x-absmartly-endpoint": "https://your-instance.absmartly.com"
+      }
+    }
+  }
+}
+```
+
 #### With OAuth
 
 ```json
@@ -274,6 +318,31 @@ Click a badge above for one-click install (OAuth). You'll be prompted for your A
     "absmartly": {
       "type": "sse",
       "url": "https://mcp.absmartly.com/sse",
+      "headers": {
+        "Authorization": "${input:absmartly-api-key}",
+        "x-absmartly-endpoint": "https://your-instance.absmartly.com"
+      }
+    }
+  },
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "absmartly-api-key",
+      "description": "ABsmartly API Key",
+      "password": true
+    }
+  ]
+}
+```
+
+**Or with Streamable HTTP transport (recommended):**
+
+```json
+{
+  "servers": {
+    "absmartly": {
+      "type": "http",
+      "url": "https://mcp.absmartly.com/mcp",
       "headers": {
         "Authorization": "${input:absmartly-api-key}",
         "x-absmartly-endpoint": "https://your-instance.absmartly.com"
@@ -363,6 +432,18 @@ gemini mcp add --transport sse --scope user absmartly \
   -H "Authorization: YOUR_API_KEY" \
   -H "x-absmartly-endpoint: https://your-instance.absmartly.com"
 ```
+
+#### Gemini Enterprise (Google Cloud Console)
+
+Gemini Enterprise's **Custom MCP Server** connector (Preview) requires Streamable HTTP transport — use the `/mcp` endpoint:
+
+1. Google Cloud Console → **Gemini Enterprise** → **Data stores** → **Create data store**.
+2. Search "Custom MCP Server" → **Add MCP server**.
+3. **Server URL:** `https://mcp.absmartly.com/mcp`
+4. **Authentication:** OAuth — register Gemini Enterprise as an OAuth client against your identity provider, then provide the `client_id` / `client_secret`. Grant the `mcp:access` scope.
+5. Save and wait for the connector status to become **Active**.
+
+> SSE transport (`/sse`) is **not** supported by this connector. The legacy Gemini CLI / Code Assist sections above continue to use `/sse` until those clients add Streamable HTTP support.
 
 > Reload the IDE window after editing settings (VS Code: Command Palette → **Developer: Reload Window**). MCP support in Code Assist requires **agent preview mode** — set `"geminicodeassist.updateChannel": "Insiders"` in VS Code settings if not already enabled.
 
