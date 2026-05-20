@@ -90,6 +90,30 @@ export default async function run() {
   test('extractEndpointFromPath keeps dotted hostname as-is', () => {
     assert.strictEqual(extractEndpointFromPath('/sse/custom.example.com', '/sse'), 'https://custom.example.com');
   });
+  test('extractEndpointFromPath returns null for /mcp without trailing content', () => {
+    assert.strictEqual(extractEndpointFromPath('/mcp/', '/mcp'), null);
+  });
+  test('extractEndpointFromPath appends domain for /mcp shortname', () => {
+    assert.strictEqual(extractEndpointFromPath('/mcp/dev1', '/mcp'), `https://dev1.${DEFAULT_ABSMARTLY_DOMAIN}`);
+  });
+  test('extractEndpointFromPath keeps dotted /mcp hostname as-is', () => {
+    assert.strictEqual(extractEndpointFromPath('/mcp/custom.example.com', '/mcp'), 'https://custom.example.com');
+  });
+  test('extractEndpointFromPath accepts an array of prefixes and matches /sse', () => {
+    assert.strictEqual(
+      extractEndpointFromPath('/sse/dev1', ['/sse', '/mcp']),
+      `https://dev1.${DEFAULT_ABSMARTLY_DOMAIN}`
+    );
+  });
+  test('extractEndpointFromPath accepts an array of prefixes and matches /mcp', () => {
+    assert.strictEqual(
+      extractEndpointFromPath('/mcp/dev1', ['/sse', '/mcp']),
+      `https://dev1.${DEFAULT_ABSMARTLY_DOMAIN}`
+    );
+  });
+  test('extractEndpointFromPath returns null when none of the prefixes match', () => {
+    assert.strictEqual(extractEndpointFromPath('/other/dev1', ['/sse', '/mcp']), null);
+  });
 
   test('escapeHtml escapes all special chars', () => {
     assert.strictEqual(escapeHtml('&<>"\''), '&amp;&lt;&gt;&quot;&#39;');
