@@ -12,7 +12,7 @@ export default async function run() {
   }
 
   // describe: /mcp transport request shape
-  test('detectApiKey returns null endpoint when /mcp path has no subdomain', () => {
+  test('detectApiKey falls back to default endpoint when /mcp path has no subdomain', () => {
     const request = new Request('https://mcp.absmartly.com/mcp', {
       headers: { 'Authorization': 'BxYKd1U2_abc123' }
     });
