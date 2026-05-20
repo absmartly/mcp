@@ -8,6 +8,7 @@ import { ABsmartlyOAuthHandler } from "./absmartly-oauth-handler";
 import { Env } from "./types";
 import { debug } from "./config";
 import { MCP_VERSION } from "./version";
+import { DXT_BUNDLE_BASE64, DXT_BUNDLE_SHA } from "./dxt-bundle";
 import { APIClient } from "@absmartly/cli/api-client";
 import type { CustomSectionField } from "@absmartly/cli/api-client";
 import { FetchHttpClient } from "./fetch-adapter";
@@ -603,6 +604,27 @@ export default {
             }), {
                 headers: {
                     'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                }
+            });
+        }
+
+        if (url.pathname === '/absmartly-mcp.dxt') {
+            const binary = atob(DXT_BUNDLE_BASE64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            if (request.headers.get('If-None-Match') === `"${DXT_BUNDLE_SHA}"`) {
+                return new Response(null, { status: 304, headers: { 'ETag': `"${DXT_BUNDLE_SHA}"` } });
+            }
+            return new Response(bytes, {
+                headers: {
+                    'Content-Type': 'application/octet-stream',
+                    'Content-Disposition': 'attachment; filename="absmartly-mcp.dxt"',
+                    'Content-Length': bytes.length.toString(),
+                    'Cache-Control': 'public, max-age=600',
+                    'ETag': `"${DXT_BUNDLE_SHA}"`,
                     'Access-Control-Allow-Origin': '*'
                 }
             });

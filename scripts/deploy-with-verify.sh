@@ -1,15 +1,10 @@
 #!/bin/bash
-# Build + deploy + verify the DXT, working around a wrangler asset bug.
+# Build + deploy + verify the DXT.
 #
-# Observed bug (cloudflare/workers-sdk#9157 and related):
-#   On a single `wrangler deploy`, new static assets are uploaded but the new
-#   worker version is published with the PREVIOUS asset manifest. The asset
-#   survives briefly in edge cache, then evicts to 404 after a few minutes.
-#   A second `wrangler deploy` creates a fresh worker version that DOES
-#   reference the uploaded assets, fixing the issue permanently.
-#
-# Workaround: always deploy twice when assets changed, then verify the live
-# bytes match the local build. Fail the deploy if they don't.
+# The DXT is bundled into the worker code (not served as a static asset)
+# because wrangler's static asset binding is unreliable for newly uploaded
+# files (cloudflare/workers-sdk#9157). Embedding makes the served bytes
+# part of the worker version, guaranteed to ship atomically.
 set -e
 
 GREEN='\033[0;32m'
@@ -18,7 +13,7 @@ YELLOW='\033[0;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-DXT_LOCAL_PATH="public/absmartly-mcp.dxt"
+DXT_LOCAL_PATH="dist/absmartly-mcp.dxt"
 DXT_PUBLIC_URL="https://mcp.absmartly.com/absmartly-mcp.dxt"
 PROPAGATION_WAIT_SECONDS=8
 MAX_VERIFY_ATTEMPTS=3
@@ -31,13 +26,7 @@ fi
 LOCAL_SHA=$(shasum "$DXT_LOCAL_PATH" | cut -d' ' -f1)
 echo -e "${BLUE}🔐 Local DXT SHA: $LOCAL_SHA${NC}"
 
-echo -e "${BLUE}🚀 Deploy 1/2 — uploads any changed static assets${NC}"
-npx wrangler deploy
-
-echo -e "${BLUE}⏳ Waiting ${PROPAGATION_WAIT_SECONDS}s before second deploy...${NC}"
-sleep $PROPAGATION_WAIT_SECONDS
-
-echo -e "${BLUE}🚀 Deploy 2/2 — ensures the worker version references the uploaded assets${NC}"
+echo -e "${BLUE}🚀 Deploying worker (DXT embedded in bundle)${NC}"
 npx wrangler deploy
 
 echo -e "${BLUE}⏳ Waiting ${PROPAGATION_WAIT_SECONDS}s for edge propagation...${NC}"
