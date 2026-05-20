@@ -781,6 +781,15 @@ export default {
             );
         }
 
+        if (url.pathname.startsWith("/mcp")) {
+            return await handleMcpTransportRequest(
+                request, env, ctx,
+                { pathPrefix: "/mcp", handler: streamableMcpHandler },
+                { apiKey, endpoint },
+                clientFingerprint
+            );
+        }
+
         if (url.pathname === '/register' && request.method === 'POST') {
             const pendingEndpoint = await safeKvGet(env.OAUTH_KV, `oauth_endpoint_pending:${clientFingerprint}`);
             const response = await oauthProvider.fetch(request, env, ctx);
