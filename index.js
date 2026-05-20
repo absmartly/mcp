@@ -1,20 +1,18 @@
 #!/usr/bin/env node
 
-// This is a minimal entry point for the DXT extension
-// The actual MCP server runs via mcp-remote
+// Minimal entry point for the DXT/MCPB extension.
+// The actual MCP server runs remotely; this just bridges stdio → mcp-remote.
 
 const { spawn } = require('child_process');
 
-// Get the configuration from environment variables (set by Claude Desktop)
-const config = process.env.DXT_CONFIG ? JSON.parse(process.env.DXT_CONFIG) : {};
-const absmartlyEndpoint = config.absmartly_endpoint || 'https://sandbox.absmartly.com';
+const DEFAULT_ABSMARTLY_ENDPOINT = 'https://sandbox.absmartly.com';
 
-// Construct the mcp-remote command with query parameter
+// ABSMARTLY_ENDPOINT is wired in manifest.json via "${user_config.absmartly_endpoint}".
+const absmartlyEndpoint = process.env.ABSMARTLY_ENDPOINT || DEFAULT_ABSMARTLY_ENDPOINT;
+
 const url = `https://mcp.absmartly.com/sse?absmartly-endpoint=${encodeURIComponent(absmartlyEndpoint)}`;
-const args = ['mcp-remote', url];
 
-// Execute mcp-remote
-const child = spawn('npx', args, {
+const child = spawn('npx', ['mcp-remote', url], {
   stdio: 'inherit',
   shell: true
 });

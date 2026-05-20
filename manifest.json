@@ -1,52 +1,23 @@
 {
   "dxt_version": "0.1",
   "name": "absmartly-mcp",
-  "displayName": "ABsmartly MCP Server",
+  "display_name": "ABsmartly MCP Server",
   "version": "1.0.0",
-  "description": "A Model Context Protocol (MCP) server that provides seamless access to the ABsmartly experimentation platform for A/B testing, feature flags, and analytics. Includes 25+ tools for experiment management, analytics, and team collaboration.",
+  "description": "Full access to the ABsmartly experimentation platform — 230+ commands across 33 groups including experiment lifecycle, metrics, goals, teams, and feature flags.",
   "author": {
     "name": "ABsmartly",
-    "email": "support@absmartly.com"
+    "email": "support@absmartly.com",
+    "url": "https://www.absmartly.com"
   },
   "license": "MIT",
-  "homepage": "https://github.com/absmartly/absmartly-mcp",
+  "homepage": "https://github.com/absmartly/mcp",
+  "documentation": "https://github.com/absmartly/mcp#readme",
+  "support": "https://github.com/absmartly/mcp/issues",
   "repository": {
     "type": "git",
-    "url": "https://github.com/absmartly/absmartly-mcp"
+    "url": "https://github.com/absmartly/mcp"
   },
-  
-  "server": {
-    "type": "node",
-    "entry_point": "index.js",
-    "mcp_config": {
-      "command": "node",
-      "args": ["index.js"]
-    }
-  },
-  
-  "config": {
-    "fields": {
-      "absmartly_endpoint": {
-        "type": "string",
-        "label": "ABsmartly API Endpoint",
-        "description": "Your ABsmartly API endpoint (e.g., https://sandbox.absmartly.com or https://dev-1.absmartly.com)",
-        "default": "https://sandbox.absmartly.com",
-        "required": true,
-        "placeholder": "https://your-instance.absmartly.com"
-      }
-    }
-  },
-  
-  "permissions": {
-    "network": {
-      "domains": [
-        "mcp.absmartly.com",
-        "*.absmartly.com",
-        "*.absmartly.cloud"
-      ]
-    }
-  },
-  
+  "icon": "icon.png",
   "keywords": [
     "absmartly",
     "ab-testing",
@@ -56,45 +27,42 @@
     "mcp",
     "model-context-protocol"
   ],
-  
-  "capabilities": {
-    "tools": [
-      "configure_absmartly",
-      "list_experiments",
-      "get_experiment",
-      "create_experiment",
-      "create_feature_flag",
-      "start_experiment",
-      "stop_experiment",
-      "update_experiment",
-      "list_goals",
-      "list_metrics",
-      "list_users",
-      "list_teams",
-      "get_goal",
-      "get_metric",
-      "get_user",
-      "get_team",
-      "create_goal",
-      "create_metric",
-      "create_user",
-      "create_team",
-      "update_goal",
-      "update_metric",
-      "update_user",
-      "update_team",
-      "custom_request"
-    ],
-    "resources": [
-      "experiment-results",
-      "analytics-data",
-      "user-management",
-      "team-management"
-    ],
-    "prompts": [
-      "experiment-analysis",
-      "feature-flag-strategy",
-      "ab-test-recommendations"
-    ]
-  }
+  "server": {
+    "type": "node",
+    "entry_point": "index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/index.js"],
+      "env": {
+        "ABSMARTLY_ENDPOINT": "${user_config.absmartly_endpoint}"
+      }
+    }
+  },
+  "user_config": {
+    "absmartly_endpoint": {
+      "type": "string",
+      "title": "ABsmartly API Endpoint",
+      "description": "Your ABsmartly instance URL (e.g., https://demo-1.absmartly.com or https://your-company.absmartly.com)",
+      "default": "https://sandbox.absmartly.com",
+      "required": true
+    }
+  },
+  "tools": [
+    {
+      "name": "discover_commands",
+      "description": "Browse available command groups or search by keyword"
+    },
+    {
+      "name": "get_command_docs",
+      "description": "Get detailed documentation for a specific command"
+    },
+    {
+      "name": "execute_command",
+      "description": "Execute any ABsmartly command with typed parameters"
+    },
+    {
+      "name": "get_auth_status",
+      "description": "Check current authentication status"
+    }
+  ]
 }
