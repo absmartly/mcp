@@ -17,6 +17,10 @@ export const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
 } as const;
 
+export const SSE_PATH = "/sse";
+export const MCP_PATH = "/mcp";
+export const TRANSPORT_PREFIXES = [SSE_PATH, MCP_PATH] as const;
+
 export type ABsmartlyProps = {
   email: string;
   name: string;
@@ -103,7 +107,7 @@ export function detectApiKey(
   const url = new URL(request.url);
   const authHeader = request.headers.get("Authorization");
 
-  const endpointFromPath = extractEndpointFromPath(url.pathname, ['/sse', '/mcp']);
+  const endpointFromPath = extractEndpointFromPath(url.pathname, TRANSPORT_PREFIXES);
 
   const apiKeyFromQuery = url.searchParams.get("api_key") || url.searchParams.get("apikey");
   if (apiKeyFromQuery) {

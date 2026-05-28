@@ -25,6 +25,8 @@ import {
     API_KEY_SESSION_TTL_SECONDS,
     SESSION_TTL_SECONDS,
     OAUTH_STATE_TTL_SECONDS,
+    SSE_PATH,
+    MCP_PATH,
     normalizeBaseUrl,
     extractEndpointFromPath,
     detectApiKey,
@@ -544,11 +546,11 @@ async function verifyApiKey(apiKey: string, endpoint: string): Promise<{ ok: boo
     }
 }
 
-const sseMcpHandler = ABsmartlyMCP.serveSSE("/sse", {
+const sseMcpHandler = ABsmartlyMCP.serveSSE(SSE_PATH, {
     corsOptions: MCP_CORS_OPTIONS
 });
 
-const streamableMcpHandler = ABsmartlyMCP.serve("/mcp", {
+const streamableMcpHandler = ABsmartlyMCP.serve(MCP_PATH, {
     corsOptions: MCP_CORS_OPTIONS
 });
 
@@ -556,8 +558,8 @@ const oauthHandler = new ABsmartlyOAuthHandler();
 
 const oauthProvider = new OAuthProvider({
     apiHandlers: {
-        "/sse": sseMcpHandler,
-        "/mcp": streamableMcpHandler
+        [SSE_PATH]: sseMcpHandler,
+        [MCP_PATH]: streamableMcpHandler
     },
     authorizeEndpoint: "/authorize",
     tokenEndpoint: "/token",
@@ -775,19 +777,19 @@ export default {
             }
         }
 
-        if (url.pathname.startsWith("/sse")) {
+        if (url.pathname.startsWith(SSE_PATH)) {
             return await handleMcpTransportRequest(
                 request, env, ctx,
-                { pathPrefix: "/sse", handler: sseMcpHandler },
+                { pathPrefix: SSE_PATH, handler: sseMcpHandler },
                 { apiKey, endpoint },
                 clientFingerprint
             );
         }
 
-        if (url.pathname.startsWith("/mcp")) {
+        if (url.pathname.startsWith(MCP_PATH)) {
             return await handleMcpTransportRequest(
                 request, env, ctx,
-                { pathPrefix: "/mcp", handler: streamableMcpHandler },
+                { pathPrefix: MCP_PATH, handler: streamableMcpHandler },
                 { apiKey, endpoint },
                 clientFingerprint
             );

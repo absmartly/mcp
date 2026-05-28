@@ -444,7 +444,7 @@ Gemini Enterprise's **Custom MCP Server** connector (Preview) requires Streamabl
 5. Save and wait for the connector status to become **Active**.
 
 > SSE transport (`/sse`) is **not** supported by this connector. The legacy Gemini CLI / Code Assist sections above continue to use `/sse` until those clients add Streamable HTTP support.
-
+>
 > Reload the IDE window after editing settings (VS Code: Command Palette → **Developer: Reload Window**). MCP support in Code Assist requires **agent preview mode** — set `"geminicodeassist.updateChannel": "Insiders"` in VS Code settings if not already enabled.
 
 ### Option 7: ChatGPT (Developer Mode)
