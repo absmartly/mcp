@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Build + deploy + verify the DXT.
 #
 # The DXT is bundled into the worker code (not served as a static asset)

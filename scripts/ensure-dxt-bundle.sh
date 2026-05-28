@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Writes a minimal src/dxt-bundle.ts stub when the real file does not exist.
 #
 # scripts/build-dxt.sh generates src/dxt-bundle.ts during local `npm run deploy`,
