@@ -20,6 +20,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Ensure DXT bundle stub for typecheck
+        run: ./scripts/ensure-dxt-bundle.sh
+
       - name: Typecheck
         run: npm run typecheck
 

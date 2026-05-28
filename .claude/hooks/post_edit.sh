@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Only deploy if we're editing TypeScript files in the src directory
 if [[ "$1" == *"/src/"* && "$1" == *".ts" ]]; then
