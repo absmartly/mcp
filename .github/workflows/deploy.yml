@@ -18,6 +18,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Build DXT bundle
+        run: ./scripts/build-dxt.sh
+
       - name: Typecheck
         run: npm run typecheck
 
@@ -25,6 +28,6 @@ jobs:
         run: npm run test:unit
 
       - name: Deploy to Cloudflare Workers
-        run: npx wrangler deploy
+        run: ./scripts/deploy-with-verify.sh
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
