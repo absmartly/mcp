@@ -14,7 +14,7 @@
 import { execFileSync, spawn } from 'child_process';
 import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { resolveTestCredentials } from './test-credentials.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -471,5 +471,9 @@ After ALL steps, return ONLY a JSON object with this exact format:
   return { success: failed === 0, passed, failed, results };
 }
 
-const result = await run();
-process.exit(result.success ? 0 : 1);
+export default run;
+
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const result = await run();
+  process.exit(result.success ? 0 : 1);
+}

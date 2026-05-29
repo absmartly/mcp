@@ -17,7 +17,7 @@
 import { execFileSync } from 'child_process';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CLAUDE_TESTS_DIR = join(__dirname, 'claude-tests');
@@ -182,7 +182,25 @@ function assertToolResult(result, check, label) {
   throw new Error(`${label}: ${context}`);
 }
 
+async function isLocalMcpReachable() {
+  if (LIVE_MODE) return true;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1500);
+    await fetch(MCP_URL, { signal: controller.signal });
+    clearTimeout(timer);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function run() {
+  if (!(await isLocalMcpReachable())) {
+    console.log(`\n  Skipped: local MCP not reachable at ${MCP_URL}. Start wrangler dev or pass --live.`);
+    return { success: true, message: 'Skipped: local MCP not reachable', testCount: 0, details: [] };
+  }
+
   let passed = 0;
   let failed = 0;
   const results = [];
@@ -668,5 +686,9 @@ After ALL steps, return ONLY a JSON object: {"categories_found": true, "docs_fou
   return { success: failed === 0, passed, failed, results };
 }
 
-const result = await run();
-process.exit(result.success ? 0 : 1);
+export default run;
+
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const result = await run();
+  process.exit(result.success ? 0 : 1);
+}
