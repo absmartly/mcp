@@ -13,6 +13,8 @@ import {
   DEFAULT_ABSMARTLY_DOMAIN,
 } from '../../src/shared';
 
+const TEST_API_KEY = 'test-api-key-fixture';
+
 export default async function run() {
   let passed = 0;
   let failed = 0;
@@ -89,6 +91,30 @@ export default async function run() {
   });
   test('extractEndpointFromPath keeps dotted hostname as-is', () => {
     assert.strictEqual(extractEndpointFromPath('/sse/custom.example.com', '/sse'), 'https://custom.example.com');
+  });
+  test('extractEndpointFromPath returns null for /mcp without trailing content', () => {
+    assert.strictEqual(extractEndpointFromPath('/mcp/', '/mcp'), null);
+  });
+  test('extractEndpointFromPath appends domain for /mcp shortname', () => {
+    assert.strictEqual(extractEndpointFromPath('/mcp/dev1', '/mcp'), `https://dev1.${DEFAULT_ABSMARTLY_DOMAIN}`);
+  });
+  test('extractEndpointFromPath keeps dotted /mcp hostname as-is', () => {
+    assert.strictEqual(extractEndpointFromPath('/mcp/custom.example.com', '/mcp'), 'https://custom.example.com');
+  });
+  test('extractEndpointFromPath accepts an array of prefixes and matches /sse', () => {
+    assert.strictEqual(
+      extractEndpointFromPath('/sse/dev1', ['/sse', '/mcp']),
+      `https://dev1.${DEFAULT_ABSMARTLY_DOMAIN}`
+    );
+  });
+  test('extractEndpointFromPath accepts an array of prefixes and matches /mcp', () => {
+    assert.strictEqual(
+      extractEndpointFromPath('/mcp/dev1', ['/sse', '/mcp']),
+      `https://dev1.${DEFAULT_ABSMARTLY_DOMAIN}`
+    );
+  });
+  test('extractEndpointFromPath returns null when none of the prefixes match', () => {
+    assert.strictEqual(extractEndpointFromPath('/other/dev1', ['/sse', '/mcp']), null);
   });
 
   test('escapeHtml escapes all special chars', () => {
@@ -168,6 +194,30 @@ export default async function run() {
     const result = detectApiKey(req);
     assert.strictEqual(result.apiKey, 'my-key');
     assert.strictEqual(result.endpoint, DEFAULT_ABSMARTLY_ENDPOINT);
+  });
+
+  test('detectApiKey extracts endpoint from /mcp path with Authorization header', () => {
+    const request = new Request('https://mcp.absmartly.com/mcp/demo-1', {
+      headers: { 'Authorization': TEST_API_KEY }
+    });
+    const result = detectApiKey(request);
+    assert.strictEqual(result.apiKey, TEST_API_KEY);
+    assert.strictEqual(result.endpoint, `https://demo-1.${DEFAULT_ABSMARTLY_DOMAIN}`);
+  });
+
+  test('detectApiKey extracts endpoint from /mcp path with api_key query param', () => {
+    const request = new Request(`https://mcp.absmartly.com/mcp/demo-1?api_key=${TEST_API_KEY}`);
+    const result = detectApiKey(request);
+    assert.strictEqual(result.apiKey, TEST_API_KEY);
+    assert.strictEqual(result.endpoint, `https://demo-1.${DEFAULT_ABSMARTLY_DOMAIN}`);
+  });
+
+  test('detectApiKey still extracts endpoint from /sse path (regression guard)', () => {
+    const request = new Request('https://mcp.absmartly.com/sse/demo-1', {
+      headers: { 'Authorization': TEST_API_KEY }
+    });
+    const result = detectApiKey(request);
+    assert.strictEqual(result.endpoint, `https://demo-1.${DEFAULT_ABSMARTLY_DOMAIN}`);
   });
 
   await asyncTest('safeKvPut does nothing when kv is undefined', async () => {

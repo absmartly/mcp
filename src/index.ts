@@ -25,6 +25,8 @@ import {
     API_KEY_SESSION_TTL_SECONDS,
     SESSION_TTL_SECONDS,
     OAUTH_STATE_TTL_SECONDS,
+    SSE_PATH,
+    MCP_PATH,
     normalizeBaseUrl,
     extractEndpointFromPath,
     detectApiKey,
@@ -34,6 +36,12 @@ import {
 
 const ENTITY_LIST_PAGE_SIZE = 100;
 const ENTITY_LIST_FIRST_PAGE = 1;
+
+const MCP_CORS_OPTIONS = {
+    origin: "*",
+    methods: "GET, POST, OPTIONS",
+    headers: "Content-Type, Authorization, Accept",
+} as const;
 
 export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartlyProps> {
     server = new McpServer(
@@ -538,13 +546,20 @@ async function verifyApiKey(apiKey: string, endpoint: string): Promise<{ ok: boo
     }
 }
 
-const baseMcpHandler = ABsmartlyMCP.mount("/sse");
+const sseMcpHandler = ABsmartlyMCP.serveSSE(SSE_PATH, {
+    corsOptions: MCP_CORS_OPTIONS
+});
+
+const streamableMcpHandler = ABsmartlyMCP.serve(MCP_PATH, {
+    corsOptions: MCP_CORS_OPTIONS
+});
 
 const oauthHandler = new ABsmartlyOAuthHandler();
 
 const oauthProvider = new OAuthProvider({
     apiHandlers: {
-        "/sse": baseMcpHandler
+        [SSE_PATH]: sseMcpHandler,
+        [MCP_PATH]: streamableMcpHandler
     },
     authorizeEndpoint: "/authorize",
     tokenEndpoint: "/token",
@@ -593,6 +608,120 @@ const oauthProvider = new OAuthProvider({
         return null;
     },
 } as any);
+
+type McpTransportRoute = {
+    pathPrefix: string;
+    handler: { fetch: (request: Request, env: any, ctx: any) => Promise<Response> };
+};
+
+function isTransportPath(pathname: string, prefix: string): boolean {
+    return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
+function extractEndpointFromResourceParam(resourceParam: string | null): string | null {
+    if (!resourceParam) return null;
+    try {
+        return new URL(resourceParam).searchParams.get('absmartly-endpoint');
+    } catch {
+        return null;
+    }
+}
+
+async function handleMcpTransportRequest(
+    request: Request,
+    env: any,
+    ctx: any,
+    route: McpTransportRoute,
+    detected: { apiKey: string | null; endpoint: string | null },
+    clientFingerprint: string
+): Promise<Response> {
+    const url = new URL(request.url);
+    const { apiKey, endpoint } = detected;
+
+    if (apiKey) {
+        debug(`API key detected on ${route.pathPrefix}, bypassing OAuth flow`);
+
+        try {
+            const verifyResult = await verifyApiKey(apiKey, endpoint || DEFAULT_ABSMARTLY_ENDPOINT);
+
+            if (!verifyResult.ok) {
+                const isTransient = verifyResult.error === 'server_error' || verifyResult.error === 'network_error';
+                console.error(`Failed to verify API key: ${verifyResult.error}`);
+                return new Response(isTransient ? "ABsmartly service temporarily unavailable" : "Unauthorized", {
+                    status: isTransient ? 503 : 401,
+                    headers: CORS_HEADERS,
+                });
+            }
+
+            const userData = verifyResult.user;
+            const userId = userData.id?.toString() || userData.email;
+
+            if (!userData.email) {
+                debug('No email found in API response for API key authentication, user data:', userData);
+            }
+
+            const props: ABsmartlyProps = {
+                email: userData.email || DEFAULT_API_KEY_USER_EMAIL,
+                name: `${userData.first_name || ''} ${userData.last_name || ''}`.trim() || userData.email || DEFAULT_API_KEY_USER_NAME,
+                absmartly_endpoint: endpoint || DEFAULT_ABSMARTLY_ENDPOINT,
+                absmartly_api_key: apiKey,
+                user_id: userId
+            };
+
+            debug(`API key authenticated for user: ${props.email}`);
+
+            const session = {
+                userId,
+                email: props.email,
+                name: props.name,
+                absmartly_endpoint: props.absmartly_endpoint,
+                absmartly_api_key: apiKey,
+                createdAt: Date.now(),
+                expiresAt: Date.now() + (SESSION_TTL_SECONDS * 1000)
+            };
+
+            await safeKvPut(env.OAUTH_KV, `session:${userId}`, JSON.stringify(session), {
+                expirationTtl: SESSION_TTL_SECONDS,
+            });
+
+            ctx.props = props;
+            return await route.handler.fetch(request, env, ctx);
+        } catch (error) {
+            console.error("Error during API key authentication:", error);
+            return new Response("Internal Server Error", {
+                status: 500,
+                headers: CORS_HEADERS,
+            });
+        }
+    }
+
+    const authHeader = request.headers.get("Authorization");
+
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        debug(`No valid Authorization header on ${route.pathPrefix}, returning 401 to trigger OAuth flow`);
+
+        const requestedEndpoint = url.searchParams.get('absmartly-endpoint') ||
+            extractEndpointFromResourceParam(url.searchParams.get('resource')) ||
+            request.headers.get('x-absmartly-endpoint') ||
+            extractEndpointFromPath(url.pathname, route.pathPrefix) ||
+            endpoint;
+        if (requestedEndpoint) {
+            await safeKvPut(env.OAUTH_KV, `oauth_endpoint_pending:${clientFingerprint}`, requestedEndpoint, {
+                expirationTtl: OAUTH_STATE_TTL_SECONDS,
+            });
+        }
+
+        return new Response("Unauthorized", {
+            status: 401,
+            headers: {
+                ...CORS_HEADERS,
+                "WWW-Authenticate": 'Bearer realm="OAuth"',
+            },
+        });
+    }
+
+    return await oauthProvider.fetch(request, env, ctx);
+}
 
 export default {
     async fetch(request: Request, env: any, ctx: any): Promise<Response> {
@@ -662,90 +791,22 @@ export default {
             }
         }
 
-        if (url.pathname.startsWith("/sse")) {
-            if (apiKey) {
-                debug("API key detected, bypassing OAuth flow");
+        if (isTransportPath(url.pathname, SSE_PATH)) {
+            return await handleMcpTransportRequest(
+                request, env, ctx,
+                { pathPrefix: SSE_PATH, handler: sseMcpHandler },
+                { apiKey, endpoint },
+                clientFingerprint
+            );
+        }
 
-                try {
-                    const verifyResult = await verifyApiKey(apiKey, endpoint || DEFAULT_ABSMARTLY_ENDPOINT);
-
-                    if (!verifyResult.ok) {
-                        const isTransient = verifyResult.error === 'server_error' || verifyResult.error === 'network_error';
-                        console.error(`Failed to verify API key: ${verifyResult.error}`);
-                        return new Response(isTransient ? "ABsmartly service temporarily unavailable" : "Unauthorized", {
-                            status: isTransient ? 503 : 401,
-                            headers: CORS_HEADERS,
-                        });
-                    }
-
-                    const userData = verifyResult.user;
-                    const userId = userData.id?.toString() || userData.email;
-
-                    if (!userData.email) {
-                        debug('No email found in API response for API key authentication, user data:', userData);
-                    }
-
-                    const props: ABsmartlyProps = {
-                        email: userData.email || DEFAULT_API_KEY_USER_EMAIL,
-                        name: `${userData.first_name || ''} ${userData.last_name || ''}`.trim() || userData.email || DEFAULT_API_KEY_USER_NAME,
-                        absmartly_endpoint: endpoint || DEFAULT_ABSMARTLY_ENDPOINT,
-                        absmartly_api_key: apiKey,
-                        user_id: userId
-                    };
-
-                    debug(`API key authenticated for user: ${props.email}`);
-
-                    const session = {
-                        userId: userId,
-                        email: props.email,
-                        name: props.name,
-                        absmartly_endpoint: props.absmartly_endpoint,
-                        absmartly_api_key: apiKey,
-                        createdAt: Date.now(),
-                        expiresAt: Date.now() + (SESSION_TTL_SECONDS * 1000)
-                    };
-
-                    await safeKvPut(env.OAUTH_KV, `session:${userId}`, JSON.stringify(session), {
-                        expirationTtl: SESSION_TTL_SECONDS,
-                    });
-
-                    ctx.props = props;
-                    return await baseMcpHandler.fetch(request, env, ctx);
-
-                } catch (error) {
-                    console.error("Error during API key authentication:", error);
-                    return new Response("Internal Server Error", {
-                        status: 500,
-                        headers: CORS_HEADERS,
-                    });
-                }
-            }
-
-            const authHeader = request.headers.get("Authorization");
-
-            if (!authHeader || !authHeader.startsWith("Bearer ")) {
-                debug("No valid Authorization header, returning 401 to trigger OAuth flow");
-
-                const requestedEndpoint = url.searchParams.get('absmartly-endpoint') ||
-                    request.headers.get('x-absmartly-endpoint') ||
-                    extractEndpointFromPath(url.pathname, '/sse') ||
-                    endpoint;
-                if (requestedEndpoint) {
-                    await safeKvPut(env.OAUTH_KV, `oauth_endpoint_pending:${clientFingerprint}`, requestedEndpoint, {
-                        expirationTtl: OAUTH_STATE_TTL_SECONDS,
-                    });
-                }
-
-                return new Response("Unauthorized", {
-                    status: 401,
-                    headers: {
-                        ...CORS_HEADERS,
-                        "WWW-Authenticate": 'Bearer realm="OAuth"',
-                    },
-                });
-            }
-
-            return await oauthProvider.fetch(request, env, ctx);
+        if (isTransportPath(url.pathname, MCP_PATH)) {
+            return await handleMcpTransportRequest(
+                request, env, ctx,
+                { pathPrefix: MCP_PATH, handler: streamableMcpHandler },
+                { apiKey, endpoint },
+                clientFingerprint
+            );
         }
 
         if (url.pathname === '/register' && request.method === 'POST') {

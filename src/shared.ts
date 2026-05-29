@@ -17,6 +17,10 @@ export const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
 } as const;
 
+export const SSE_PATH = "/sse";
+export const MCP_PATH = "/mcp";
+export const TRANSPORT_PREFIXES = [SSE_PATH, MCP_PATH] as const;
+
 export type ABsmartlyProps = {
   email: string;
   name: string;
@@ -38,12 +42,16 @@ export function buildAuthHeader(authToken: string, isApiKey: boolean): Record<st
   };
 }
 
-export function extractEndpointFromPath(pathname: string, prefix: string): string | null {
-  if (!pathname.startsWith(prefix + '/')) return null;
-  const hostPart = pathname.slice(prefix.length + 1).replace(/\/+$/, '');
-  if (!hostPart) return null;
-  const host = hostPart.includes('.') ? hostPart : `${hostPart}.${DEFAULT_ABSMARTLY_DOMAIN}`;
-  return `https://${host}`;
+export function extractEndpointFromPath(pathname: string, prefix: string | readonly string[]): string | null {
+  const prefixes = Array.isArray(prefix) ? prefix : [prefix];
+  for (const p of prefixes) {
+    if (!pathname.startsWith(p + '/')) continue;
+    const hostPart = pathname.slice(p.length + 1).replace(/\/+$/, '');
+    if (!hostPart) continue;
+    const host = hostPart.includes('.') ? hostPart : `${hostPart}.${DEFAULT_ABSMARTLY_DOMAIN}`;
+    return `https://${host}`;
+  }
+  return null;
 }
 
 export function pickDefined(source: Record<string, unknown>, keys: string[]): Record<string, unknown> {
@@ -99,7 +107,7 @@ export function detectApiKey(
   const url = new URL(request.url);
   const authHeader = request.headers.get("Authorization");
 
-  const endpointFromPath = extractEndpointFromPath(url.pathname, '/sse');
+  const endpointFromPath = extractEndpointFromPath(url.pathname, TRANSPORT_PREFIXES);
 
   const apiKeyFromQuery = url.searchParams.get("api_key") || url.searchParams.get("apikey");
   if (apiKeyFromQuery) {
