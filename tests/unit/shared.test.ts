@@ -13,6 +13,8 @@ import {
   DEFAULT_ABSMARTLY_DOMAIN,
 } from '../../src/shared';
 
+const TEST_API_KEY = 'test-api-key-fixture';
+
 export default async function run() {
   let passed = 0;
   let failed = 0;
@@ -196,23 +198,23 @@ export default async function run() {
 
   test('detectApiKey extracts endpoint from /mcp path with Authorization header', () => {
     const request = new Request('https://mcp.absmartly.com/mcp/demo-1', {
-      headers: { 'Authorization': 'BxYKd1U2_abc123' }
+      headers: { 'Authorization': TEST_API_KEY }
     });
     const result = detectApiKey(request);
-    assert.strictEqual(result.apiKey, 'BxYKd1U2_abc123');
+    assert.strictEqual(result.apiKey, TEST_API_KEY);
     assert.strictEqual(result.endpoint, `https://demo-1.${DEFAULT_ABSMARTLY_DOMAIN}`);
   });
 
   test('detectApiKey extracts endpoint from /mcp path with api_key query param', () => {
-    const request = new Request('https://mcp.absmartly.com/mcp/demo-1?api_key=BxYKd1U2_abc123');
+    const request = new Request(`https://mcp.absmartly.com/mcp/demo-1?api_key=${TEST_API_KEY}`);
     const result = detectApiKey(request);
-    assert.strictEqual(result.apiKey, 'BxYKd1U2_abc123');
+    assert.strictEqual(result.apiKey, TEST_API_KEY);
     assert.strictEqual(result.endpoint, `https://demo-1.${DEFAULT_ABSMARTLY_DOMAIN}`);
   });
 
   test('detectApiKey still extracts endpoint from /sse path (regression guard)', () => {
     const request = new Request('https://mcp.absmartly.com/sse/demo-1', {
-      headers: { 'Authorization': 'BxYKd1U2_abc123' }
+      headers: { 'Authorization': TEST_API_KEY }
     });
     const result = detectApiKey(request);
     assert.strictEqual(result.endpoint, `https://demo-1.${DEFAULT_ABSMARTLY_DOMAIN}`);

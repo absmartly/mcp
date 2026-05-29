@@ -614,6 +614,19 @@ type McpTransportRoute = {
     handler: { fetch: (request: Request, env: any, ctx: any) => Promise<Response> };
 };
 
+function isTransportPath(pathname: string, prefix: string): boolean {
+    return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
+function extractEndpointFromResourceParam(resourceParam: string | null): string | null {
+    if (!resourceParam) return null;
+    try {
+        return new URL(resourceParam).searchParams.get('absmartly-endpoint');
+    } catch {
+        return null;
+    }
+}
+
 async function handleMcpTransportRequest(
     request: Request,
     env: any,
@@ -688,6 +701,7 @@ async function handleMcpTransportRequest(
         debug(`No valid Authorization header on ${route.pathPrefix}, returning 401 to trigger OAuth flow`);
 
         const requestedEndpoint = url.searchParams.get('absmartly-endpoint') ||
+            extractEndpointFromResourceParam(url.searchParams.get('resource')) ||
             request.headers.get('x-absmartly-endpoint') ||
             extractEndpointFromPath(url.pathname, route.pathPrefix) ||
             endpoint;
@@ -777,7 +791,7 @@ export default {
             }
         }
 
-        if (url.pathname.startsWith(SSE_PATH)) {
+        if (isTransportPath(url.pathname, SSE_PATH)) {
             return await handleMcpTransportRequest(
                 request, env, ctx,
                 { pathPrefix: SSE_PATH, handler: sseMcpHandler },
@@ -786,7 +800,7 @@ export default {
             );
         }
 
-        if (url.pathname.startsWith(MCP_PATH)) {
+        if (isTransportPath(url.pathname, MCP_PATH)) {
             return await handleMcpTransportRequest(
                 request, env, ctx,
                 { pathPrefix: MCP_PATH, handler: streamableMcpHandler },

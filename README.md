@@ -124,7 +124,7 @@ claude mcp add --transport sse --scope user absmartly \
   -H "Authorization:my-subdomain YOUR_API_KEY"
 ```
 
-#### Remote with API Key (Streamable HTTP — recommended for new installs)
+#### Remote with API Key (Streamable HTTP — recommended for new installations)
 
 ```bash
 claude mcp add --transport http --scope user absmartly \

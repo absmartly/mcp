@@ -1,6 +1,8 @@
 import assert from 'node:assert';
 import { extractEndpointFromPath, detectApiKey, DEFAULT_ABSMARTLY_DOMAIN } from '../../src/shared';
 
+const TEST_API_KEY = 'test-api-key-fixture';
+
 export default async function run() {
   let passed = 0;
   let failed = 0;
@@ -14,17 +16,17 @@ export default async function run() {
   // describe: /mcp transport request shape
   test('detectApiKey falls back to default endpoint when /mcp path has no subdomain', () => {
     const request = new Request('https://mcp.absmartly.com/mcp', {
-      headers: { 'Authorization': 'BxYKd1U2_abc123' }
+      headers: { 'Authorization': TEST_API_KEY }
     });
     const result = detectApiKey(request);
-    assert.strictEqual(result.apiKey, 'BxYKd1U2_abc123');
+    assert.strictEqual(result.apiKey, TEST_API_KEY);
     assert.strictEqual(result.endpoint, 'https://sandbox.absmartly.com');
   });
 
   test('detectApiKey prefers explicit x-absmartly-endpoint over /mcp path', () => {
     const request = new Request('https://mcp.absmartly.com/mcp/demo-1', {
       headers: {
-        'Authorization': 'BxYKd1U2_abc123',
+        'Authorization': TEST_API_KEY,
         'x-absmartly-endpoint': 'https://override.absmartly.com'
       }
     });
