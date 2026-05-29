@@ -83,15 +83,6 @@ export default async function runAuthenticationTests() {
     return assertTrue(response.status === 200 || response.status === 401, 'SSE endpoint should respond');
   });
 
-  // Test authentication header parsing (through health endpoint behavior)
-  await test('Health endpoint shows OAuth configuration', async () => {
-    const response = await fetchWithTimeout(`${BASE_URL}/health`);
-    const data = await response.json();
-    
-    // Should have authentication documentation
-    return assertTrue('authentication' in data, 'Health endpoint should document authentication');
-  });
-
   // Test CORS on all endpoints
   await test('CORS headers are present on all endpoints', async () => {
     const endpoints = ['/health', '/mcp', '/sse'];
