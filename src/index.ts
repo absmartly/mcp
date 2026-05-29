@@ -213,9 +213,9 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 safeCall('teams', () => this.apiClient!.listTeams()),
                 safeCall('applications', () => this.apiClient!.listApplications()),
                 safeCall('unitTypes', () => this.apiClient!.listUnitTypes()),
-                safeCall('experimentTags', () => this.apiClient!.listExperimentTags(100, 0)),
+                safeCall('experimentTags', () => this.apiClient!.listExperimentTags({ items: 100, page: 1 })),
                 safeCall('metrics', () => this.apiClient!.listMetrics({ items: 100 })),
-                safeCall('goals', () => this.apiClient!.listGoals(100, 0))
+                safeCall('goals', () => this.apiClient!.listGoals({ items: 100, page: 1 }))
             ]);
 
             if (warnings.length > 0) {

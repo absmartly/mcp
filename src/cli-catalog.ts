@@ -667,6 +667,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         description: 'Activate an archived metric',
         params: [
           { name: 'metricId', type: 'number', required: true, description: 'Metric ID' },
+          { name: 'reason', type: 'string', required: true, description: 'Reason for activation' },
         ],
         returns: 'Activation result',
       },
@@ -735,6 +736,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         params: [
           { name: 'metricId', type: 'number', required: true, description: 'Metric ID' },
           { name: 'userId', type: 'number', required: true, description: 'User ID' },
+          { name: 'roleId', type: 'number', required: true, description: 'Asset role ID' },
         ],
         returns: 'Grant result',
       },
@@ -743,6 +745,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         params: [
           { name: 'metricId', type: 'number', required: true, description: 'Metric ID' },
           { name: 'userId', type: 'number', required: true, description: 'User ID' },
+          { name: 'roleId', type: 'number', required: true, description: 'Asset role ID' },
         ],
         returns: 'Revocation result',
       },
@@ -756,6 +759,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         params: [
           { name: 'metricId', type: 'number', required: true, description: 'Metric ID' },
           { name: 'teamId', type: 'number', required: true, description: 'Team ID' },
+          { name: 'roleId', type: 'number', required: true, description: 'Asset role ID' },
         ],
         returns: 'Grant result',
       },
@@ -764,6 +768,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         params: [
           { name: 'metricId', type: 'number', required: true, description: 'Metric ID' },
           { name: 'teamId', type: 'number', required: true, description: 'Team ID' },
+          { name: 'roleId', type: 'number', required: true, description: 'Asset role ID' },
         ],
         returns: 'Revocation result',
       },
@@ -1171,6 +1176,102 @@ export function getTotalCommandCount(): number {
 
 // ─── Command Execution ──────────────────────────────────────────────────────
 
+const METRIC_FIELD_ALIASES: Record<string, string> = {
+  goal_id: 'goalId',
+  format_str: 'formatStr',
+  mean_format_str: 'meanFormatStr',
+  mean_scale: 'meanScale',
+  mean_precision: 'meanPrecision',
+  outlier_limit_method: 'outlierLimitMethod',
+  value_source_property: 'valueSourceProperty',
+  property_filter: 'propertyFilter',
+  retention_time: 'retentionTime',
+  retention_time_reference: 'retentionTimeReference',
+  activity_interval: 'activityInterval',
+  custom_sql: 'customSql',
+  custom_statistics_type: 'customStatisticsType',
+  vr_lookback_interval: 'vrLookbackInterval',
+  relation_kind: 'relationKind',
+  relation_refund_operation: 'relationRefundOperation',
+  relation_foreign_duplicate_operation: 'relationForeignDuplicateOperation',
+  numerator_type: 'numeratorType',
+  denominator_type: 'denominatorType',
+  denominator_goal_id: 'denominatorGoalId',
+  denominator_value_source_property: 'denominatorValueSourceProperty',
+  denominator_property_filter: 'denominatorPropertyFilter',
+  denominator_outlier_limit_method: 'denominatorOutlierLimitMethod',
+  denominator_retention_time: 'denominatorRetentionTime',
+  denominator_retention_time_reference: 'denominatorRetentionTimeReference',
+  denominator_activity_interval: 'denominatorActivityInterval',
+  denominator_custom_sql: 'denominatorCustomSql',
+  denominator_custom_statistics_type: 'denominatorCustomStatisticsType',
+  denominator_vr_lookback_interval: 'denominatorVrLookbackInterval',
+  denominator_relation_kind: 'denominatorRelationKind',
+  denominator_relation_refund_operation: 'denominatorRelationRefundOperation',
+  denominator_relation_foreign_duplicate_operation: 'denominatorRelationForeignDuplicateOperation',
+  ratio_condition: 'ratioCondition',
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeMetricFields(fields: Record<string, unknown>): Record<string, unknown> {
+  const normalized = { ...fields };
+
+  for (const [source, target] of Object.entries(METRIC_FIELD_ALIASES)) {
+    if (normalized[source] !== undefined && normalized[target] === undefined) {
+      normalized[target] = normalized[source];
+    }
+  }
+
+  if (normalized.owner === undefined && Array.isArray(normalized.owners)) {
+    const [firstOwner] = normalized.owners;
+    if (isRecord(firstOwner) && typeof firstOwner.user_id === 'number') {
+      normalized.owner = firstOwner.user_id;
+    }
+  }
+
+  return normalized;
+}
+
+function normalizeMetricCommandParams(command: string, params: Record<string, unknown>): Record<string, unknown> {
+  const normalized = { ...params };
+
+  if (normalized.id === undefined && normalized.metricId !== undefined) {
+    normalized.id = normalized.metricId;
+  }
+
+  if (
+    (command === 'createMetric' || command === 'updateMetric') &&
+    isRecord(normalized.data)
+  ) {
+    const { data, ...rest } = normalized;
+    return normalizeMetricFields({ ...data, ...rest });
+  }
+
+  if (
+    (command === 'addMetricReviewComment' || command === 'replyToMetricReviewComment') &&
+    normalized.message === undefined &&
+    normalized.text !== undefined
+  ) {
+    normalized.message = normalized.text;
+  }
+
+  return normalizeMetricFields(normalized);
+}
+
+function normalizeCommandParams(
+  group: string,
+  command: string,
+  params: Record<string, unknown>
+): Record<string, unknown> {
+  if (group === 'metrics') {
+    return normalizeMetricCommandParams(command, params);
+  }
+  return params;
+}
+
 export async function executeCommand(
   client: APIClient,
   group: string,
@@ -1192,5 +1293,5 @@ export async function executeCommand(
     throw new Error(`Function "${command}" not found in core module "${group}". Available: ${Object.keys(mod).filter(k => typeof mod[k] === 'function').join(', ')}`);
   }
 
-  return fn(client, params);
+  return fn(client, normalizeCommandParams(group, command, params));
 }

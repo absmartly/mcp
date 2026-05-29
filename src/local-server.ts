@@ -226,9 +226,9 @@ async function main() {
         safeCall('teams', () => apiClient.listTeams()),
         safeCall('applications', () => apiClient.listApplications()),
         safeCall('unitTypes', () => apiClient.listUnitTypes()),
-        safeCall('experimentTags', () => apiClient.listExperimentTags(100, 0)),
+        safeCall('experimentTags', () => apiClient.listExperimentTags({ items: 100, page: 1 })),
         safeCall('metrics', () => apiClient.listMetrics({ items: 100 })),
-        safeCall('goals', () => apiClient.listGoals(100, 0)),
+        safeCall('goals', () => apiClient.listGoals({ items: 100, page: 1 })),
     ]);
 
     customFields = rawCustomFields as CustomSectionField[];
