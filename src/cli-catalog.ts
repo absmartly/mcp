@@ -736,7 +736,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         params: [
           { name: 'metricId', type: 'number', required: true, description: 'Metric ID' },
           { name: 'userId', type: 'number', required: true, description: 'User ID' },
-          { name: 'roleId', type: 'number', required: true, description: 'Asset role ID' },
+          { name: 'assetRoleId', type: 'number', required: true, description: 'Asset role ID' },
         ],
         returns: 'Grant result',
       },
@@ -745,7 +745,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         params: [
           { name: 'metricId', type: 'number', required: true, description: 'Metric ID' },
           { name: 'userId', type: 'number', required: true, description: 'User ID' },
-          { name: 'roleId', type: 'number', required: true, description: 'Asset role ID' },
+          { name: 'assetRoleId', type: 'number', required: true, description: 'Asset role ID' },
         ],
         returns: 'Revocation result',
       },
@@ -759,7 +759,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         params: [
           { name: 'metricId', type: 'number', required: true, description: 'Metric ID' },
           { name: 'teamId', type: 'number', required: true, description: 'Team ID' },
-          { name: 'roleId', type: 'number', required: true, description: 'Asset role ID' },
+          { name: 'assetRoleId', type: 'number', required: true, description: 'Asset role ID' },
         ],
         returns: 'Grant result',
       },
@@ -768,7 +768,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         params: [
           { name: 'metricId', type: 'number', required: true, description: 'Metric ID' },
           { name: 'teamId', type: 'number', required: true, description: 'Team ID' },
-          { name: 'roleId', type: 'number', required: true, description: 'Asset role ID' },
+          { name: 'assetRoleId', type: 'number', required: true, description: 'Asset role ID' },
         ],
         returns: 'Revocation result',
       },
@@ -1176,6 +1176,33 @@ export function getTotalCommandCount(): number {
 
 // ─── Command Execution ──────────────────────────────────────────────────────
 
+const METRICS_GROUP = 'metrics';
+const CREATE_METRIC_COMMAND = 'createMetric';
+const UPDATE_METRIC_COMMAND = 'updateMetric';
+const ADD_METRIC_REVIEW_COMMENT_COMMAND = 'addMetricReviewComment';
+const REPLY_TO_METRIC_REVIEW_COMMENT_COMMAND = 'replyToMetricReviewComment';
+const GRANT_METRIC_ACCESS_USER_COMMAND = 'grantMetricAccessUser';
+const REVOKE_METRIC_ACCESS_USER_COMMAND = 'revokeMetricAccessUser';
+const GRANT_METRIC_ACCESS_TEAM_COMMAND = 'grantMetricAccessTeam';
+const REVOKE_METRIC_ACCESS_TEAM_COMMAND = 'revokeMetricAccessTeam';
+
+const METRIC_DATA_COMMANDS = new Set([
+  CREATE_METRIC_COMMAND,
+  UPDATE_METRIC_COMMAND,
+]);
+
+const METRIC_REVIEW_MESSAGE_COMMANDS = new Set([
+  ADD_METRIC_REVIEW_COMMENT_COMMAND,
+  REPLY_TO_METRIC_REVIEW_COMMENT_COMMAND,
+]);
+
+const METRIC_ACCESS_ROLE_COMMANDS = new Set([
+  GRANT_METRIC_ACCESS_USER_COMMAND,
+  REVOKE_METRIC_ACCESS_USER_COMMAND,
+  GRANT_METRIC_ACCESS_TEAM_COMMAND,
+  REVOKE_METRIC_ACCESS_TEAM_COMMAND,
+]);
+
 const METRIC_FIELD_ALIASES: Record<string, string> = {
   goal_id: 'goalId',
   format_str: 'formatStr',
@@ -1235,23 +1262,29 @@ function normalizeMetricFields(fields: Record<string, unknown>): Record<string, 
   return normalized;
 }
 
-function normalizeMetricCommandParams(command: string, params: Record<string, unknown>): Record<string, unknown> {
+export function normalizeMetricCommandParams(command: string, params: Record<string, unknown>): Record<string, unknown> {
   const normalized = { ...params };
 
   if (normalized.id === undefined && normalized.metricId !== undefined) {
     normalized.id = normalized.metricId;
   }
 
-  if (
-    (command === 'createMetric' || command === 'updateMetric') &&
-    isRecord(normalized.data)
-  ) {
+  if (METRIC_ACCESS_ROLE_COMMANDS.has(command)) {
+    if (normalized.assetRoleId === undefined && normalized.roleId !== undefined) {
+      normalized.assetRoleId = normalized.roleId;
+    }
+    if (normalized.roleId === undefined && normalized.assetRoleId !== undefined) {
+      normalized.roleId = normalized.assetRoleId;
+    }
+  }
+
+  if (METRIC_DATA_COMMANDS.has(command) && isRecord(normalized.data)) {
     const { data, ...rest } = normalized;
     return normalizeMetricFields({ ...data, ...rest });
   }
 
   if (
-    (command === 'addMetricReviewComment' || command === 'replyToMetricReviewComment') &&
+    METRIC_REVIEW_MESSAGE_COMMANDS.has(command) &&
     normalized.message === undefined &&
     normalized.text !== undefined
   ) {
@@ -1266,7 +1299,7 @@ function normalizeCommandParams(
   command: string,
   params: Record<string, unknown>
 ): Record<string, unknown> {
-  if (group === 'metrics') {
+  if (group === METRICS_GROUP) {
     return normalizeMetricCommandParams(command, params);
   }
   return params;

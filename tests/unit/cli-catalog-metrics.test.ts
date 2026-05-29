@@ -1,4 +1,4 @@
-import { executeCommand } from '../../src/cli-catalog';
+import { executeCommand, normalizeMetricCommandParams } from '../../src/cli-catalog';
 
 export default async function runTests() {
   let passed = 0;
@@ -41,7 +41,50 @@ export default async function runTests() {
     addMetricReviewComment: async (...args: unknown[]) => {
       calls.push({ method: 'addMetricReviewComment', args });
     },
+    grantMetricAccessUser: async (...args: unknown[]) => {
+      calls.push({ method: 'grantMetricAccessUser', args });
+    },
+    revokeMetricAccessTeam: async (...args: unknown[]) => {
+      calls.push({ method: 'revokeMetricAccessTeam', args });
+    },
   };
+
+  const normalizedCreate = normalizeMetricCommandParams('createMetric', {
+    data: {
+      goal_id: 42,
+      owners: [{ user_id: 7 }],
+    },
+  });
+  assertEquals(
+    {
+      goalId: normalizedCreate.goalId,
+      owner: normalizedCreate.owner,
+    },
+    {
+      goalId: 42,
+      owner: 7,
+    },
+    'normalizeMetricCommandParams maps goal_id and owners aliases'
+  );
+
+  const normalizedAccess = normalizeMetricCommandParams('grantMetricAccessUser', {
+    metricId: 7,
+    userId: 2,
+    assetRoleId: 3,
+  });
+  assertEquals(
+    {
+      id: normalizedAccess.id,
+      roleId: normalizedAccess.roleId,
+      assetRoleId: normalizedAccess.assetRoleId,
+    },
+    {
+      id: 7,
+      roleId: 3,
+      assetRoleId: 3,
+    },
+    'normalizeMetricCommandParams accepts assetRoleId for metric access commands'
+  );
 
   await executeCommand(client as any, 'metrics', 'createMetric', {
     data: {
@@ -97,6 +140,28 @@ export default async function runTests() {
     calls.at(-1),
     { method: 'addMetricReviewComment', args: [7, 'Looks good'] },
     'addMetricReviewComment maps text to message'
+  );
+
+  await executeCommand(client as any, 'metrics', 'grantMetricAccessUser', {
+    metricId: 7,
+    userId: 2,
+    assetRoleId: 3,
+  });
+  assertEquals(
+    calls.at(-1),
+    { method: 'grantMetricAccessUser', args: [7, 2, 3] },
+    'grantMetricAccessUser maps assetRoleId to CLI roleId'
+  );
+
+  await executeCommand(client as any, 'metrics', 'revokeMetricAccessTeam', {
+    metricId: 8,
+    teamId: 4,
+    roleId: 5,
+  });
+  assertEquals(
+    calls.at(-1),
+    { method: 'revokeMetricAccessTeam', args: [8, 4, 5] },
+    'revokeMetricAccessTeam preserves roleId for CLI access commands'
   );
 
   return {

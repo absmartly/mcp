@@ -19,6 +19,8 @@ const DEFAULT_PROFILE_NAME = 'default';
 const KEYCHAIN_SERVICE = 'absmartly-cli';
 const KEYCHAIN_ACCOUNT_PREFIX = 'api-key';
 const CREDENTIALS_FILE_PATH = '.config/absmartly/credentials.json';
+const ENTITY_LIST_PAGE_SIZE = 100;
+const ENTITY_LIST_FIRST_PAGE = 1;
 
 interface ProfileConfig {
     endpoint: string;
@@ -226,9 +228,9 @@ async function main() {
         safeCall('teams', () => apiClient.listTeams()),
         safeCall('applications', () => apiClient.listApplications()),
         safeCall('unitTypes', () => apiClient.listUnitTypes()),
-        safeCall('experimentTags', () => apiClient.listExperimentTags({ items: 100, page: 1 })),
-        safeCall('metrics', () => apiClient.listMetrics({ items: 100 })),
-        safeCall('goals', () => apiClient.listGoals({ items: 100, page: 1 })),
+        safeCall('experimentTags', () => apiClient.listExperimentTags({ items: ENTITY_LIST_PAGE_SIZE, page: ENTITY_LIST_FIRST_PAGE })),
+        safeCall('metrics', () => apiClient.listMetrics({ items: ENTITY_LIST_PAGE_SIZE })),
+        safeCall('goals', () => apiClient.listGoals({ items: ENTITY_LIST_PAGE_SIZE, page: ENTITY_LIST_FIRST_PAGE })),
     ]);
 
     customFields = rawCustomFields as CustomSectionField[];
