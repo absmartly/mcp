@@ -32,6 +32,9 @@ import {
     safeKvGet,
 } from "./shared";
 
+const ENTITY_LIST_PAGE_SIZE = 100;
+const ENTITY_LIST_FIRST_PAGE = 1;
+
 export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartlyProps> {
     server = new McpServer(
         {
@@ -213,9 +216,9 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
                 safeCall('teams', () => this.apiClient!.listTeams()),
                 safeCall('applications', () => this.apiClient!.listApplications()),
                 safeCall('unitTypes', () => this.apiClient!.listUnitTypes()),
-                safeCall('experimentTags', () => this.apiClient!.listExperimentTags(100, 0)),
-                safeCall('metrics', () => this.apiClient!.listMetrics({ items: 100 })),
-                safeCall('goals', () => this.apiClient!.listGoals(100, 0))
+                safeCall('experimentTags', () => this.apiClient!.listExperimentTags({ items: ENTITY_LIST_PAGE_SIZE, page: ENTITY_LIST_FIRST_PAGE })),
+                safeCall('metrics', () => this.apiClient!.listMetrics({ items: ENTITY_LIST_PAGE_SIZE })),
+                safeCall('goals', () => this.apiClient!.listGoals({ items: ENTITY_LIST_PAGE_SIZE, page: ENTITY_LIST_FIRST_PAGE }))
             ]);
 
             if (warnings.length > 0) {
