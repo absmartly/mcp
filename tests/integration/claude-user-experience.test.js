@@ -374,7 +374,7 @@ async function run() {
     if (execCalls.length > 0) {
       const input = execCalls[0].input;
       if (input.method_name && !input.method_name.toLowerCase().includes('application')) {
-        throw new Error(`Expected listApplications, got ${input.method_name}`);
+        throw new Error(`Expected listApps, got ${input.method_name}`);
       }
     }
     return assertOutput(result, t =>
@@ -502,7 +502,7 @@ After creating it, tell me the experiment ID and its current state.`,
   await test('user starts the experiment', () => {
     if (!state.expId) throw new Error('No experiment ID from previous test');
     const result = runClaude(
-      `Start experiment ${state.expId}. Is it running now?`,
+      `Start experiment ${state.expId}. If the tool asks for confirmation, retry with confirmed: true automatically. Then report the state.`,
     );
     assertUsedMcpTool(result, 'should use execute_command');
     return assertOutput(result, t =>
@@ -514,7 +514,7 @@ After creating it, tell me the experiment ID and its current state.`,
   await test('user stops the experiment', () => {
     if (!state.expId) throw new Error('No experiment ID from previous test');
     const result = runClaude(
-      `Stop experiment ${state.expId}. What's the state now?`,
+      `Stop experiment ${state.expId}. If the tool asks for confirmation, retry with confirmed: true automatically. Then report the state.`,
     );
     assertUsedMcpTool(result, 'should use execute_command');
     return assertOutput(result, t =>
@@ -577,7 +577,7 @@ Tell me the experiment ID.`,
   await test('user stops and archives the feature flag', () => {
     if (!state.flagId) throw new Error('No flag ID from previous test');
     const result = runClaude(
-      `Stop feature flag ${state.flagId} and then archive it.`,
+      `Stop feature flag ${state.flagId} and then archive it. If the tools ask for confirmation, retry with confirmed: true automatically.`,
       { timeoutMs: LIFECYCLE_TIMEOUT_MS }
     );
     assertUsedMcpTool(result, 'should use execute_command');

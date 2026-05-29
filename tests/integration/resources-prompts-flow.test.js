@@ -97,8 +97,8 @@ async function testResources() {
   console.log('\n📚 Testing Resources...');
   
   const client = new MockMcpClient(`${BASE_URL}/sse`, {
-    'x-absmartly-endpoint': 'https://test.absmartly.com/v1',
-    'x-absmartly-api-key': 'test-key'
+    'x-absmartly-endpoint': process.env.ABSMARTLY_API_ENDPOINT || 'https://test.absmartly.com/v1',
+    'Authorization': process.env.ABSMARTLY_API_KEY || 'test-key'
   });
 
   let passed = 0;
@@ -163,8 +163,8 @@ async function testPrompts() {
   console.log('\n💡 Testing Prompts...');
   
   const client = new MockMcpClient(`${BASE_URL}/sse`, {
-    'x-absmartly-endpoint': 'https://test.absmartly.com/v1',
-    'x-absmartly-api-key': 'test-key'
+    'x-absmartly-endpoint': process.env.ABSMARTLY_API_ENDPOINT || 'https://test.absmartly.com/v1',
+    'Authorization': process.env.ABSMARTLY_API_KEY || 'test-key'
   });
 
   let passed = 0;
@@ -245,6 +245,17 @@ export default async function runResourcesPromptsTests() {
     return {
       success: true,
       message: 'MCP server not reachable - tests skipped',
+      testCount: 0
+    };
+  }
+
+  // Skip if no real credentials are available — the tests need to authenticate
+  // against a live backend to exercise resource/prompt resolution.
+  if (!process.env.ABSMARTLY_API_KEY || !process.env.ABSMARTLY_API_ENDPOINT) {
+    console.log('⚠ ABSMARTLY_API_KEY / ABSMARTLY_API_ENDPOINT not set — skipping resources and prompts tests. (Set them or pass --profile <name> to enable.)');
+    return {
+      success: true,
+      message: 'No credentials available - tests skipped',
       testCount: 0
     };
   }
