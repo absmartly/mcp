@@ -75,30 +75,33 @@ async function run() {
     console.log('\n-- discover_commands schema --\n');
     const discoverTool = tools.tools.find(t => t.name === 'discover_commands')!;
     const discoverProps = Object.keys(discoverTool.inputSchema?.properties || {});
-    assert(discoverProps.includes('category'), 'has category param');
+    assert(discoverProps.includes('group'), 'has group param');
     assert(discoverProps.includes('search'), 'has search param');
     assert(discoverProps.length === 2, `exactly 2 params`, `got: ${discoverProps.join(', ')}`);
 
     console.log('\n-- get_command_docs schema --\n');
     const docsTool = tools.tools.find(t => t.name === 'get_command_docs')!;
     const docsProps = Object.keys(docsTool.inputSchema?.properties || {});
-    assert(docsProps.includes('method_name'), 'has method_name param');
-    assert(docsProps.length === 1, `exactly 1 param`, `got: ${docsProps.join(', ')}`);
+    assert(docsProps.includes('group'), 'has group param');
+    assert(docsProps.includes('command'), 'has command param');
+    assert(docsProps.length === 2, `exactly 2 params`, `got: ${docsProps.join(', ')}`);
     const docsRequired = (docsTool.inputSchema as any)?.required || [];
-    assert(docsRequired.includes('method_name'), 'method_name is required');
+    assert(docsRequired.includes('group'), 'group is required');
+    assert(docsRequired.includes('command'), 'command is required');
 
     console.log('\n-- execute_command schema --\n');
     const execTool = tools.tools.find(t => t.name === 'execute_command')!;
     const execProps = Object.keys(execTool.inputSchema?.properties || {});
-    assert(execProps.includes('method_name'), 'has method_name param');
+    assert(execProps.includes('group'), 'has group param');
+    assert(execProps.includes('command'), 'has command param');
     assert(execProps.includes('params'), 'has params param');
-    assert(execProps.includes('show'), 'has show param');
-    assert(execProps.includes('exclude'), 'has exclude param');
+    assert(execProps.includes('confirmed'), 'has confirmed param');
     assert(execProps.includes('raw'), 'has raw param');
     assert(execProps.includes('limit'), 'has limit param');
     assert(execProps.length === 6, `exactly 6 params`, `got: ${execProps.join(', ')}`);
     const execRequired = (execTool.inputSchema as any)?.required || [];
-    assert(execRequired.includes('method_name'), 'method_name is required');
+    assert(execRequired.includes('group'), 'group is required');
+    assert(execRequired.includes('command'), 'command is required');
     assert(!execRequired.includes('params'), 'params is optional');
 
     console.log('\n-- Tool invocation --\n');
@@ -109,7 +112,7 @@ async function run() {
 
     const discoverResult = await client.callTool({ name: 'discover_commands', arguments: {} });
     const discoverText = (discoverResult.content as any[])[0]?.text || '';
-    assert(discoverText.includes('experiments') && discoverText.includes('methods'), 'discover_commands returns catalog');
+    assert(discoverText.includes('experiments') && discoverText.includes('metrics'), 'discover_commands returns catalog');
 
     const docsResult = await client.callTool({ name: 'get_command_docs', arguments: { group: 'teams', command: 'listTeams' } });
     const docsText = (docsResult.content as any[])[0]?.text || '';

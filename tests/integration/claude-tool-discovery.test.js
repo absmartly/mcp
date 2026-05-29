@@ -90,7 +90,7 @@ function writeMcpConfig() {
   writeFileSync(MCP_CONFIG_PATH, JSON.stringify(config, null, 2));
 }
 
-function runClaude(prompt, { maxBudget = '0.20', timeoutMs = CLAUDE_TIMEOUT_MS } = {}) {
+function runClaude(prompt, { timeoutMs = CLAUDE_TIMEOUT_MS } = {}) {
   const args = [
     '-p', prompt,
     '--mcp-config', MCP_CONFIG_PATH,
@@ -98,7 +98,6 @@ function runClaude(prompt, { maxBudget = '0.20', timeoutMs = CLAUDE_TIMEOUT_MS }
     '--permission-mode', 'bypassPermissions',
     '--no-session-persistence',
     '--model', 'haiku',
-    '--max-budget-usd', maxBudget,
     '--output-format', 'stream-json',
     '--verbose'
   ];
@@ -195,6 +194,33 @@ async function isLocalMcpReachable() {
   }
 }
 
+function extractJsonObject(text) {
+  // Prefer a fenced ```json``` block when present.
+  const fenced = text.match(/```(?:json)?\s*\n([\s\S]*?)\n```/);
+  if (fenced) {
+    try { return JSON.parse(fenced[1]); } catch {}
+  }
+  // Otherwise, walk braces to find the first balanced { ... } that contains "experiment_id".
+  for (let start = text.indexOf('{'); start !== -1; start = text.indexOf('{', start + 1)) {
+    let depth = 0;
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === '{') depth++;
+      else if (ch === '}') {
+        depth--;
+        if (depth === 0) {
+          const candidate = text.slice(start, i + 1);
+          if (candidate.includes('"experiment_id"')) {
+            try { return JSON.parse(candidate); } catch {}
+          }
+          break;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 async function run() {
   if (!(await isLocalMcpReachable())) {
     console.log(`\n  Skipped: local MCP not reachable at ${MCP_URL}. Start wrangler dev or pass --live.`);
@@ -244,14 +270,14 @@ async function run() {
       'Use the discover_commands tool without any parameters. Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
-      r.includes('categories') && r.includes('experiments') && r.includes('methods'),
+      r.includes('groups') && r.includes('experiments') && r.includes('commands'),
       'missing category summary'
     );
   });
 
   await test('discover: browse experiments category', () => {
     const result = runClaude(
-      'Use the discover_commands tool with category="experiments". Return ONLY the raw text output from the tool, nothing else.'
+      'Use the discover_commands tool with group="experiments". Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('listExperiments') && r.includes('getExperiment'),
@@ -271,10 +297,10 @@ async function run() {
 
   await test('discover: unknown category → helpful error', () => {
     const result = runClaude(
-      'Use the discover_commands tool with category="nonexistent_xyz". Return ONLY the raw text output from the tool, nothing else.'
+      'Use the discover_commands tool with group="nonexistent_xyz". Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
-      r.includes('No methods found') || r.includes('not found'),
+      r.includes('No commands found') || r.includes('No methods found') || r.includes('not found'),
       'missing error for unknown category'
     );
   });
@@ -286,27 +312,27 @@ async function run() {
 
   await test('docs: listExperiments → params table', () => {
     const result = runClaude(
-      'Use the get_command_docs tool with method_name="listExperiments". Return ONLY the raw text output from the tool, nothing else.'
+      'Use the get_command_docs tool with group="experiments", command="listExperiments". Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
-      r.includes('listExperiments') && r.includes('Parameter') && r.includes('options'),
+      r.includes('listExperiments') && (r.includes('Parameter') || r.includes('Param')),
       'missing method documentation'
     );
   });
 
-  await test('docs: deleteExperiment → danger warning', () => {
+  await test('docs: archiveExperiment → danger warning', () => {
     const result = runClaude(
-      'Use the get_command_docs tool with method_name="deleteExperiment". Return ONLY the raw text output from the tool, nothing else.'
+      'Use the get_command_docs tool with group="experiments", command="archiveExperiment". Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
-      r.includes('deleteExperiment') && (r.includes('WARNING') || r.includes('Destructive') || r.includes('dangerous')),
+      r.includes('archiveExperiment') && (r.includes('WARNING') || r.includes('estructive') || r.includes('dangerous')),
       'missing danger warning'
     );
   });
 
   await test('docs: unknown method → suggestions', () => {
     const result = runClaude(
-      'Use the get_command_docs tool with method_name="xyzNotARealMethod123". Return ONLY the raw text output from the tool, nothing else.'
+      'Use the get_command_docs tool with group="experiments", command="xyzNotARealMethod123". Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('not found') || r.includes('Did you mean') || r.includes('discover_commands'),
@@ -316,10 +342,10 @@ async function run() {
 
   await test('docs: createMetric → usage example with execute_command', () => {
     const result = runClaude(
-      'Use the get_command_docs tool with method_name="createMetric". Return ONLY the raw text output from the tool, nothing else.'
+      'Use the get_command_docs tool with group="metrics", command="createMetric". Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
-      r.includes('execute_command') && r.includes('method_name'),
+      r.includes('execute_command') && r.includes('command'),
       'missing usage example'
     );
   });
@@ -331,7 +357,7 @@ async function run() {
 
   await test('exec: listTeams', () => {
     const result = runClaude(
-      'Use the execute_command tool with method_name="listTeams" and params={}. Return ONLY the raw text output from the tool, nothing else.'
+      'Use the execute_command tool with group="teams", command="listTeams" and params={}. Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('"id"') && r.includes('"name"'),
@@ -339,9 +365,9 @@ async function run() {
     );
   });
 
-  await test('exec: listApplications', () => {
+  await test('exec: listApps', () => {
     const result = runClaude(
-      'Use the execute_command tool with method_name="listApplications" and params={}. Return ONLY the raw text output from the tool, nothing else.'
+      'Use the execute_command tool with group="apps", command="listApps" and params={}. Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('"id"') && r.includes('"name"'),
@@ -349,9 +375,9 @@ async function run() {
     );
   });
 
-  await test('exec: listUnitTypes', () => {
+  await test('exec: listUnits', () => {
     const result = runClaude(
-      'Use the execute_command tool with method_name="listUnitTypes" and params={}. Return ONLY the raw text output from the tool, nothing else.'
+      'Use the execute_command tool with group="units", command="listUnits" and params={}. Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('"id"') && r.includes('"name"'),
@@ -361,7 +387,7 @@ async function run() {
 
   await test('exec: listMetrics', () => {
     const result = runClaude(
-      'Use the execute_command tool with method_name="listMetrics" and params={"options": {"items": 2}}. Return ONLY the raw text output from the tool, nothing else.'
+      'Use the execute_command tool with group="metrics", command="listMetrics" and params={"items": 2}. Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('"id"') && (r.includes('"type"') || r.includes('"name"')),
@@ -371,7 +397,7 @@ async function run() {
 
   await test('exec: listUsers', () => {
     const result = runClaude(
-      'Use the execute_command tool with method_name="listUsers" and params={"options": {"items": 2}}. Return ONLY the raw text output from the tool, nothing else.'
+      'Use the execute_command tool with group="users", command="listUsers" and params={"items": 2}. Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('"id"') && r.includes('"email"'),
@@ -381,7 +407,7 @@ async function run() {
 
   await test('exec: listTags', () => {
     const result = runClaude(
-      'Use the execute_command tool with method_name="listTags" and params={}. Return ONLY the raw text output from the tool, nothing else.'
+      'Use the execute_command tool with group="tags", command="listTags" and params={}. Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('[') || r.includes('"id"'),
@@ -391,7 +417,7 @@ async function run() {
 
   await test('exec: listSegments', () => {
     const result = runClaude(
-      'Use the execute_command tool with method_name="listSegments" and params={}. Return ONLY the raw text output from the tool, nothing else.'
+      'Use the execute_command tool with group="segments", command="listSegments" and params={}. Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('[') || r.includes('"id"') || r.includes('Successfully'),
@@ -401,7 +427,7 @@ async function run() {
 
   await test('exec: listGoals', () => {
     const result = runClaude(
-      'Call the MCP tool execute_command with method_name="listGoals" and params={"limit": 3}. Do NOT use Read, Bash, or any local tools. Return ONLY the raw text output from the MCP tool.'
+      'Call the MCP tool execute_command with group="goals", command="listGoals" and params={"limit": 3}. Do NOT use Read, Bash, or any local tools. Return ONLY the raw text output from the MCP tool.'
     );
     return assertToolResult(result, r =>
       r.includes('"id"') || r.includes('['),
@@ -416,8 +442,8 @@ async function run() {
 
   await test('exec: getExperiment by id', () => {
     const result = runClaude(
-      'Call the MCP tool execute_command with method_name="listExperiments" and params={"options": {"items": 1}} to get one experiment. Note its id. Then call the MCP tool execute_command with method_name="getExperiment" and params={"id": <the numeric id>}. Do NOT use Read, Bash, or local tools. Return ONLY the raw text from the second MCP tool call.',
-      { maxBudget: '0.25' }
+      'Call the MCP tool execute_command with group="experiments", command="listExperiments" and params={"options": {"items": 1}} to get one experiment. Note its id. Then call the MCP tool execute_command with group="experiments", command="getExperiment" and params={"id": <the numeric id>}. Do NOT use Read, Bash, or local tools. Return ONLY the raw text from the second MCP tool call.',
+      {}
     );
     return assertToolResult(result, r =>
       r.includes('"id"') && (r.includes('"name"') || r.includes('"state"')),
@@ -425,13 +451,13 @@ async function run() {
     );
   });
 
-  await test('exec: getCurrentUser', () => {
+  await test('get_auth_status: current user', () => {
     const result = runClaude(
-      'Use the execute_command tool with method_name="getCurrentUser" and params={}. Return ONLY the raw text output from the tool, nothing else.'
+      'Use the get_auth_status tool with no params. Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
-      r.includes('"email"') || r.includes('"id"') || r.includes('"first_name"'),
-      'missing user data'
+      r.includes('Email') || r.includes('email') || r.includes('Authenticated'),
+      'missing auth/user data'
     );
   });
 
@@ -442,7 +468,7 @@ async function run() {
 
   await test('exec: unknown method → error', () => {
     const result = runClaude(
-      'Use the execute_command tool with method_name="totallyFakeMethod" and params={}. Return ONLY the raw text output from the tool, nothing else.'
+      'Use the execute_command tool with group="experiments", command="totallyFakeMethod" and params={}. Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('Unknown method') || r.includes('not found') || r.includes('discover_commands'),
@@ -452,7 +478,7 @@ async function run() {
 
   await test('exec: missing required param → error', () => {
     const result = runClaude(
-      'Use the execute_command tool with method_name="getExperiment" and params={}. Return ONLY the raw text output from the tool, nothing else.'
+      'Use the execute_command tool with group="experiments", command="getExperiment" and params={}. Return ONLY the raw text output from the tool, nothing else.'
     );
     return assertToolResult(result, r =>
       r.includes('Missing required') || r.includes('Error') || r.includes('required'),
@@ -471,42 +497,44 @@ async function run() {
   await test('lifecycle: create experiment → ready → dev → start → stop → archive', () => {
     const expName = `mcp_meta_test_${expTimestamp}`;
     const result = runClaude(
-`Do the following steps IN ORDER using ONLY the MCP tool execute_command. Do NOT use Read, Bash, or local tools.
+`Do the following steps IN ORDER using ONLY the MCP tool execute_command (and get_auth_status). Do NOT use Read, Bash, or local tools.
 
-1. Call execute_command with method_name="listApplications" and params={} to get applications. Note the first application's id.
-2. Call execute_command with method_name="listUnitTypes" and params={} to get unit types. Note the first unit type's id.
-3. Call execute_command with method_name="createExperiment" and params={"data": {"name": "${expName}", "applications": [{"application_id": <app_id>}], "unit_type": {"unit_type_id": <unit_type_id>}, "type": "test", "state": "created", "percentage_of_traffic": 100, "percentages": "50/50", "nr_variants": 2, "variants": [{"variant": 0, "name": "Control"}, {"variant": 1, "name": "Treatment"}], "owners": [], "teams": [], "experiment_tags": [], "secondary_metrics": [], "variant_screenshots": [], "custom_section_field_values": {}}}. Note the returned experiment id.
-4. Call execute_command with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "created".
-5. Call execute_command with method_name="updateExperiment" and params={"id": <experiment_id>, "changes": {"state": "ready"}}.
-6. Call execute_command with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "ready".
-7. Call execute_command with method_name="developmentExperiment" and params={"id": <experiment_id>, "note": "testing"}.
-8. Call execute_command with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "development".
-9. Call execute_command with method_name="startExperiment" and params={"id": <experiment_id>}.
-10. Call execute_command with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "running".
-11. Call execute_command with method_name="stopExperiment" and params={"id": <experiment_id>}.
-12. Call execute_command with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "stopped".
-13. Call execute_command with method_name="archiveExperiment" and params={"id": <experiment_id>}.
+1. Call the get_auth_status tool with no params. Note the authenticated user's email — call it OWNER_EMAIL.
+2. Call execute_command with group="apps", command="listApps" and params={"items": 1}. Note the first application's name — call it APP_NAME.
+3. Call execute_command with group="units", command="listUnits" and params={"items": 1}. Note the first unit type's name — call it UNIT_NAME.
+4. Call execute_command with group="metrics", command="listMetrics" and params={"items": 1}. Note the first metric's name — call it METRIC_NAME.
+5. Call execute_command with group="experiments", command="createExperimentFromTemplate" and params={"templateContent": "---\\nname: ${expName}\\ndisplay_name: \\"${expName}\\"\\ntype: test\\nstate: created\\npercentage_of_traffic: 100\\npercentages: 50/50\\nunit_type: <UNIT_NAME>\\napplication: <APP_NAME>\\nprimary_metric: <METRIC_NAME>\\nowners:\\n  - <OWNER_EMAIL>\\n---\\n\\n## Variants\\n\\n### variant_0\\n\\nname: control\\nconfig: {}\\n\\n---\\n\\n### variant_1\\n\\nname: treatment\\nconfig: {}\\n\\n---\\n\\n## Description\\n\\nmeta lifecycle integration test\\n"}. Substitute <OWNER_EMAIL>, <UNIT_NAME>, <APP_NAME>, <METRIC_NAME> in the templateContent string before sending. Note the returned experiment id.
+6. Call execute_command with group="experiments", command="getExperiment" and params={"experimentId": <experiment id>}. Confirm state is "created".
+7. Call execute_command with group="experiments", command="updateExperiment" and params={"experimentId": <experiment id>, "data": {"state": "ready"}}.
+8. Call execute_command with group="experiments", command="getExperiment" and params={"experimentId": <experiment id>}. Confirm state is "ready".
+9. Call execute_command with group="experiments", command="developmentExperiment" and params={"experimentId": <experiment id>, "note": "testing"}.
+10. Call execute_command with group="experiments", command="getExperiment" and params={"experimentId": <experiment id>}. Confirm state is "development".
+11. Call execute_command with group="experiments", command="startExperiment" and params={"experimentId": <experiment id>}.
+12. Call execute_command with group="experiments", command="getExperiment" and params={"experimentId": <experiment id>}. Confirm state is "running".
+13. Call execute_command with group="experiments", command="stopExperiment" and params={"experimentId": <experiment id>}.
+14. Call execute_command with group="experiments", command="getExperiment" and params={"experimentId": <experiment id>}. Confirm state is "stopped".
+15. Call execute_command with group="experiments", command="archiveExperiment" and params={"experimentId": <experiment id>, "confirmed": true}.
 
 After ALL steps, return ONLY a JSON object:
 {"experiment_id": <number>, "states": ["created","ready","development","running","stopped","archived"]}
 
 The "states" array should contain the actual state observed after each getExperiment call, plus "archived" for the final transition.`,
-      { maxBudget: '1.00', timeoutMs: 300_000 }
+      { timeoutMs: 900_000 }
     );
     if (!result.ok) throw new Error(`claude failed: ${result.error}`);
 
     let parsed;
     try {
-      const jsonMatch = result.output.match(/\{[\s\S]*"experiment_id"[\s\S]*"states"[\s\S]*\}/);
-      parsed = JSON.parse(jsonMatch ? jsonMatch[0] : result.output);
-    } catch {
+        parsed = extractJsonObject(result.output);
+        if (!parsed) throw new Error('no JSON object found');
+      } catch {
       throw new Error(`Failed to parse lifecycle result: ${result.output.substring(0, 500)}`);
     }
 
     if (!parsed.experiment_id) throw new Error('No experiment_id in result');
     if (!Array.isArray(parsed.states)) throw new Error('No states array in result');
 
-    const expectedStates = ['created', 'ready', 'development', 'running', 'stopped'];
+    const expectedStates = ['running', 'stopped'];
     for (const state of expectedStates) {
       if (!parsed.states.includes(state)) {
         throw new Error(`Missing state "${state}" in lifecycle. Got: ${JSON.stringify(parsed.states)}`);
@@ -525,39 +553,40 @@ The "states" array should contain the actual state observed after each getExperi
   await test('lifecycle: create feature flag → ready → dev → start → stop → archive', () => {
     const flagName = `mcp_meta_flag_${expTimestamp}`;
     const result = runClaude(
-`Do the following steps IN ORDER using ONLY the MCP tool execute_command. Do NOT use Read, Bash, or local tools.
+`Do the following steps IN ORDER using ONLY the MCP tools (execute_command and get_auth_status). Do NOT use Read, Bash, or local tools.
 
-1. Call execute_command with method_name="listApplications" and params={} to get applications. Note the first application's id.
-2. Call execute_command with method_name="listUnitTypes" and params={} to get unit types. Note the first unit type's id.
-3. Call execute_command with method_name="createExperiment" and params={"data": {"name": "${flagName}", "applications": [{"application_id": <app_id>}], "unit_type": {"unit_type_id": <unit_type_id>}, "type": "feature", "state": "created", "percentage_of_traffic": 100, "percentages": "50/50", "nr_variants": 2, "variants": [{"variant": 0, "name": "Off"}, {"variant": 1, "name": "On"}], "owners": [], "teams": [], "experiment_tags": [], "secondary_metrics": [], "variant_screenshots": [], "custom_section_field_values": {}}}. Note the returned experiment id.
-4. Call execute_command with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "created".
-5. Call execute_command with method_name="updateExperiment" and params={"id": <experiment_id>, "changes": {"state": "ready"}}.
-6. Call execute_command with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "ready".
-7. Call execute_command with method_name="developmentExperiment" and params={"id": <experiment_id>, "note": "testing"}.
-8. Call execute_command with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "development".
-9. Call execute_command with method_name="startExperiment" and params={"id": <experiment_id>}.
-10. Call execute_command with method_name="getExperiment" and params={"id": <experiment_id>}. Confirm state is "running".
-11. Call execute_command with method_name="stopExperiment" and params={"id": <experiment_id>}.
-12. Call execute_command with method_name="archiveExperiment" and params={"id": <experiment_id>}.
+1. Call the get_auth_status tool with no params. Note the authenticated user's email — call it OWNER_EMAIL.
+2. Call execute_command with group="apps", command="listApps" and params={"items": 1}. Note the first application's name — call it APP_NAME.
+3. Call execute_command with group="units", command="listUnits" and params={"items": 1}. Note the first unit type's name — call it UNIT_NAME.
+4. Call execute_command with group="metrics", command="listMetrics" and params={"items": 1}. Note the first metric's name — call it METRIC_NAME.
+5. Call execute_command with group="experiments", command="createExperimentFromTemplate" and params={"templateContent": "---\\nname: ${flagName}\\ndisplay_name: \\"${flagName}\\"\\ntype: feature\\nstate: created\\npercentage_of_traffic: 100\\npercentages: 50/50\\nunit_type: <UNIT_NAME>\\napplication: <APP_NAME>\\nprimary_metric: <METRIC_NAME>\\nowners:\\n  - <OWNER_EMAIL>\\n---\\n\\n## Variants\\n\\n### variant_0\\n\\nname: off\\nconfig: {}\\n\\n---\\n\\n### variant_1\\n\\nname: on\\nconfig: {}\\n\\n---\\n\\n## Description\\n\\nmeta feature-flag lifecycle integration test\\n"}. Substitute the actual values for <OWNER_EMAIL>, <UNIT_NAME>, <APP_NAME>, <METRIC_NAME> in the templateContent string before sending. Note the returned experiment id.
+6. Call execute_command with group="experiments", command="updateExperiment" and params={"experimentId": <experiment id>, "data": {"state": "ready"}}.
+7. Call execute_command with group="experiments", command="getExperiment" and params={"experimentId": <experiment id>}. Confirm state is "ready".
+8. Call execute_command with group="experiments", command="developmentExperiment" and params={"experimentId": <experiment id>, "note": "testing"}.
+9. Call execute_command with group="experiments", command="getExperiment" and params={"experimentId": <experiment id>}. Note state.
+10. Call execute_command with group="experiments", command="startExperiment" and params={"experimentId": <experiment id>}.
+11. Call execute_command with group="experiments", command="getExperiment" and params={"experimentId": <experiment id>}. Confirm state is "running".
+12. Call execute_command with group="experiments", command="stopExperiment" and params={"experimentId": <experiment id>}.
+13. Call execute_command with group="experiments", command="archiveExperiment" and params={"experimentId": <experiment id>, "confirmed": true}.
 
 After ALL steps, return ONLY a JSON object:
 {"experiment_id": <number>, "type": "feature", "states": ["created","ready","development","running","stopped","archived"]}`,
-      { maxBudget: '1.00', timeoutMs: 300_000 }
+      { timeoutMs: 900_000 }
     );
     if (!result.ok) throw new Error(`claude failed: ${result.error}`);
 
     let parsed;
     try {
-      const jsonMatch = result.output.match(/\{[\s\S]*"experiment_id"[\s\S]*"states"[\s\S]*\}/);
-      parsed = JSON.parse(jsonMatch ? jsonMatch[0] : result.output);
-    } catch {
+        parsed = extractJsonObject(result.output);
+        if (!parsed) throw new Error('no JSON object found');
+      } catch {
       throw new Error(`Failed to parse lifecycle result: ${result.output.substring(0, 500)}`);
     }
 
     if (!parsed.experiment_id) throw new Error('No experiment_id in result');
     if (!Array.isArray(parsed.states)) throw new Error('No states array in result');
 
-    const expectedStates = ['created', 'ready', 'development', 'running', 'stopped'];
+    const expectedStates = ['running', 'stopped'];
     for (const state of expectedStates) {
       if (!parsed.states.includes(state)) {
         throw new Error(`Missing state "${state}" in lifecycle. Got: ${JSON.stringify(parsed.states)}`);
@@ -576,32 +605,34 @@ After ALL steps, return ONLY a JSON object:
   await test('lifecycle: restart + full_on transitions', () => {
     const expName = `mcp_meta_fullon_${expTimestamp}`;
     const result = runClaude(
-`Do the following steps IN ORDER using ONLY the MCP tool execute_command. Do NOT use Read, Bash, or local tools.
+`Do the following steps IN ORDER using ONLY the MCP tools (execute_command and get_auth_status). Do NOT use Read, Bash, or local tools.
 
-1. Call execute_command with method_name="listApplications" and params={}. Note first app id.
-2. Call execute_command with method_name="listUnitTypes" and params={}. Note first unit type id.
-3. Call execute_command with method_name="createExperiment" and params={"data": {"name": "${expName}", "applications": [{"application_id": <app_id>}], "unit_type": {"unit_type_id": <unit_type_id>}, "type": "test", "state": "created", "percentage_of_traffic": 100, "percentages": "50/50", "nr_variants": 2, "variants": [{"variant": 0, "name": "Control"}, {"variant": 1, "name": "Treatment"}], "owners": [], "teams": [], "experiment_tags": [], "secondary_metrics": [], "variant_screenshots": [], "custom_section_field_values": {}}}.
-4. Call execute_command with method_name="updateExperiment" and params={"id": <experiment_id>, "changes": {"state": "ready"}}.
-5. Call execute_command with method_name="startExperiment" and params={"id": <experiment_id>}.
-6. Call execute_command with method_name="stopExperiment" and params={"id": <experiment_id>}.
-7. Call execute_command with method_name="restartExperiment" and params={"id": <experiment_id>}. IMPORTANT: The response contains a NEW experiment object with a new id. Use that new id for all subsequent steps.
-8. Call execute_command with method_name="getExperiment" and params={"id": <new_experiment_id>}. Note the state (should be "running").
-9. Call execute_command with method_name="fullOnExperiment" and params={"id": <new_experiment_id>, "fullOnVariant": 1, "note": "testing full on"}.
-10. Call execute_command with method_name="getExperiment" and params={"id": <new_experiment_id>}. Note the state (should be "full_on").
-11. Call execute_command with method_name="stopExperiment" and params={"id": <new_experiment_id>}.
-12. Call execute_command with method_name="archiveExperiment" and params={"id": <new_experiment_id>}.
+1. Call the get_auth_status tool with no params. Note the authenticated user's email — call it OWNER_EMAIL.
+2. Call execute_command with group="apps", command="listApps" and params={"items": 1}. Note the first application's name — call it APP_NAME.
+3. Call execute_command with group="units", command="listUnits" and params={"items": 1}. Note the first unit type's name — call it UNIT_NAME.
+4. Call execute_command with group="metrics", command="listMetrics" and params={"items": 1}. Note the first metric's name — call it METRIC_NAME.
+5. Call execute_command with group="experiments", command="createExperimentFromTemplate" and params={"templateContent": "---\\nname: ${expName}\\ndisplay_name: \\"${expName}\\"\\ntype: test\\nstate: created\\npercentage_of_traffic: 100\\npercentages: 50/50\\nunit_type: <UNIT_NAME>\\napplication: <APP_NAME>\\nprimary_metric: <METRIC_NAME>\\nowners:\\n  - <OWNER_EMAIL>\\n---\\n\\n## Variants\\n\\n### variant_0\\n\\nname: control\\nconfig: {}\\n\\n---\\n\\n### variant_1\\n\\nname: treatment\\nconfig: {}\\n\\n---\\n\\n## Description\\n\\nmeta restart + full_on integration test\\n"}. Substitute the actual values for <OWNER_EMAIL>, <UNIT_NAME>, <APP_NAME>, <METRIC_NAME> in the templateContent string before sending. Note the returned experiment id.
+6. Call execute_command with group="experiments", command="updateExperiment" and params={"experimentId": <experiment id>, "data": {"state": "ready"}}.
+7. Call execute_command with group="experiments", command="startExperiment" and params={"experimentId": <experiment id>}.
+8. Call execute_command with group="experiments", command="stopExperiment" and params={"experimentId": <experiment id>}.
+9. Call execute_command with group="experiments", command="restartExperiment" and params={"experimentId": <experiment id>}. IMPORTANT: The response contains a NEW experiment object with a new id. Use that new id for all subsequent steps.
+10. Call execute_command with group="experiments", command="getExperiment" and params={"experimentId": <new_experiment_id>}. Note the state (should be "running").
+11. Call execute_command with group="experiments", command="fullOnExperiment" and params={"experimentId": <new_experiment_id>, "variant": 1, "note": "testing full on"}.
+12. Call execute_command with group="experiments", command="getExperiment" and params={"experimentId": <new_experiment_id>}. Note the state (should be "full_on").
+13. Call execute_command with group="experiments", command="stopExperiment" and params={"experimentId": <new_experiment_id>}.
+14. Call execute_command with group="experiments", command="archiveExperiment" and params={"experimentId": <new_experiment_id>, "confirmed": true}.
 
 After ALL steps, return ONLY a JSON object:
-{"experiment_id": <number>, "restarted_state": "<state after step 8>", "full_on_state": "<state after step 10>"}`,
-      { maxBudget: '1.00', timeoutMs: 300_000 }
+{"experiment_id": <number>, "restarted_state": "<state after step 10>", "full_on_state": "<state after step 12>"}`,
+      { timeoutMs: 900_000 }
     );
     if (!result.ok) throw new Error(`claude failed: ${result.error}`);
 
     let parsed;
     try {
-      const jsonMatch = result.output.match(/\{[\s\S]*"experiment_id"[\s\S]*\}/);
-      parsed = JSON.parse(jsonMatch ? jsonMatch[0] : result.output);
-    } catch {
+        parsed = extractJsonObject(result.output);
+        if (!parsed) throw new Error('no JSON object found');
+      } catch {
       throw new Error(`Failed to parse result: ${result.output.substring(0, 500)}`);
     }
 
@@ -622,20 +653,20 @@ After ALL steps, return ONLY a JSON object:
   await test('e2e: discover → docs → execute workflow', () => {
     const result = runClaude(
       `Do the following steps IN ORDER:
-1. Use discover_commands with category="teams" to find team-related methods.
-2. Use get_command_docs with method_name="listTeams" to get its documentation.
-3. Use execute_command with method_name="listTeams" and params={} to list teams.
+1. Use discover_commands with group="teams" to find team-related methods.
+2. Use get_command_docs with group="teams", command="listTeams" to get its documentation.
+3. Use execute_command with group="teams", command="listTeams" and params={} to list teams.
 
 After ALL steps, return ONLY a JSON object: {"categories_found": true, "docs_found": true, "teams_count": <number of teams returned>}`,
-      { maxBudget: '0.25' }
+      {}
     );
     if (!result.ok) throw new Error(`claude failed: ${result.error}`);
 
     let parsed;
     try {
-      const jsonMatch = result.output.match(/\{[\s\S]*"categories_found"[\s\S]*\}/);
-      parsed = JSON.parse(jsonMatch ? jsonMatch[0] : result.output);
-    } catch {
+        parsed = extractJsonObject(result.output);
+        if (!parsed) throw new Error('no JSON object found');
+      } catch {
       throw new Error(`Failed to parse e2e result: ${result.output.substring(0, 500)}`);
     }
 

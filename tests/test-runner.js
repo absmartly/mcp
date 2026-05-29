@@ -103,15 +103,37 @@ class TestRunner {
     if (!options.unitOnly) {
       this.log('\n🔗 Integration Tests', 'info');
       const integrationTestDir = join(__dirname, 'integration');
+      let wranglerFixture = null;
       try {
         const integrationTests = await readdir(integrationTestDir);
         const testFiles = integrationTests.filter(file => file.endsWith('.test.js') || file.endsWith('.test.ts'));
-        
+
+        // Start a shared wrangler dev so wrangler-dependent tests can
+        // exercise the local MCP. ensureWranglerDev no-ops if the port
+        // is already reachable (user already has wrangler up).
+        try {
+          const { ensureWranglerDev } = await import('./integration/wrangler-fixture.js');
+          wranglerFixture = await ensureWranglerDev();
+          if (wranglerFixture.alreadyRunning) {
+            this.log(`Using existing wrangler dev on port ${wranglerFixture.port}`, 'info');
+          } else {
+            this.log(`Started wrangler dev on port ${wranglerFixture.port}`, 'info');
+          }
+        } catch (err) {
+          this.log(`Could not start wrangler dev (${err.message}). Tests that need it will skip.`, 'warning');
+        }
+
         for (const testFile of testFiles) {
           await this.runTest(testFile, join(integrationTestDir, testFile));
         }
       } catch (error) {
         this.log(`No integration tests directory found: ${error.message}`, 'warning');
+      } finally {
+        if (wranglerFixture && !wranglerFixture.alreadyRunning) {
+          const { stopWranglerDev } = await import('./integration/wrangler-fixture.js');
+          stopWranglerDev(wranglerFixture);
+          this.log('Stopped wrangler dev', 'info');
+        }
       }
     }
 
