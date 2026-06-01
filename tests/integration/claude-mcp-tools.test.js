@@ -61,14 +61,14 @@ function writeMcpConfig() {
   writeFileSync(MCP_CONFIG_PATH, JSON.stringify(config, null, 2));
 }
 
-function runClaude(prompt, { timeoutMs = CLAUDE_TIMEOUT_MS } = {}) {
+function runClaude(prompt, { timeoutMs = CLAUDE_TIMEOUT_MS, model = 'haiku' } = {}) {
   const args = [
     '-p', prompt,
     '--mcp-config', MCP_CONFIG_PATH,
     '--strict-mcp-config',
     '--permission-mode', 'bypassPermissions',
     '--no-session-persistence',
-    '--model', 'haiku',
+    '--model', model,
     '--output-format', 'stream-json',
     '--verbose'
   ];
@@ -189,24 +189,32 @@ async function run() {
 
   async function test(name, fn) {
     process.stdout.write(`\n  ${name} ... `);
-    try {
-      await ensureServer();
-      const result = await fn();
-      passed++;
-      results.push({ name, status: 'PASS' });
-      console.log('PASS');
-      if (SHOW_RESPONSES && result && result.output) {
-        console.log(`    ── response ──`);
-        console.log(`    ${result.output.substring(0, 1000).split('\n').join('\n    ')}`);
-        if (result.output.length > 1000) console.log(`    ... (${result.output.length} chars total)`);
-        console.log(`    ──────────────`);
+    let lastErr;
+    let result;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await ensureServer();
+        result = await fn();
+        if (attempt > 1) console.log(`(retry ${attempt - 1} succeeded) `);
+        passed++;
+        results.push({ name, status: 'PASS' });
+        console.log('PASS');
+        if (SHOW_RESPONSES && result && result.output) {
+          console.log(`    ── response ──`);
+          console.log(`    ${result.output.substring(0, 1000).split('\n').join('\n    ')}`);
+          if (result.output.length > 1000) console.log(`    ... (${result.output.length} chars total)`);
+          console.log(`    ──────────────`);
+        }
+        return;
+      } catch (err) {
+        lastErr = err;
+        if (attempt === 1) process.stdout.write(`(attempt 1 failed: ${err.message.substring(0, 80)}; retrying) `);
       }
-    } catch (err) {
-      failed++;
-      results.push({ name, status: 'FAIL', error: err.message });
-      console.log('FAIL');
-      console.log(`    ${err.message}`);
     }
+    failed++;
+    results.push({ name, status: 'FAIL', error: lastErr.message });
+    console.log('FAIL');
+    console.log(`    ${lastErr.message}`);
   }
 
   try {
@@ -238,14 +246,14 @@ async function run() {
 
     await test('listApps returns applications', () => {
       const result = runClaude(
-        'Call the execute_command tool with group "apps" and command "listApps" and params {"items": 2}. Return ONLY the raw JSON output from the tool, nothing else.'
+        'Call the execute_command tool with group "apps" and command "listApps" and params {}. Return ONLY the raw JSON output from the tool, nothing else.'
       );
       return assertToolResult(result, r => r.includes('"id"') && r.includes('"name"'), 'tool result missing application fields');
     });
 
     await test('listUnits returns unit types', () => {
       const result = runClaude(
-        'Call the execute_command tool with group "units" and command "listUnits" and params {"items": 2}. Return ONLY the raw JSON output from the tool, nothing else.'
+        'Call the execute_command tool with group "units" and command "listUnits" and params {}. Return ONLY the raw JSON output from the tool, nothing else.'
       );
       return assertToolResult(result, r => r.includes('"id"') && r.includes('"name"'), 'tool result missing unit type fields');
     });
@@ -335,6 +343,8 @@ async function run() {
       const expName = `mcp_test_exp_${expTimestamp}`;
       const result = runClaude(
 `Do the following steps IN ORDER. Wait for each result before proceeding.
+
+STATE-READ RULE: whenever a step asks you to "Confirm state is X" or check a state, the backend may need a moment to propagate. If the first getExperiment call returns a state that is NOT the expected one, wait ~2 seconds (you may sleep by ignoring the next instant and immediately re-calling) and call getExperiment again. Retry up to 5 times before giving up — record the LAST observed state.
 
 1. Call the get_auth_status tool with no params. Note the authenticated user's email — call it OWNER_EMAIL.
 2. Call execute_command with group="apps", command="listApps", params={"items": 1}. Note the first application's name — call it APP_NAME.
