@@ -221,6 +221,20 @@ function extractJsonObject(text) {
   return null;
 }
 
+// Build a human-readable dump of every tool call result captured during the
+// run. Trims each to a reasonable size so a long lifecycle doesn't blow up
+// the test failure log.
+function formatToolResults(result, perItemMax = 600) {
+  const items = result?.toolResults || [];
+  if (items.length === 0) return '(no tool results captured)';
+  return items.map((text, idx) => {
+    const trimmed = text.length > perItemMax
+      ? text.slice(0, perItemMax) + ` … (+${text.length - perItemMax} chars truncated)`
+      : text;
+    return `    [tool ${idx + 1}/${items.length}]\n      ${trimmed.split('\n').join('\n      ')}`;
+  }).join('\n');
+}
+
 async function run() {
   if (!(await isLocalMcpReachable())) {
     console.log(`\n  Skipped: local MCP not reachable at ${MCP_URL}. Start wrangler dev or pass --live.`);
@@ -507,7 +521,7 @@ async function run() {
     const result = runClaude(
 `Do the following steps IN ORDER using ONLY the MCP tool execute_command (and get_auth_status). Do NOT use Read, Bash, or local tools.
 
-STATE-READ RULE: whenever a step asks you to "Confirm state is X" or check a state, the backend may need a moment to propagate. If the first getExperiment call returns a state that is NOT the expected one, wait ~2 seconds (you may sleep by ignoring the next instant and immediately re-calling) and call getExperiment again. Retry up to 5 times before giving up — record the LAST observed state.
+STATE-READ RULE: state-change tools (updateExperiment, startExperiment, stopExperiment, restartExperiment, fullOnExperiment, developmentExperiment) acknowledge the request before the read replica catches up. Whenever a step asks you to read state — whether the wording is "Confirm state is X", "Note state (should be X)", or just "Note the state" — you MUST poll: call getExperiment, and if the returned \`state\` field does not match the expected value, immediately call getExperiment again (the network round-trip itself is enough of a wait). Retry up to 5 times. Record the LAST observed state — the one from the call where it either matched the expected value or you hit the retry limit.
 
 1. Call the get_auth_status tool with no params. Note the authenticated user's email — call it OWNER_EMAIL.
 2. Call execute_command with group="apps", command="listApps" and params={"items": 1}. Note the first application's name — call it APP_NAME.
@@ -538,16 +552,16 @@ The "states" array should contain the actual state observed after each getExperi
         parsed = extractJsonObject(result.output);
         if (!parsed) throw new Error('no JSON object found');
       } catch {
-      throw new Error(`Failed to parse lifecycle result: ${result.output.substring(0, 500)}`);
+      throw new Error(`Failed to parse lifecycle result: ${result.output.substring(0, 500)}\n  --- tool calls ---\n${formatToolResults(result)}`);
     }
 
-    if (!parsed.experiment_id) throw new Error('No experiment_id in result');
+    if (!parsed.experiment_id) throw new Error(`No experiment_id in result\n  --- tool calls ---\n${formatToolResults(result)}`);
     if (!Array.isArray(parsed.states)) throw new Error('No states array in result');
 
     const expectedStates = ['running', 'stopped'];
     for (const state of expectedStates) {
       if (!parsed.states.includes(state)) {
-        throw new Error(`Missing state "${state}" in lifecycle. Got: ${JSON.stringify(parsed.states)}`);
+        throw new Error(`Missing state "${state}" in lifecycle. Got: ${JSON.stringify(parsed.states)}\n  --- tool calls ---\n${formatToolResults(result)}`);
       }
     }
 
@@ -565,7 +579,7 @@ The "states" array should contain the actual state observed after each getExperi
     const result = runClaude(
 `Do the following steps IN ORDER using ONLY the MCP tools (execute_command and get_auth_status). Do NOT use Read, Bash, or local tools.
 
-STATE-READ RULE: whenever a step asks you to "Confirm state is X" or check a state, the backend may need a moment to propagate. If the first getExperiment call returns a state that is NOT the expected one, wait ~2 seconds (you may sleep by ignoring the next instant and immediately re-calling) and call getExperiment again. Retry up to 5 times before giving up — record the LAST observed state.
+STATE-READ RULE: state-change tools (updateExperiment, startExperiment, stopExperiment, restartExperiment, fullOnExperiment, developmentExperiment) acknowledge the request before the read replica catches up. Whenever a step asks you to read state — whether the wording is "Confirm state is X", "Note state (should be X)", or just "Note the state" — you MUST poll: call getExperiment, and if the returned \`state\` field does not match the expected value, immediately call getExperiment again (the network round-trip itself is enough of a wait). Retry up to 5 times. Record the LAST observed state — the one from the call where it either matched the expected value or you hit the retry limit.
 
 1. Call the get_auth_status tool with no params. Note the authenticated user's email — call it OWNER_EMAIL.
 2. Call execute_command with group="apps", command="listApps" and params={"items": 1}. Note the first application's name — call it APP_NAME.
@@ -592,16 +606,16 @@ After ALL steps, return ONLY a JSON object:
         parsed = extractJsonObject(result.output);
         if (!parsed) throw new Error('no JSON object found');
       } catch {
-      throw new Error(`Failed to parse lifecycle result: ${result.output.substring(0, 500)}`);
+      throw new Error(`Failed to parse lifecycle result: ${result.output.substring(0, 500)}\n  --- tool calls ---\n${formatToolResults(result)}`);
     }
 
-    if (!parsed.experiment_id) throw new Error('No experiment_id in result');
+    if (!parsed.experiment_id) throw new Error(`No experiment_id in result\n  --- tool calls ---\n${formatToolResults(result)}`);
     if (!Array.isArray(parsed.states)) throw new Error('No states array in result');
 
     const expectedStates = ['running', 'stopped'];
     for (const state of expectedStates) {
       if (!parsed.states.includes(state)) {
-        throw new Error(`Missing state "${state}" in lifecycle. Got: ${JSON.stringify(parsed.states)}`);
+        throw new Error(`Missing state "${state}" in lifecycle. Got: ${JSON.stringify(parsed.states)}\n  --- tool calls ---\n${formatToolResults(result)}`);
       }
     }
 
@@ -619,7 +633,7 @@ After ALL steps, return ONLY a JSON object:
     const result = runClaude(
 `Do the following steps IN ORDER using ONLY the MCP tools (execute_command and get_auth_status). Do NOT use Read, Bash, or local tools.
 
-STATE-READ RULE: whenever a step asks you to "Confirm state is X" or check a state, the backend may need a moment to propagate. If the first getExperiment call returns a state that is NOT the expected one, wait ~2 seconds (you may sleep by ignoring the next instant and immediately re-calling) and call getExperiment again. Retry up to 5 times before giving up — record the LAST observed state.
+STATE-READ RULE: state-change tools (updateExperiment, startExperiment, stopExperiment, restartExperiment, fullOnExperiment, developmentExperiment) acknowledge the request before the read replica catches up. Whenever a step asks you to read state — whether the wording is "Confirm state is X", "Note state (should be X)", or just "Note the state" — you MUST poll: call getExperiment, and if the returned \`state\` field does not match the expected value, immediately call getExperiment again (the network round-trip itself is enough of a wait). Retry up to 5 times. Record (and report in the final JSON) the LAST observed state — the one from the call where it either matched the expected value or you hit the retry limit. This is REQUIRED for the named state fields (\`restarted_state\`, \`full_on_state\`, etc.) in the final JSON summary too — never report a state from a single un-polled read.
 
 1. Call the get_auth_status tool with no params. Note the authenticated user's email — call it OWNER_EMAIL.
 2. Call execute_command with group="apps", command="listApps" and params={"items": 1}. Note the first application's name — call it APP_NAME.
@@ -630,14 +644,14 @@ STATE-READ RULE: whenever a step asks you to "Confirm state is X" or check a sta
 7. Call execute_command with group="experiments", command="startExperiment" and params={"experimentId": <experiment id>}.
 8. Call execute_command with group="experiments", command="stopExperiment" and params={"experimentId": <experiment id>}.
 9. Call execute_command with group="experiments", command="restartExperiment" and params={"experimentId": <experiment id>}. IMPORTANT: The response contains a NEW experiment object with a new id. Use that new id for all subsequent steps.
-10. Call execute_command with group="experiments", command="getExperiment" and params={"experimentId": <new_experiment_id>}. Note the state (should be "running").
+10. Apply the STATE-READ RULE: poll getExperiment with params={"experimentId": <new_experiment_id>} until \`state\` is "running" (up to 5 retries). Save the final observed state as RESTARTED_STATE.
 11. Call execute_command with group="experiments", command="fullOnExperiment" and params={"experimentId": <new_experiment_id>, "variant": 1, "note": "testing full on"}.
-12. Call execute_command with group="experiments", command="getExperiment" and params={"experimentId": <new_experiment_id>}. Note the state (should be "full_on").
+12. Apply the STATE-READ RULE: poll getExperiment with params={"experimentId": <new_experiment_id>} until \`state\` is "full_on" (up to 5 retries). Save the final observed state as FULL_ON_STATE.
 13. Call execute_command with group="experiments", command="stopExperiment" and params={"experimentId": <new_experiment_id>}.
 14. Call execute_command with group="experiments", command="archiveExperiment" and params={"experimentId": <new_experiment_id>, "confirmed": true}.
 
 After ALL steps, return ONLY a JSON object:
-{"experiment_id": <number>, "restarted_state": "<state after step 10>", "full_on_state": "<state after step 12>"}`,
+{"experiment_id": <number>, "restarted_state": "<RESTARTED_STATE from step 10>", "full_on_state": "<FULL_ON_STATE from step 12>"}`,
       { timeoutMs: 900_000 }
     );
     if (!result.ok) throw new Error(`claude failed: ${result.error}`);
@@ -647,12 +661,12 @@ After ALL steps, return ONLY a JSON object:
         parsed = extractJsonObject(result.output);
         if (!parsed) throw new Error('no JSON object found');
       } catch {
-      throw new Error(`Failed to parse result: ${result.output.substring(0, 500)}`);
+      throw new Error(`Failed to parse result: ${result.output.substring(0, 500)}\n  --- tool calls ---\n${formatToolResults(result)}`);
     }
 
-    if (!parsed.experiment_id) throw new Error('No experiment_id');
-    if (parsed.restarted_state !== 'running') throw new Error(`Expected restarted_state="running", got "${parsed.restarted_state}"`);
-    if (parsed.full_on_state !== 'full_on') throw new Error(`Expected full_on_state="full_on", got "${parsed.full_on_state}"`);
+    if (!parsed.experiment_id) throw new Error(`No experiment_id\n  --- tool calls ---\n${formatToolResults(result)}`);
+    if (parsed.restarted_state !== 'running') throw new Error(`Expected restarted_state="running", got "${parsed.restarted_state}"\n  --- tool calls ---\n${formatToolResults(result)}`);
+    if (parsed.full_on_state !== 'full_on') throw new Error(`Expected full_on_state="full_on", got "${parsed.full_on_state}"\n  --- tool calls ---\n${formatToolResults(result)}`);
 
     console.log(`\n    experiment_id=${parsed.experiment_id} restart→${parsed.restarted_state} full_on→${parsed.full_on_state}`);
     process.stdout.write('    ');

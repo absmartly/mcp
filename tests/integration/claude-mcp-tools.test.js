@@ -169,6 +169,20 @@ function extractJsonObject(text) {
   return null;
 }
 
+// Build a human-readable dump of every tool call result captured during the
+// run. Trims each to a reasonable size so a long lifecycle doesn't blow up
+// the test failure log.
+function formatToolResults(result, perItemMax = 600) {
+  const items = result?.toolResults || [];
+  if (items.length === 0) return '(no tool results captured)';
+  return items.map((text, idx) => {
+    const trimmed = text.length > perItemMax
+      ? text.slice(0, perItemMax) + ` … (+${text.length - perItemMax} chars truncated)`
+      : text;
+    return `    [tool ${idx + 1}/${items.length}]\n      ${trimmed.split('\n').join('\n      ')}`;
+  }).join('\n');
+}
+
 async function run() {
   const ownedFixtures = [];
   let serverVerified = false;
@@ -344,7 +358,7 @@ async function run() {
       const result = runClaude(
 `Do the following steps IN ORDER. Wait for each result before proceeding.
 
-STATE-READ RULE: whenever a step asks you to "Confirm state is X" or check a state, the backend may need a moment to propagate. If the first getExperiment call returns a state that is NOT the expected one, wait ~2 seconds (you may sleep by ignoring the next instant and immediately re-calling) and call getExperiment again. Retry up to 5 times before giving up — record the LAST observed state.
+STATE-READ RULE: state-change tools (updateExperiment, startExperiment, stopExperiment, restartExperiment, fullOnExperiment, developmentExperiment) acknowledge the request before the read replica catches up. Whenever a step asks you to read state — whether the wording is "Confirm state is X", "Note state (should be X)", or just "Note the state" — you MUST poll: call getExperiment, and if the returned \`state\` field does not match the expected value, immediately call getExperiment again (the network round-trip itself is enough of a wait). Retry up to 5 times. Record the LAST observed state — the one from the call where it either matched the expected value or you hit the retry limit.
 
 1. Call the get_auth_status tool with no params. Note the authenticated user's email — call it OWNER_EMAIL.
 2. Call execute_command with group="apps", command="listApps", params={"items": 1}. Note the first application's name — call it APP_NAME.
@@ -378,16 +392,16 @@ After ALL steps, return ONLY a JSON object with this exact format:
         parsed = extractJsonObject(result.output);
         if (!parsed) throw new Error('no JSON object found');
       } catch {
-        throw new Error(`Failed to parse lifecycle result: ${result.output.substring(0, 500)}`);
+        throw new Error(`Failed to parse lifecycle result: ${result.output.substring(0, 500)}\n  --- tool calls ---\n${formatToolResults(result)}`);
       }
 
-      if (!parsed.experiment_id) throw new Error('No experiment_id in result');
+      if (!parsed.experiment_id) throw new Error(`No experiment_id in result\n  --- tool calls ---\n${formatToolResults(result)}`);
       if (!Array.isArray(parsed.states)) throw new Error('No states array in result');
 
       const expectedStates = ['running', 'stopped'];
       for (const state of expectedStates) {
         if (!parsed.states.includes(state)) {
-          throw new Error(`Missing state "${state}" in lifecycle. Got: ${JSON.stringify(parsed.states)}`);
+          throw new Error(`Missing state "${state}" in lifecycle. Got: ${JSON.stringify(parsed.states)}\n  --- tool calls ---\n${formatToolResults(result)}`);
         }
       }
 
