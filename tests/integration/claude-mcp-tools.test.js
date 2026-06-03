@@ -351,12 +351,12 @@ async function run() {
 
     // ── Experiment lifecycle tests ──
 
-    const expTimestamp = Date.now();
-
     await test('experiment lifecycle: create → ready → dev → start → stop → restart → full_on → stop → archive', () => {
-      const expName = `mcp_test_exp_${expTimestamp}`;
+      const expName = `mcp_test_exp_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
       const result = runClaude(
 `Do the following steps IN ORDER. Wait for each result before proceeding.
+
+CONFIRMATION RULE: The state-transition commands (startExperiment, stopExperiment, restartExperiment, developmentExperiment, fullOnExperiment, archiveExperiment) and createExperimentFromTemplate are flagged as "dangerous" in the MCP catalog and will return a confirmation prompt (no state change) when called without confirmed=true. The confirmed argument MUST be at the TOP LEVEL of the execute_command call, ALONGSIDE group/command/params — NOT inside params. Correct shape: execute_command({"group": "experiments", "command": "archiveExperiment", "params": {"experimentId": 123}, "confirmed": true}). For ALL calls to the dangerous commands listed above, ALWAYS include "confirmed": true at the top level. If a call returns a message like "Action cancelled", "not confirmed by user", or "show the user this preview", immediately retry the SAME call adding "confirmed": true at the top level.
 
 STATE-READ RULE: state-change tools (updateExperiment, startExperiment, stopExperiment, restartExperiment, fullOnExperiment, developmentExperiment) acknowledge the request before the read replica catches up. Whenever a step asks you to read state — whether the wording is "Confirm state is X", "Note state (should be X)", or just "Note the state" — you MUST poll: call getExperiment, and if the returned \`state\` field does not match the expected value, immediately call getExperiment again (the network round-trip itself is enough of a wait). Retry up to 5 times. Record the LAST observed state — the one from the call where it either matched the expected value or you hit the retry limit.
 
@@ -378,7 +378,7 @@ STATE-READ RULE: state-change tools (updateExperiment, startExperiment, stopExpe
 16. Call execute_command with group="experiments", command="fullOnExperiment", params={"experimentId": <new experiment id>, "variant": 1, "note": "going full on"}.
 17. Call execute_command with group="experiments", command="getExperiment", params={"experimentId": <new experiment id>}. Note state.
 18. Call execute_command with group="experiments", command="stopExperiment", params={"experimentId": <new experiment id>}.
-19. Call execute_command with group="experiments", command="archiveExperiment", params={"experimentId": <new experiment id>, "confirmed": true}.
+19. Call execute_command with group="experiments", command="archiveExperiment", params={"experimentId": <new experiment id>}, confirmed=true.
 
 After ALL steps, return ONLY a JSON object with this exact format:
 {"experiment_id": <number>, "states": ["ready", ...all observed states...]}`,

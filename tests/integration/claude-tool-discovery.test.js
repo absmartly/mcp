@@ -514,12 +514,12 @@ async function run() {
   // ════════════════════════════════════════════════
   console.log(`\n── execute_command: experiment lifecycle ──`);
 
-  const expTimestamp = Date.now();
-
   await test('lifecycle: create experiment → ready → dev → start → stop → archive', () => {
-    const expName = `mcp_meta_test_${expTimestamp}`;
+    const expName = `mcp_meta_test_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
     const result = runClaude(
 `Do the following steps IN ORDER using ONLY the MCP tool execute_command (and get_auth_status). Do NOT use Read, Bash, or local tools.
+
+CONFIRMATION RULE: The state-transition commands (startExperiment, stopExperiment, restartExperiment, developmentExperiment, fullOnExperiment, archiveExperiment) and createExperimentFromTemplate are flagged as "dangerous" in the MCP catalog and will return a confirmation prompt (no state change) when called without confirmed=true. The confirmed argument MUST be at the TOP LEVEL of the execute_command call, ALONGSIDE group/command/params — NOT inside params. Correct shape: execute_command({"group": "experiments", "command": "archiveExperiment", "params": {"experimentId": 123}, "confirmed": true}). For ALL calls to the dangerous commands listed above, ALWAYS include "confirmed": true at the top level. If a call returns a message like "Action cancelled", "not confirmed by user", or "show the user this preview", immediately retry the SAME call adding "confirmed": true at the top level.
 
 STATE-READ RULE: state-change tools (updateExperiment, startExperiment, stopExperiment, restartExperiment, fullOnExperiment, developmentExperiment) acknowledge the request before the read replica catches up. Whenever a step asks you to read state — whether the wording is "Confirm state is X", "Note state (should be X)", or just "Note the state" — you MUST poll: call getExperiment, and if the returned \`state\` field does not match the expected value, immediately call getExperiment again (the network round-trip itself is enough of a wait). Retry up to 5 times. Record the LAST observed state — the one from the call where it either matched the expected value or you hit the retry limit.
 
@@ -537,7 +537,7 @@ STATE-READ RULE: state-change tools (updateExperiment, startExperiment, stopExpe
 12. Call execute_command with group="experiments", command="getExperiment" and params={"experimentId": <experiment id>}. Confirm state is "running".
 13. Call execute_command with group="experiments", command="stopExperiment" and params={"experimentId": <experiment id>}.
 14. Call execute_command with group="experiments", command="getExperiment" and params={"experimentId": <experiment id>}. Confirm state is "stopped".
-15. Call execute_command with group="experiments", command="archiveExperiment" and params={"experimentId": <experiment id>, "confirmed": true}.
+15. Call execute_command with group="experiments", command="archiveExperiment" and params={"experimentId": <experiment id>}, confirmed=true.
 
 After ALL steps, return ONLY a JSON object:
 {"experiment_id": <number>, "states": ["created","ready","development","running","stopped","archived"]}
@@ -575,9 +575,11 @@ The "states" array should contain the actual state observed after each getExperi
   // ════════════════════════════════════════════════
 
   await test('lifecycle: create feature flag → ready → dev → start → stop → archive', () => {
-    const flagName = `mcp_meta_flag_${expTimestamp}`;
+    const flagName = `mcp_meta_flag_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
     const result = runClaude(
 `Do the following steps IN ORDER using ONLY the MCP tools (execute_command and get_auth_status). Do NOT use Read, Bash, or local tools.
+
+CONFIRMATION RULE: The state-transition commands (startExperiment, stopExperiment, restartExperiment, developmentExperiment, fullOnExperiment, archiveExperiment) and createExperimentFromTemplate are flagged as "dangerous" in the MCP catalog and will return a confirmation prompt (no state change) when called without confirmed=true. The confirmed argument MUST be at the TOP LEVEL of the execute_command call, ALONGSIDE group/command/params — NOT inside params. Correct shape: execute_command({"group": "experiments", "command": "archiveExperiment", "params": {"experimentId": 123}, "confirmed": true}). For ALL calls to the dangerous commands listed above, ALWAYS include "confirmed": true at the top level. If a call returns a message like "Action cancelled", "not confirmed by user", or "show the user this preview", immediately retry the SAME call adding "confirmed": true at the top level.
 
 STATE-READ RULE: state-change tools (updateExperiment, startExperiment, stopExperiment, restartExperiment, fullOnExperiment, developmentExperiment) acknowledge the request before the read replica catches up. Whenever a step asks you to read state — whether the wording is "Confirm state is X", "Note state (should be X)", or just "Note the state" — you MUST poll: call getExperiment, and if the returned \`state\` field does not match the expected value, immediately call getExperiment again (the network round-trip itself is enough of a wait). Retry up to 5 times. Record the LAST observed state — the one from the call where it either matched the expected value or you hit the retry limit.
 
@@ -593,7 +595,7 @@ STATE-READ RULE: state-change tools (updateExperiment, startExperiment, stopExpe
 10. Call execute_command with group="experiments", command="startExperiment" and params={"experimentId": <experiment id>}.
 11. Call execute_command with group="experiments", command="getExperiment" and params={"experimentId": <experiment id>}. Confirm state is "running".
 12. Call execute_command with group="experiments", command="stopExperiment" and params={"experimentId": <experiment id>}.
-13. Call execute_command with group="experiments", command="archiveExperiment" and params={"experimentId": <experiment id>, "confirmed": true}.
+13. Call execute_command with group="experiments", command="archiveExperiment" and params={"experimentId": <experiment id>}, confirmed=true.
 
 After ALL steps, return ONLY a JSON object:
 {"experiment_id": <number>, "type": "feature", "states": ["created","ready","development","running","stopped","archived"]}`,
@@ -629,9 +631,11 @@ After ALL steps, return ONLY a JSON object:
   // ════════════════════════════════════════════════
 
   await test('lifecycle: restart + full_on transitions', () => {
-    const expName = `mcp_meta_fullon_${expTimestamp}`;
+    const expName = `mcp_meta_fullon_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
     const result = runClaude(
 `Do the following steps IN ORDER using ONLY the MCP tools (execute_command and get_auth_status). Do NOT use Read, Bash, or local tools.
+
+CONFIRMATION RULE: The state-transition commands (startExperiment, stopExperiment, restartExperiment, developmentExperiment, fullOnExperiment, archiveExperiment) and createExperimentFromTemplate are flagged as "dangerous" in the MCP catalog and will return a confirmation prompt (no state change) when called without confirmed=true. The confirmed argument MUST be at the TOP LEVEL of the execute_command call, ALONGSIDE group/command/params — NOT inside params. Correct shape: execute_command({"group": "experiments", "command": "archiveExperiment", "params": {"experimentId": 123}, "confirmed": true}). For ALL calls to the dangerous commands listed above, ALWAYS include "confirmed": true at the top level. If a call returns a message like "Action cancelled", "not confirmed by user", or "show the user this preview", immediately retry the SAME call adding "confirmed": true at the top level.
 
 STATE-READ RULE: state-change tools (updateExperiment, startExperiment, stopExperiment, restartExperiment, fullOnExperiment, developmentExperiment) acknowledge the request before the read replica catches up. Whenever a step asks you to read state — whether the wording is "Confirm state is X", "Note state (should be X)", or just "Note the state" — you MUST poll: call getExperiment, and if the returned \`state\` field does not match the expected value, immediately call getExperiment again (the network round-trip itself is enough of a wait). Retry up to 5 times. Record (and report in the final JSON) the LAST observed state — the one from the call where it either matched the expected value or you hit the retry limit. This is REQUIRED for the named state fields (\`restarted_state\`, \`full_on_state\`, etc.) in the final JSON summary too — never report a state from a single un-polled read.
 
@@ -648,7 +652,7 @@ STATE-READ RULE: state-change tools (updateExperiment, startExperiment, stopExpe
 11. Call execute_command with group="experiments", command="fullOnExperiment" and params={"experimentId": <new_experiment_id>, "variant": 1, "note": "testing full on"}.
 12. Apply the STATE-READ RULE: poll getExperiment with params={"experimentId": <new_experiment_id>} until \`state\` is "full_on" (up to 5 retries). Save the final observed state as FULL_ON_STATE.
 13. Call execute_command with group="experiments", command="stopExperiment" and params={"experimentId": <new_experiment_id>}.
-14. Call execute_command with group="experiments", command="archiveExperiment" and params={"experimentId": <new_experiment_id>, "confirmed": true}.
+14. Call execute_command with group="experiments", command="archiveExperiment" and params={"experimentId": <new_experiment_id>}, confirmed=true.
 
 After ALL steps, return ONLY a JSON object:
 {"experiment_id": <number>, "restarted_state": "<RESTARTED_STATE from step 10>", "full_on_state": "<FULL_ON_STATE from step 12>"}`,
