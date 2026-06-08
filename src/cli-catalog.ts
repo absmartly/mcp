@@ -176,7 +176,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         description: 'Update an existing experiment',
         params: [
           { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
-          { name: 'data', type: 'object', required: true, description: 'Fields to update' },
+          { name: 'changes', type: 'object', required: true, description: 'Fields to update — e.g. { state: "ready" }, { name: "new" }, { primary_metric: { metric_id: 123 } }, etc. (Core reads params.changes; calls with `data` are silently ignored.)' },
         ],
         returns: 'Updated experiment',
       },
@@ -193,7 +193,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         description: 'Stop a running experiment',
         params: [
           { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
-          { name: 'reason', type: 'string', required: false, description: 'Stop reason' },
+          { name: 'reason', type: 'string', required: true, description: 'Stop reason (required by core validator). One of: hypothesis_rejected, hypothesis_iteration, user_feedback, data_issue, implementation_issue, experiment_setup_issue, guardrail_metric_impact, secondary_metric_impact, …' },
           { name: 'note', type: 'string', required: false, description: 'Optional note' },
         ],
         returns: 'Stop result',
@@ -211,7 +211,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         description: 'Restart a stopped experiment with optional changes',
         params: [
           { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
-          { name: 'reason', type: 'string', required: false, description: 'Restart reason' },
+          { name: 'reason', type: 'string', required: true, description: 'Restart reason (required by backend). Same enum as stopExperiment: hypothesis_rejected, hypothesis_iteration, user_feedback, data_issue, implementation_issue, experiment_setup_issue, guardrail_metric_impact, secondary_metric_impact, operational_decision, performance_issue, testing, tracking_issue, code_cleaned_up, other' },
           { name: 'type', type: 'string', required: false, description: 'Restart type' },
           { name: 'note', type: 'string', required: false, description: 'Optional note' },
         ],

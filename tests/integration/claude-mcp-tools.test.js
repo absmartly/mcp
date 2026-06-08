@@ -142,47 +142,6 @@ function assertToolResult(result, check, label) {
   return result;
 }
 
-function extractJsonObject(text) {
-  // Prefer a fenced ```json``` block when present.
-  const fenced = text.match(/```(?:json)?\s*\n([\s\S]*?)\n```/);
-  if (fenced) {
-    try { return JSON.parse(fenced[1]); } catch {}
-  }
-  // Otherwise, walk braces to find the first balanced { ... } that contains "experiment_id".
-  for (let start = text.indexOf('{'); start !== -1; start = text.indexOf('{', start + 1)) {
-    let depth = 0;
-    for (let i = start; i < text.length; i++) {
-      const ch = text[i];
-      if (ch === '{') depth++;
-      else if (ch === '}') {
-        depth--;
-        if (depth === 0) {
-          const candidate = text.slice(start, i + 1);
-          if (candidate.includes('"experiment_id"')) {
-            try { return JSON.parse(candidate); } catch {}
-          }
-          break;
-        }
-      }
-    }
-  }
-  return null;
-}
-
-// Build a human-readable dump of every tool call result captured during the
-// run. Trims each to a reasonable size so a long lifecycle doesn't blow up
-// the test failure log.
-function formatToolResults(result, perItemMax = 600) {
-  const items = result?.toolResults || [];
-  if (items.length === 0) return '(no tool results captured)';
-  return items.map((text, idx) => {
-    const trimmed = text.length > perItemMax
-      ? text.slice(0, perItemMax) + ` … (+${text.length - perItemMax} chars truncated)`
-      : text;
-    return `    [tool ${idx + 1}/${items.length}]\n      ${trimmed.split('\n').join('\n      ')}`;
-  }).join('\n');
-}
-
 async function run() {
   const ownedFixtures = [];
   let serverVerified = false;
@@ -350,71 +309,11 @@ async function run() {
     });
 
     // ── Experiment lifecycle tests ──
-
-    await test('experiment lifecycle: create → ready → dev → start → stop → restart → full_on → stop → archive', () => {
-      const expName = `mcp_test_exp_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-      const result = runClaude(
-`Do the following steps IN ORDER. Wait for each result before proceeding.
-
-CONFIRMATION RULE: The state-transition commands (startExperiment, stopExperiment, restartExperiment, developmentExperiment, fullOnExperiment, archiveExperiment) and createExperimentFromTemplate are flagged as "dangerous" in the MCP catalog and will return a confirmation prompt (no state change) when called without confirmed=true. The confirmed argument MUST be at the TOP LEVEL of the execute_command call, ALONGSIDE group/command/params — NOT inside params. Correct shape: execute_command({"group": "experiments", "command": "archiveExperiment", "params": {"experimentId": 123}, "confirmed": true}). For ALL calls to the dangerous commands listed above, ALWAYS include "confirmed": true at the top level. If a call returns a message like "Action cancelled", "not confirmed by user", or "show the user this preview", immediately retry the SAME call adding "confirmed": true at the top level.
-
-STATE-READ RULE: state-change tools (updateExperiment, startExperiment, stopExperiment, restartExperiment, fullOnExperiment, developmentExperiment) acknowledge the request before the read replica catches up. Whenever a step asks you to read state — whether the wording is "Confirm state is X", "Note state (should be X)", or just "Note the state" — you MUST poll: call getExperiment, and if the returned \`state\` field does not match the expected value, immediately call getExperiment again (the network round-trip itself is enough of a wait). Retry up to 5 times. Record the LAST observed state — the one from the call where it either matched the expected value or you hit the retry limit.
-
-1. Call the get_auth_status tool with no params. Note the authenticated user's email — call it OWNER_EMAIL.
-2. Call execute_command with group="apps", command="listApps", params={"items": 1}. Note the first application's name — call it APP_NAME.
-3. Call execute_command with group="units", command="listUnits", params={"items": 1}. Note the first unit type's name — call it UNIT_NAME.
-4. Call execute_command with group="metrics", command="listMetrics", params={"items": 1}. Note the first metric's name — call it METRIC_NAME.
-5. Call execute_command with group="experiments", command="createExperimentFromTemplate", params={"templateContent": "---\\nname: ${expName}\\ndisplay_name: \\"${expName}\\"\\ntype: test\\nstate: created\\npercentage_of_traffic: 100\\npercentages: 50/50\\nunit_type: <UNIT_NAME>\\napplication: <APP_NAME>\\nprimary_metric: <METRIC_NAME>\\nowners:\\n  - <OWNER_EMAIL>\\n---\\n\\n## Variants\\n\\n### variant_0\\n\\nname: control\\nconfig: {}\\n\\n---\\n\\n### variant_1\\n\\nname: treatment\\nconfig: {}\\n\\n---\\n\\n## Description\\n\\nmcp lifecycle integration test\\n"}. Substitute the actual values for <OWNER_EMAIL>, <UNIT_NAME>, <APP_NAME>, <METRIC_NAME> in the templateContent string before sending. Note the returned experiment id.
-6. Call execute_command with group="experiments", command="updateExperiment", params={"experimentId": <experiment id>, "data": {"state": "ready"}}.
-7. Call execute_command with group="experiments", command="getExperiment", params={"experimentId": <experiment id>}. Confirm state is "ready".
-8. Call execute_command with group="experiments", command="developmentExperiment", params={"experimentId": <experiment id>, "note": "dev testing"}.
-9. Call execute_command with group="experiments", command="getExperiment", params={"experimentId": <experiment id>}. Note state.
-10. Call execute_command with group="experiments", command="startExperiment", params={"experimentId": <experiment id>}.
-11. Call execute_command with group="experiments", command="getExperiment", params={"experimentId": <experiment id>}. Confirm state is "running".
-12. Call execute_command with group="experiments", command="stopExperiment", params={"experimentId": <experiment id>}.
-13. Call execute_command with group="experiments", command="getExperiment", params={"experimentId": <experiment id>}. Confirm state is "stopped".
-14. Call execute_command with group="experiments", command="restartExperiment", params={"experimentId": <experiment id>}. Note the new experiment id returned.
-15. Call execute_command with group="experiments", command="getExperiment", params={"experimentId": <new experiment id>}. Note the state.
-16. Call execute_command with group="experiments", command="fullOnExperiment", params={"experimentId": <new experiment id>, "variant": 1, "note": "going full on"}.
-17. Call execute_command with group="experiments", command="getExperiment", params={"experimentId": <new experiment id>}. Note state.
-18. Call execute_command with group="experiments", command="stopExperiment", params={"experimentId": <new experiment id>}.
-19. Call execute_command with group="experiments", command="archiveExperiment", params={"experimentId": <new experiment id>}, confirmed=true.
-
-After ALL steps, return ONLY a JSON object with this exact format:
-{"experiment_id": <number>, "states": ["ready", ...all observed states...]}`,
-        { timeoutMs: 900_000 }
-      );
-      if (!result.ok) throw new Error(`claude failed: ${result.error}`);
-      if (!result.output) throw new Error(`claude returned empty output. error=${result.error || 'none'}`);
-
-      let parsed;
-      try {
-        parsed = extractJsonObject(result.output);
-        if (!parsed) throw new Error('no JSON object found');
-      } catch {
-        throw new Error(`Failed to parse lifecycle result: ${result.output.substring(0, 500)}\n  --- tool calls ---\n${formatToolResults(result)}`);
-      }
-
-      if (!parsed.experiment_id) throw new Error(`No experiment_id in result\n  --- tool calls ---\n${formatToolResults(result)}`);
-      if (!Array.isArray(parsed.states)) throw new Error('No states array in result');
-
-      const expectedStates = ['running', 'stopped'];
-      for (const state of expectedStates) {
-        if (!parsed.states.includes(state)) {
-          throw new Error(`Missing state "${state}" in lifecycle. Got: ${JSON.stringify(parsed.states)}\n  --- tool calls ---\n${formatToolResults(result)}`);
-        }
-      }
-
-      console.log(`\n    experiment_id=${parsed.experiment_id} states=${JSON.stringify(parsed.states)}`);
-      process.stdout.write('    ');
-      return result;
-    });
-
-    // Note: a `type: feature` lifecycle test used to live here too. It was
-    // removed because the test-1 sandbox returns Internal Server Error for
-    // every feature-flag create attempt regardless of payload, which is a
-    // backend issue not reproducible against demo-2 / sandbox. The experiment
-    // lifecycle above covers the same MCP code paths.
+    // Moved to tests/integration/lifecycle-sdk.test.ts — that file drives the
+    // full state machine via direct MCP SDK calls with real setTimeout-based
+    // polling, which is deterministic. The Claude-driven version that used to
+    // live here was flaky (haiku occasionally lost track of MCP tools after
+    // ~7 rapid calls; long prompts compounded per-step failure rates).
 
   } finally {
     for (const fixture of ownedFixtures) {
