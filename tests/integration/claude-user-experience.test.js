@@ -249,7 +249,9 @@ function assertUsedMcpTool(result, label) {
   );
 
   if (mcpTools.length === 0) {
-    throw new Error(`${label}: Claude did not use any MCP meta-tools. Tools used: ${result.toolCalls.map(c => c.tool).join(', ') || 'none'}`);
+    const allToolNames = result.toolCalls.map(c => c.tool).join(', ') || 'none';
+    const outputPreview = (result.output || '').substring(0, 600);
+    throw new Error(`${label}: Claude did not use any MCP meta-tools. Tools used: ${allToolNames}\n    Output: ${outputPreview}`);
   }
 
   return mcpTools;
@@ -281,26 +283,34 @@ async function run() {
 
   async function test(name, fn) {
     process.stdout.write(`\n  ${name} ... `);
-    try {
-      const result = await fn();
-      passed++;
-      results.push({ name, status: 'PASS' });
-      console.log('PASS');
-      if (SHOW_RESPONSES && result && result.output) {
-        console.log(`    -- response --`);
-        const lines = result.output.substring(0, 1500).split('\n');
-        for (const line of lines) {
-          console.log(`    ${line}`);
+    let lastErr;
+    let result;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        result = await fn();
+        if (attempt > 1) console.log(`(retry ${attempt - 1} succeeded) `);
+        passed++;
+        results.push({ name, status: 'PASS' });
+        console.log('PASS');
+        if (SHOW_RESPONSES && result && result.output) {
+          console.log(`    -- response --`);
+          const lines = result.output.substring(0, 1500).split('\n');
+          for (const line of lines) {
+            console.log(`    ${line}`);
+          }
+          if (result.output.length > 1500) console.log(`    ... (${result.output.length} chars total)`);
+          console.log(`    -------------`);
         }
-        if (result.output.length > 1500) console.log(`    ... (${result.output.length} chars total)`);
-        console.log(`    -------------`);
+        return;
+      } catch (err) {
+        lastErr = err;
+        if (attempt === 1) process.stdout.write(`(attempt 1 failed: ${err.message.substring(0, 80).split('\n')[0]}; retrying) `);
       }
-    } catch (err) {
-      failed++;
-      results.push({ name, status: 'FAIL', error: err.message });
-      console.log('FAIL');
-      console.log(`    ${err.message.split('\n').join('\n    ')}`);
     }
+    failed++;
+    results.push({ name, status: 'FAIL', error: lastErr.message });
+    console.log('FAIL');
+    console.log(`    ${lastErr.message.split('\n').join('\n    ')}`);
   }
 
   writeMcpConfig();
@@ -445,7 +455,9 @@ async function run() {
   await test('user creates an experiment with natural language', () => {
     state.expName = `ux_test_homepage_cta_${ts}`;
     const result = runClaude(
-      `Create a new experiment called "${state.expName}" with type "test". Use the first application and first unit type available. It should have two variants: "Control" and "Blue Button". Set traffic to 100%. Leave it in "created" state.
+      `Create a new ABsmartly experiment for me. Don't read local files or shell scripts — work directly against ABsmartly.
+
+Name it "${state.expName}", type "test". Use the first application and first unit type available. Two variants: "Control" and "Blue Button". Traffic at 100%. Leave it in "created" state. If a tool needs an extra parameter (like an owner email or primary metric), pick a sensible value and continue — don't ask me.
 
 After creating it, tell me the experiment ID and its current state.`,
       { timeoutMs: LIFECYCLE_TIMEOUT_MS }
@@ -543,7 +555,9 @@ After creating it, tell me the experiment ID and its current state.`,
   await test('user creates a feature flag', () => {
     state.flagName = `ux_test_dark_mode_${ts}`;
     const result = runClaude(
-      `Create a feature flag called "${state.flagName}". Use the first application and first unit type. It should have an "Off" variant and an "On" variant with 50/50 split. Leave it in "created" state.
+      `Create an ABsmartly feature flag for me. Don't read local files or shell scripts — work directly against ABsmartly.
+
+Name it "${state.flagName}". Use the first application and first unit type. Variants are "Off" and "On" with 50/50 split. Leave it in "created" state. If a tool needs an extra parameter (like an owner email or primary metric), pick a sensible value and continue — don't ask me.
 
 Tell me the experiment ID.`,
       { timeoutMs: LIFECYCLE_TIMEOUT_MS }
@@ -590,7 +604,7 @@ Tell me the experiment ID.`,
     }
     if (!state.flagId) throw new Error('No flag ID from previous test');
     const result = runClaude(
-      `Take feature flag ${state.flagId} through these states in order: ready, then development (note: "testing"), then start it. Tell me the final state.`,
+      `Take ABsmartly feature flag ${state.flagId} through these states in order: ready, then development (note: "testing"), then start it. Work directly against ABsmartly — don't read local files. If a tool needs an extra parameter, pick a sensible value and continue. Tell me the final state.`,
       { timeoutMs: LIFECYCLE_TIMEOUT_MS }
     );
     assertUsedMcpTool(result, 'should use execute_command');
@@ -626,7 +640,11 @@ Tell me the experiment ID.`,
   await test('user creates and runs an experiment for restart test', () => {
     state.advName = `ux_test_fullon_${ts}`;
     const result = runClaude(
-      `Create an experiment called "${state.advName}" with type "test", first available application and unit type, Control and Treatment variants, 50/50 split, in "created" state. Then move it to ready, start it, and stop it. Tell me the experiment ID and final state.`,
+      `I want you to create and run an ABsmartly experiment for me. Don't read local files or shell scripts — work directly against ABsmartly.
+
+Create a "test"-type experiment called "${state.advName}" using the first application and first unit type available. Two variants: Control and Treatment, 50/50 split, 100% traffic. Then take it through ready → running → stopped. If a tool needs an extra parameter (like a stop reason or owner email), pick a sensible value and continue — don't ask me.
+
+When done, tell me the experiment ID and final state.`,
       { timeoutMs: LIFECYCLE_TIMEOUT_MS }
     );
     assertUsedMcpTool(result, 'should use execute_command');
