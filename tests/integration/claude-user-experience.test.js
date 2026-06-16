@@ -646,14 +646,19 @@ Tell me the experiment ID.`,
   await test('user restarts the experiment and sets it to full-on', () => {
     if (!state.advId) throw new Error('No experiment ID from previous test');
     const result = runClaude(
-      `Restart experiment ${state.advId}. Note: restarting creates a new experiment — use the new ID from the response. Then set the new experiment to full-on with variant 1 (note: "going full on"). Tell me the new experiment ID and confirm it's in full_on state.`,
+      `Restart experiment ${state.advId} (any reasonable reason — e.g. hypothesis_iteration). Note: restarting creates a new experiment — use the new ID from the response. Then set the new experiment to full-on with variant 1 (note: "going full on"). If the tools ask for confirmation, retry with confirmed: true automatically. Tell me the new experiment ID and confirm it's in full_on state.`,
       { timeoutMs: LIFECYCLE_TIMEOUT_MS }
     );
     assertUsedMcpTool(result, 'should use execute_command');
 
+    // fullOnExperiment does NOT change the experiment's `state` field — the
+    // state stays "running" and the backend records full_on_at /
+    // full_on_variant on the row. Accept any of: literal "full_on" mention,
+    // "full on" in prose, or "full_on_at" timestamp surfacing in the model's
+    // summary as evidence the call succeeded.
     const allText = [result.output, ...result.toolResults].join('\n').toLowerCase();
     const fullOnMatch = allText.includes('full_on') || allText.includes('full on');
-    if (!fullOnMatch) throw new Error(`Expected full_on state in response: ${result.output.substring(0, 500)}`);
+    if (!fullOnMatch) throw new Error(`Expected full_on signal in response: ${result.output.substring(0, 500)}`);
 
     const newId = extractExperimentId(result);
     if (newId) state.advId = newId;

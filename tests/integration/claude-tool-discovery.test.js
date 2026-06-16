@@ -517,32 +517,23 @@ async function run() {
   await test('lifecycle: create experiment → ready → dev → start → stop → archive', () => {
     const expName = `mcp_meta_test_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
     const result = runClaude(
-`Do the following steps IN ORDER using ONLY the MCP tool execute_command (and get_auth_status). Do NOT use Read, Bash, or local tools.
+`Drive an experiment through its lifecycle using the MCP server. Use discover_commands / get_command_docs to learn the exact tool shapes. Do NOT use Read, Bash, or local tools.
 
-CONFIRMATION RULE: The state-transition commands (startExperiment, stopExperiment, restartExperiment, developmentExperiment, fullOnExperiment, archiveExperiment) and createExperimentFromTemplate are flagged as "dangerous" in the MCP catalog and will return a confirmation prompt (no state change) when called without confirmed=true. The confirmed argument MUST be at the TOP LEVEL of the execute_command call, ALONGSIDE group/command/params — NOT inside params. Correct shape: execute_command({"group": "experiments", "command": "archiveExperiment", "params": {"experimentId": 123}, "confirmed": true}). For ALL calls to the dangerous commands listed above, ALWAYS include "confirmed": true at the top level. If a call returns a message like "Action cancelled", "not confirmed by user", or "show the user this preview", immediately retry the SAME call adding "confirmed": true at the top level.
+Use the first available application, unit type, and metric, and the authenticated user's email as the owner.
 
-STATE-READ RULE: state-change tools (updateExperiment, startExperiment, stopExperiment, restartExperiment, fullOnExperiment, developmentExperiment) acknowledge the request before the read replica catches up. Whenever a step asks you to read state — whether the wording is "Confirm state is X", "Note state (should be X)", or just "Note the state" — you MUST poll: call getExperiment, and if the returned \`state\` field does not match the expected value, immediately call getExperiment again (the network round-trip itself is enough of a wait). Retry up to 5 times. Record the LAST observed state — the one from the call where it either matched the expected value or you hit the retry limit.
+Steps:
+1. Create a new experiment of type "test" named "${expName}" (state "created", two variants Control/Treatment, 50/50 split, 100% traffic).
+2. Move it to the "ready" state.
+3. Put it into the "development" state.
+4. Start it so it goes "running".
+5. Stop it.
+6. Archive it.
 
-1. Call the get_auth_status tool with no params. Note the authenticated user's email — call it OWNER_EMAIL.
-2. Call execute_command with group="apps", command="listApps" and params={"items": 1}. Note the first application's name — call it APP_NAME.
-3. Call execute_command with group="units", command="listUnits" and params={"items": 1}. Note the first unit type's name — call it UNIT_NAME.
-4. Call execute_command with group="metrics", command="listMetrics" and params={"items": 1}. Note the first metric's name — call it METRIC_NAME.
-5. Call execute_command with group="experiments", command="createExperimentFromTemplate" and params={"templateContent": "---\\nname: ${expName}\\ndisplay_name: \\"${expName}\\"\\ntype: test\\nstate: created\\npercentage_of_traffic: 100\\npercentages: 50/50\\nunit_type: <UNIT_NAME>\\napplication: <APP_NAME>\\nprimary_metric: <METRIC_NAME>\\nowners:\\n  - <OWNER_EMAIL>\\n---\\n\\n## Variants\\n\\n### variant_0\\n\\nname: control\\nconfig: {}\\n\\n---\\n\\n### variant_1\\n\\nname: treatment\\nconfig: {}\\n\\n---\\n\\n## Description\\n\\nmeta lifecycle integration test\\n"}. Substitute <OWNER_EMAIL>, <UNIT_NAME>, <APP_NAME>, <METRIC_NAME> in the templateContent string before sending. Note the returned experiment id.
-6. Call execute_command with group="experiments", command="getExperiment" and params={"experimentId": <experiment id>}. Confirm state is "created".
-7. Call execute_command with group="experiments", command="updateExperiment" and params={"experimentId": <experiment id>, "changes": {"state": "ready"}}.
-8. Call execute_command with group="experiments", command="getExperiment" and params={"experimentId": <experiment id>}. Confirm state is "ready".
-9. Call execute_command with group="experiments", command="developmentExperiment" and params={"experimentId": <experiment id>, "note": "testing"}.
-10. Call execute_command with group="experiments", command="getExperiment" and params={"experimentId": <experiment id>}. Confirm state is "development".
-11. Call execute_command with group="experiments", command="startExperiment" and params={"experimentId": <experiment id>}.
-12. Call execute_command with group="experiments", command="getExperiment" and params={"experimentId": <experiment id>}. Confirm state is "running".
-13. Call execute_command with group="experiments", command="stopExperiment" and params={"experimentId": <experiment id>}.
-14. Call execute_command with group="experiments", command="getExperiment" and params={"experimentId": <experiment id>}. Confirm state is "stopped".
-15. Call execute_command with group="experiments", command="archiveExperiment" and params={"experimentId": <experiment id>}, confirmed=true.
+After each transition, observe the resulting state. Return ONLY a JSON object:
 
-After ALL steps, return ONLY a JSON object:
 {"experiment_id": <number>, "states": ["created","ready","development","running","stopped","archived"]}
 
-The "states" array should contain the actual state observed after each getExperiment call, plus "archived" for the final transition.`,
+The "states" array should contain the actual state observed after each transition.`,
       { timeoutMs: 900_000 }
     );
     if (!result.ok) throw new Error(`claude failed: ${result.error}`);
@@ -577,27 +568,20 @@ The "states" array should contain the actual state observed after each getExperi
   await test('lifecycle: create feature flag → ready → dev → start → stop → archive', () => {
     const flagName = `mcp_meta_flag_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
     const result = runClaude(
-`Do the following steps IN ORDER using ONLY the MCP tools (execute_command and get_auth_status). Do NOT use Read, Bash, or local tools.
+`Drive a feature flag through its lifecycle using the MCP server. Use discover_commands / get_command_docs to learn the exact tool shapes. Do NOT use Read, Bash, or local tools.
 
-CONFIRMATION RULE: The state-transition commands (startExperiment, stopExperiment, restartExperiment, developmentExperiment, fullOnExperiment, archiveExperiment) and createExperimentFromTemplate are flagged as "dangerous" in the MCP catalog and will return a confirmation prompt (no state change) when called without confirmed=true. The confirmed argument MUST be at the TOP LEVEL of the execute_command call, ALONGSIDE group/command/params — NOT inside params. Correct shape: execute_command({"group": "experiments", "command": "archiveExperiment", "params": {"experimentId": 123}, "confirmed": true}). For ALL calls to the dangerous commands listed above, ALWAYS include "confirmed": true at the top level. If a call returns a message like "Action cancelled", "not confirmed by user", or "show the user this preview", immediately retry the SAME call adding "confirmed": true at the top level.
+Use the first available application, unit type, and metric, and the authenticated user's email as the owner.
 
-STATE-READ RULE: state-change tools (updateExperiment, startExperiment, stopExperiment, restartExperiment, fullOnExperiment, developmentExperiment) acknowledge the request before the read replica catches up. Whenever a step asks you to read state — whether the wording is "Confirm state is X", "Note state (should be X)", or just "Note the state" — you MUST poll: call getExperiment, and if the returned \`state\` field does not match the expected value, immediately call getExperiment again (the network round-trip itself is enough of a wait). Retry up to 5 times. Record the LAST observed state — the one from the call where it either matched the expected value or you hit the retry limit.
+Steps:
+1. Create a new FEATURE flag (type "feature") named "${flagName}" (state "created", variants "off"/"on", 50/50 split, 100% traffic).
+2. Move it to "ready".
+3. Put it into "development".
+4. Start it.
+5. Stop it.
+6. Archive it.
 
-1. Call the get_auth_status tool with no params. Note the authenticated user's email — call it OWNER_EMAIL.
-2. Call execute_command with group="apps", command="listApps" and params={"items": 1}. Note the first application's name — call it APP_NAME.
-3. Call execute_command with group="units", command="listUnits" and params={"items": 1}. Note the first unit type's name — call it UNIT_NAME.
-4. Call execute_command with group="metrics", command="listMetrics" and params={"items": 1}. Note the first metric's name — call it METRIC_NAME.
-5. Call execute_command with group="experiments", command="createExperimentFromTemplate" and params={"templateContent": "---\\nname: ${flagName}\\ndisplay_name: \\"${flagName}\\"\\ntype: feature\\nstate: created\\npercentage_of_traffic: 100\\npercentages: 50/50\\nunit_type: <UNIT_NAME>\\napplication: <APP_NAME>\\nprimary_metric: <METRIC_NAME>\\nowners:\\n  - <OWNER_EMAIL>\\n---\\n\\n## Variants\\n\\n### variant_0\\n\\nname: off\\nconfig: {}\\n\\n---\\n\\n### variant_1\\n\\nname: on\\nconfig: {}\\n\\n---\\n\\n## Description\\n\\nmeta feature-flag lifecycle integration test\\n"}. Substitute the actual values for <OWNER_EMAIL>, <UNIT_NAME>, <APP_NAME>, <METRIC_NAME> in the templateContent string before sending. Note the returned experiment id.
-6. Call execute_command with group="experiments", command="updateExperiment" and params={"experimentId": <experiment id>, "changes": {"state": "ready"}}.
-7. Call execute_command with group="experiments", command="getExperiment" and params={"experimentId": <experiment id>}. Confirm state is "ready".
-8. Call execute_command with group="experiments", command="developmentExperiment" and params={"experimentId": <experiment id>, "note": "testing"}.
-9. Call execute_command with group="experiments", command="getExperiment" and params={"experimentId": <experiment id>}. Note state.
-10. Call execute_command with group="experiments", command="startExperiment" and params={"experimentId": <experiment id>}.
-11. Call execute_command with group="experiments", command="getExperiment" and params={"experimentId": <experiment id>}. Confirm state is "running".
-12. Call execute_command with group="experiments", command="stopExperiment" and params={"experimentId": <experiment id>}.
-13. Call execute_command with group="experiments", command="archiveExperiment" and params={"experimentId": <experiment id>}, confirmed=true.
+After each transition, observe the resulting state. Return ONLY a JSON object:
 
-After ALL steps, return ONLY a JSON object:
 {"experiment_id": <number>, "type": "feature", "states": ["created","ready","development","running","stopped","archived"]}`,
       { timeoutMs: 900_000 }
     );
@@ -650,29 +634,23 @@ After ALL steps, return ONLY a JSON object:
   await test('lifecycle: restart + full_on transitions', () => {
     const expName = `mcp_meta_fullon_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
     const result = runClaude(
-`Do the following steps IN ORDER using ONLY the MCP tools (execute_command and get_auth_status). Do NOT use Read, Bash, or local tools.
+`Exercise the restart + full-on flow using the MCP server. Use discover_commands / get_command_docs to learn the exact tool shapes. Do NOT use Read, Bash, or local tools.
 
-CONFIRMATION RULE: The state-transition commands (startExperiment, stopExperiment, restartExperiment, developmentExperiment, fullOnExperiment, archiveExperiment) and createExperimentFromTemplate are flagged as "dangerous" in the MCP catalog and will return a confirmation prompt (no state change) when called without confirmed=true. The confirmed argument MUST be at the TOP LEVEL of the execute_command call, ALONGSIDE group/command/params — NOT inside params. Correct shape: execute_command({"group": "experiments", "command": "archiveExperiment", "params": {"experimentId": 123}, "confirmed": true}). For ALL calls to the dangerous commands listed above, ALWAYS include "confirmed": true at the top level. If a call returns a message like "Action cancelled", "not confirmed by user", or "show the user this preview", immediately retry the SAME call adding "confirmed": true at the top level.
+Use the first available application, unit type, and metric, and the authenticated user's email as the owner.
 
-STATE-READ RULE: state-change tools (updateExperiment, startExperiment, stopExperiment, restartExperiment, fullOnExperiment, developmentExperiment) acknowledge the request before the read replica catches up. Whenever a step asks you to read state — whether the wording is "Confirm state is X", "Note state (should be X)", or just "Note the state" — you MUST poll: call getExperiment, and if the returned \`state\` field does not match the expected value, immediately call getExperiment again (the network round-trip itself is enough of a wait). Retry up to 5 times. Record (and report in the final JSON) the LAST observed state — the one from the call where it either matched the expected value or you hit the retry limit. This is REQUIRED for the named state fields (\`restarted_state\`, \`full_on_state\`, etc.) in the final JSON summary too — never report a state from a single un-polled read.
+Steps:
+1. Create an experiment of type "test" named "${expName}" with two variants (Control/Treatment, 50/50, 100% traffic).
+2. Move it to "ready", start it, then stop it.
+3. Restart it. The restart spawns a NEW experiment id — switch to that id from here on.
+4. Observe the state of the restarted experiment (it should be "running").
+5. Take the restarted experiment to full-on with variant 1.
+   IMPORTANT: fullOnExperiment does NOT change the \`state\` field. The state stays "running" and the backend records full_on_at / full_on_variant on the row. Do not expect a state transition.
+6. Observe the state again (still "running") and note whether full_on_at is now set on the experiment.
+7. Stop the restarted experiment, then archive it.
 
-1. Call the get_auth_status tool with no params. Note the authenticated user's email — call it OWNER_EMAIL.
-2. Call execute_command with group="apps", command="listApps" and params={"items": 1}. Note the first application's name — call it APP_NAME.
-3. Call execute_command with group="units", command="listUnits" and params={"items": 1}. Note the first unit type's name — call it UNIT_NAME.
-4. Call execute_command with group="metrics", command="listMetrics" and params={"items": 1}. Note the first metric's name — call it METRIC_NAME.
-5. Call execute_command with group="experiments", command="createExperimentFromTemplate" and params={"templateContent": "---\\nname: ${expName}\\ndisplay_name: \\"${expName}\\"\\ntype: test\\nstate: created\\npercentage_of_traffic: 100\\npercentages: 50/50\\nunit_type: <UNIT_NAME>\\napplication: <APP_NAME>\\nprimary_metric: <METRIC_NAME>\\nowners:\\n  - <OWNER_EMAIL>\\n---\\n\\n## Variants\\n\\n### variant_0\\n\\nname: control\\nconfig: {}\\n\\n---\\n\\n### variant_1\\n\\nname: treatment\\nconfig: {}\\n\\n---\\n\\n## Description\\n\\nmeta restart + full_on integration test\\n"}. Substitute the actual values for <OWNER_EMAIL>, <UNIT_NAME>, <APP_NAME>, <METRIC_NAME> in the templateContent string before sending. Note the returned experiment id.
-6. Call execute_command with group="experiments", command="updateExperiment" and params={"experimentId": <experiment id>, "changes": {"state": "ready"}}.
-7. Call execute_command with group="experiments", command="startExperiment" and params={"experimentId": <experiment id>}.
-8. Call execute_command with group="experiments", command="stopExperiment" and params={"experimentId": <experiment id>}.
-9. Call execute_command with group="experiments", command="restartExperiment" and params={"experimentId": <experiment id>}. IMPORTANT: The response contains a NEW experiment object with a new id. Use that new id for all subsequent steps.
-10. Apply the STATE-READ RULE: poll getExperiment with params={"experimentId": <new_experiment_id>} until \`state\` is "running" (up to 5 retries). Save the final observed state as RESTARTED_STATE.
-11. Call execute_command with group="experiments", command="fullOnExperiment" and params={"experimentId": <new_experiment_id>, "variant": 1, "note": "testing full on"}. NOTE: fullOnExperiment does NOT change the \`state\` field — the experiment stays in "running" state and the backend sets companion fields (\`full_on_at\`, \`full_on_variant\`) instead. Do not expect a state transition.
-12. Call execute_command with group="experiments", command="getExperiment" and params={"experimentId": <new_experiment_id>}. The \`state\` will still be "running" — save it as FULL_ON_STATE and also record whether the response includes \`full_on_at\` (a timestamp) — that field being present is the real signal that fullOnExperiment succeeded.
-13. Call execute_command with group="experiments", command="stopExperiment" and params={"experimentId": <new_experiment_id>}.
-14. Call execute_command with group="experiments", command="archiveExperiment" and params={"experimentId": <new_experiment_id>}, confirmed=true.
+Return ONLY a JSON object:
 
-After ALL steps, return ONLY a JSON object:
-{"experiment_id": <number>, "restarted_state": "<RESTARTED_STATE from step 10>", "full_on_state": "<FULL_ON_STATE from step 12>"}`,
+{"experiment_id": <number>, "restarted_state": "<state after restart>", "full_on_state": "<state after fullOn>"}`,
       { timeoutMs: 900_000 }
     );
     if (!result.ok) throw new Error(`claude failed: ${result.error}`);

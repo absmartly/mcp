@@ -203,6 +203,8 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         description: 'Archive an experiment',
         params: [
           { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
+          { name: 'unarchive', type: 'boolean', required: false, description: 'Set true to unarchive a previously archived experiment instead' },
+          { name: 'note', type: 'string', required: false, description: 'Optional note recorded with the archive action' },
         ],
         returns: 'Archive result',
         dangerous: true,
@@ -222,6 +224,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         description: 'Put experiment into development mode',
         params: [
           { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
+          { name: 'note', type: 'string', required: false, description: 'Optional note recorded with the transition' },
         ],
         returns: 'Development mode result',
         dangerous: true,
@@ -231,6 +234,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         params: [
           { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
           { name: 'variant', type: 'number', required: false, description: 'Variant index for full-on' },
+          { name: 'note', type: 'string', required: false, description: 'Optional note recorded with the transition' },
         ],
         returns: 'Full-on result',
         dangerous: true,
@@ -1137,6 +1141,69 @@ export function getCommandEntry(group: string, command: string): CommandEntry | 
   const cmdDef = groupDef.commands[command];
   if (!cmdDef) return undefined;
   return { ...cmdDef, command, group };
+}
+
+// Levenshtein distance for "did you mean" suggestions on misspelled params.
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  const m = a.length;
+  const n = b.length;
+  const prev: number[] = new Array(n + 1);
+  const curr: number[] = new Array(n + 1);
+  for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+    }
+    for (let j = 0; j <= n; j++) prev[j] = curr[j];
+  }
+  return prev[n];
+}
+
+function suggestParam(unknown: string, valid: string[]): string | undefined {
+  const best = valid
+    .map((name) => ({ name, dist: levenshtein(unknown.toLowerCase(), name.toLowerCase()) }))
+    .filter((c) => c.dist <= Math.max(2, Math.floor(unknown.length / 3)))
+    .sort((a, b) => a.dist - b.dist)[0];
+  return best?.name;
+}
+
+/**
+ * Validate params against a command's schema. Returns an array of error
+ * messages. Empty array means the params are valid.
+ *
+ * - Unknown params: rejected with "did you mean X?" if a close match exists.
+ * - Missing required params: rejected with the list of expected params.
+ * - Type checks are not enforced here — the underlying core/API functions
+ *   still validate values, and string vs number is often coerced by
+ *   JSON/MCP transports.
+ */
+export function validateCommandParams(
+  entry: CommandEntry,
+  provided: Record<string, unknown>
+): string[] {
+  const errors: string[] = [];
+  const validNames = entry.params.map((p) => p.name);
+  const validSet = new Set(validNames);
+
+  for (const key of Object.keys(provided)) {
+    if (validSet.has(key)) continue;
+    const guess = suggestParam(key, validNames);
+    const baseMsg = `Unknown param "${key}" for ${entry.group}.${entry.command}. Valid params: ${validNames.length > 0 ? validNames.join(', ') : '(none)'}.`;
+    errors.push(guess ? `${baseMsg} Did you mean "${guess}"?` : baseMsg);
+  }
+
+  for (const p of entry.params) {
+    if (p.required && provided[p.name] === undefined) {
+      errors.push(`Missing required param "${p.name}" (${p.type}) for ${entry.group}.${entry.command}: ${p.description}`);
+    }
+  }
+
+  return errors;
 }
 
 export function getGroupCommands(group: string): CommandEntry[] {
