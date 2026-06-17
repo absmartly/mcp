@@ -1,6 +1,6 @@
 import type { HttpClient, HttpRequestConfig, HttpResponse } from '@absmartly/cli/api-client';
 import { debug } from './config';
-import { MCP_VERSION } from './version';
+import { MCP_VERSION, CLI_CORE_VERSION } from './version';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
 const API_VERSION_PREFIX = '/v1';
@@ -56,7 +56,7 @@ export class FetchHttpClient implements HttpClient {
     const headers: Record<string, string> = {
       'Authorization': authHeader,
       'Content-Type': 'application/json',
-      'User-Agent': `ABsmartly-MCP-Server/${MCP_VERSION}`,
+      'User-Agent': `ABsmartly-MCP-Server/${MCP_VERSION} (CLI-core/${CLI_CORE_VERSION})`,
       ...config.headers,
     };
 

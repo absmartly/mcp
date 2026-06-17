@@ -2,7 +2,7 @@
   "dxt_version": "0.1",
   "name": "absmartly-mcp",
   "display_name": "ABsmartly MCP Server",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Full access to the ABsmartly experimentation platform — 230+ commands across 33 groups including experiment lifecycle, metrics, goals, teams, and feature flags.",
   "author": {
     "name": "ABsmartly",
