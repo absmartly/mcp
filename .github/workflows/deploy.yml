@@ -18,6 +18,16 @@ jobs:
 
       - run: npm ci
 
+      # Build the DXT bundle BEFORE typecheck. scripts/build-dxt.sh installs
+      # @anthropic-ai/dxt, packs the extension, embeds the bytes into
+      # src/dxt-bundle.ts (gitignored — that's why typecheck fails without
+      # this step), and writes the artifact to dist/absmartly-mcp.dxt.
+      # Production deploys MUST use this rather than ensure-dxt-bundle.sh's
+      # empty stub — the worker serves the embedded bytes at
+      # /absmartly-mcp.dxt.
+      - name: Build DXT bundle
+        run: ./scripts/build-dxt.sh
+
       - name: Typecheck
         run: npm run typecheck
 
