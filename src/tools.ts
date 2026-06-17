@@ -13,6 +13,7 @@ import {
   searchCommands,
   executeCommand,
   getTotalCommandCount,
+  validateCommandParams,
 } from "./cli-catalog.js";
 import type { CommandEntry } from "./cli-catalog.js";
 
@@ -83,6 +84,47 @@ export function autoPopulateCustomFields(
   }
 
   data.custom_section_field_values = fieldValues;
+}
+
+function buildCommandDoc(entry: CommandEntry, customFields: readonly any[]): string {
+  let doc = `# ${entry.group}.${entry.command}\n\n**Group:** ${entry.group}\n**Description:** ${entry.description}\n`;
+  if (entry.dangerous) {
+    doc += '**WARNING: This is a destructive/dangerous operation.**\n';
+  }
+  doc += `**Returns:** ${entry.returns}\n\n`;
+
+  if (entry.params.length > 0) {
+    doc += '## Parameters\n\n';
+    doc += '| Name | Type | Required | Description |\n|------|------|----------|-------------|\n';
+    for (const p of entry.params) {
+      doc += `| ${p.name} | ${p.type} | ${p.required ? 'Yes' : 'No'} | ${p.description} |\n`;
+    }
+  } else {
+    doc += '## Parameters\n\nNone.\n';
+  }
+
+  if (entry.example) {
+    doc += `\n## Example\n\n\`\`\`json\n${JSON.stringify(entry.example, null, 2)}\n\`\`\`\n`;
+  }
+
+  doc += `\n## Usage with execute_command\n\n\`\`\`json\n{\n  "group": "${entry.group}",\n  "command": "${entry.command}",\n  "params": ${JSON.stringify(
+    Object.fromEntries(entry.params.filter(p => p.required).map(p => [p.name, p.type === 'number' ? 1 : p.type === 'boolean' ? true : p.type === 'object' ? {} : p.type === 'array' ? [] : 'value'])),
+    null, 2
+  )}\n}\n\`\`\``;
+
+  // Show custom fields for createExperiment
+  if (entry.command === 'createExperiment' && customFields.length > 0) {
+    doc += '\n\n## Available Custom Fields\n\n';
+    doc += 'Pass `custom_fields` (by name) in params.data to override defaults:\n\n';
+    doc += '| Title | Type | Default Value | Section Type |\n|-------|------|---------------|-------------|\n';
+    for (const f of customFields) {
+      if (f.archived) continue;
+      const sectionType = f.custom_section?.type || 'unknown';
+      doc += `| ${f.name} | ${f.type} | ${f.default_value || ''} | ${sectionType} |\n`;
+    }
+  }
+
+  return doc;
 }
 
 export function setupTools(server: McpServer, ctx: ToolContext): void {
@@ -174,42 +216,7 @@ To create experiments, use execute_command with group "experiments" and command 
         return { content: [{ type: "text" as const, text: `Command "${params.group}.${params.command}" not found.${sugText}` }] };
       }
 
-      let doc = `# ${entry.group}.${entry.command}\n\n**Group:** ${entry.group}\n**Description:** ${entry.description}\n`;
-      if (entry.dangerous) {
-        doc += '**WARNING: This is a destructive/dangerous operation.**\n';
-      }
-      doc += `**Returns:** ${entry.returns}\n\n`;
-
-      if (entry.params.length > 0) {
-        doc += '## Parameters\n\n';
-        doc += '| Name | Type | Required | Description |\n|------|------|----------|-------------|\n';
-        for (const p of entry.params) {
-          doc += `| ${p.name} | ${p.type} | ${p.required ? 'Yes' : 'No'} | ${p.description} |\n`;
-        }
-      } else {
-        doc += '## Parameters\n\nNone.\n';
-      }
-
-      if (entry.example) {
-        doc += `\n## Example\n\n\`\`\`json\n${JSON.stringify(entry.example, null, 2)}\n\`\`\`\n`;
-      }
-
-      doc += `\n## Usage with execute_command\n\n\`\`\`json\n{\n  "group": "${entry.group}",\n  "command": "${entry.command}",\n  "params": ${JSON.stringify(
-        Object.fromEntries(entry.params.filter(p => p.required).map(p => [p.name, p.type === 'number' ? 1 : p.type === 'boolean' ? true : p.type === 'object' ? {} : p.type === 'array' ? [] : 'value'])),
-        null, 2
-      )}\n}\n\`\`\``;
-
-      // Show custom fields for createExperiment
-      if (entry.command === 'createExperiment' && ctx.customFields.length > 0) {
-        doc += '\n\n## Available Custom Fields\n\n';
-        doc += 'Pass `custom_fields` (by name) in params.data to override defaults:\n\n';
-        doc += '| Title | Type | Default Value | Section Type |\n|-------|------|---------------|-------------|\n';
-        for (const f of ctx.customFields) {
-          if (f.archived) continue;
-          const sectionType = f.custom_section?.type || 'unknown';
-          doc += `| ${f.name} | ${f.type} | ${f.default_value || ''} | ${sectionType} |\n`;
-        }
-      }
+      const doc = buildCommandDoc(entry, ctx.customFields);
 
       return { content: [{ type: "text" as const, text: doc }] };
     }
@@ -247,6 +254,23 @@ To create experiments, use group "experiments", command "createExperimentFromTem
       const entry = getCommandEntry(params.group, params.command);
       if (!entry) {
         return { content: [{ type: "text" as const, text: `Unknown command "${params.group}.${params.command}". Use discover_commands to find available commands.` }] };
+      }
+
+      // Param validation. We catch typos and missing required params here
+      // rather than letting them silently no-op against the core function
+      // (e.g. updateExperiment ignores params.data and reads params.changes
+      // — without this guard, the call returns success but does nothing).
+      const validationErrors = validateCommandParams(entry, params.params || {});
+      if (validationErrors.length > 0) {
+        const docs = buildCommandDoc(entry, ctx.customFields);
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Param validation failed for ${params.group}.${params.command}:\n` +
+              validationErrors.map((e) => `  - ${e}`).join('\n') +
+              `\n\n---\n\n${docs}`,
+          }],
+        };
       }
 
       // Confirm destructive actions

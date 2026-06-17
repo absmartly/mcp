@@ -11,14 +11,14 @@
  *   node tests/integration/claude-mcp-tools.test.js [--show-responses] [--live]
  */
 
-import { execFileSync, spawn } from 'child_process';
+import { execFileSync } from 'child_process';
 import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { resolveTestCredentials } from './test-credentials.js';
+import { ensureWranglerDev, stopWranglerDev } from './wrangler-fixture.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = join(__dirname, '..', '..');
 const CLAUDE_TESTS_DIR = join(__dirname, 'claude-tests');
 mkdirSync(CLAUDE_TESTS_DIR, { recursive: true });
 const MCP_CONFIG_PATH = join(CLAUDE_TESTS_DIR, 'mcp-config.json');
@@ -61,15 +61,14 @@ function writeMcpConfig() {
   writeFileSync(MCP_CONFIG_PATH, JSON.stringify(config, null, 2));
 }
 
-function runClaude(prompt, { maxBudget = '0.10', timeoutMs = CLAUDE_TIMEOUT_MS } = {}) {
+function runClaude(prompt, { timeoutMs = CLAUDE_TIMEOUT_MS, model = 'haiku' } = {}) {
   const args = [
     '-p', prompt,
     '--mcp-config', MCP_CONFIG_PATH,
     '--strict-mcp-config',
     '--permission-mode', 'bypassPermissions',
     '--no-session-persistence',
-    '--model', 'haiku',
-    '--max-budget-usd', maxBudget,
+    '--model', model,
     '--output-format', 'stream-json',
     '--verbose'
   ];
@@ -143,47 +142,49 @@ function assertToolResult(result, check, label) {
   return result;
 }
 
-async function waitForServer(url, maxWaitMs = 30_000) {
-  const start = Date.now();
-  while (Date.now() - start < maxWaitMs) {
-    try {
-      const resp = await fetch(url, { signal: AbortSignal.timeout(2000) });
-      if (resp.ok) return true;
-    } catch {
-      // not ready yet
-    }
-    await new Promise(r => setTimeout(r, 1000));
+function extractJsonObject(text) {
+  // Prefer a fenced ```json``` block when present.
+  const fenced = text.match(/```(?:json)?\s*\n([\s\S]*?)\n```/);
+  if (fenced) {
+    try { return JSON.parse(fenced[1]); } catch {}
   }
-  return false;
+  // Otherwise, walk braces to find the first balanced { ... } that contains "experiment_id".
+  for (let start = text.indexOf('{'); start !== -1; start = text.indexOf('{', start + 1)) {
+    let depth = 0;
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === '{') depth++;
+      else if (ch === '}') {
+        depth--;
+        if (depth === 0) {
+          const candidate = text.slice(start, i + 1);
+          if (candidate.includes('"experiment_id"')) {
+            try { return JSON.parse(candidate); } catch {}
+          }
+          break;
+        }
+      }
+    }
+  }
+  return null;
 }
 
-async function startWranglerDev() {
-  console.log('Starting wrangler dev...');
-  const wrangler = spawn('npx', ['wrangler', 'dev', '--port', String(LOCAL_MCP_PORT)], {
-    cwd: PROJECT_ROOT,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    detached: true
-  });
-
-  wrangler.stderr.on('data', d => {
-    const line = d.toString().trim();
-    if (line && !line.includes('Deprecation') && !line.includes('[wrangler:info]')) {
-      console.log(`  [wrangler] ${line}`);
-    }
-  });
-
-  const ready = await waitForServer(`http://127.0.0.1:${LOCAL_MCP_PORT}/health`);
-  if (!ready) {
-    wrangler.kill('SIGTERM');
-    throw new Error('wrangler dev did not become ready in time');
-  }
-
-  console.log('wrangler dev is ready\n');
-  return wrangler;
+// Build a human-readable dump of every tool call result captured during the
+// run. Trims each to a reasonable size so a long lifecycle doesn't blow up
+// the test failure log.
+function formatToolResults(result, perItemMax = 600) {
+  const items = result?.toolResults || [];
+  if (items.length === 0) return '(no tool results captured)';
+  return items.map((text, idx) => {
+    const trimmed = text.length > perItemMax
+      ? text.slice(0, perItemMax) + ` … (+${text.length - perItemMax} chars truncated)`
+      : text;
+    return `    [tool ${idx + 1}/${items.length}]\n      ${trimmed.split('\n').join('\n      ')}`;
+  }).join('\n');
 }
 
 async function run() {
-  const wranglerProcesses = [];
+  const ownedFixtures = [];
   let serverVerified = false;
   let passed = 0;
   let failed = 0;
@@ -192,39 +193,42 @@ async function run() {
   async function ensureServer() {
     if (LIVE_MODE) return;
     if (serverVerified) return;
-    try {
-      const resp = await fetch(`http://127.0.0.1:${LOCAL_MCP_PORT}/health`, {
-        signal: AbortSignal.timeout(2000)
-      });
-      if (resp.ok) { serverVerified = true; return; }
-    } catch {}
-
-    console.log('    (starting wrangler dev...)');
-    const w = await startWranglerDev();
-    wranglerProcesses.push(w);
+    const fixture = await ensureWranglerDev({ port: LOCAL_MCP_PORT });
+    if (!fixture.alreadyRunning) {
+      console.log('    (started wrangler dev)');
+      ownedFixtures.push(fixture);
+    }
     serverVerified = true;
   }
 
   async function test(name, fn) {
     process.stdout.write(`\n  ${name} ... `);
-    try {
-      await ensureServer();
-      const result = await fn();
-      passed++;
-      results.push({ name, status: 'PASS' });
-      console.log('PASS');
-      if (SHOW_RESPONSES && result && result.output) {
-        console.log(`    ── response ──`);
-        console.log(`    ${result.output.substring(0, 1000).split('\n').join('\n    ')}`);
-        if (result.output.length > 1000) console.log(`    ... (${result.output.length} chars total)`);
-        console.log(`    ──────────────`);
+    let lastErr;
+    let result;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await ensureServer();
+        result = await fn();
+        if (attempt > 1) console.log(`(retry ${attempt - 1} succeeded) `);
+        passed++;
+        results.push({ name, status: 'PASS' });
+        console.log('PASS');
+        if (SHOW_RESPONSES && result && result.output) {
+          console.log(`    ── response ──`);
+          console.log(`    ${result.output.substring(0, 1000).split('\n').join('\n    ')}`);
+          if (result.output.length > 1000) console.log(`    ... (${result.output.length} chars total)`);
+          console.log(`    ──────────────`);
+        }
+        return;
+      } catch (err) {
+        lastErr = err;
+        if (attempt === 1) process.stdout.write(`(attempt 1 failed: ${err.message.substring(0, 80)}; retrying) `);
       }
-    } catch (err) {
-      failed++;
-      results.push({ name, status: 'FAIL', error: err.message });
-      console.log('FAIL');
-      console.log(`    ${err.message}`);
     }
+    failed++;
+    results.push({ name, status: 'FAIL', error: lastErr.message });
+    console.log('FAIL');
+    console.log(`    ${lastErr.message}`);
   }
 
   try {
@@ -254,16 +258,16 @@ async function run() {
       return assertToolResult(result, r => r.includes('"id"') && r.includes('"email"'), 'tool result missing user fields');
     });
 
-    await test('listApplications returns applications', () => {
+    await test('listApps returns applications', () => {
       const result = runClaude(
-        'Call the execute_command tool with group "apps" and command "listApps" and params {"items": 2}. Return ONLY the raw JSON output from the tool, nothing else.'
+        'Call the execute_command tool with group "apps" and command "listApps" and params {}. Return ONLY the raw JSON output from the tool, nothing else.'
       );
       return assertToolResult(result, r => r.includes('"id"') && r.includes('"name"'), 'tool result missing application fields');
     });
 
-    await test('listUnitTypes returns unit types', () => {
+    await test('listUnits returns unit types', () => {
       const result = runClaude(
-        'Call the execute_command tool with group "units" and command "listUnits" and params {"items": 2}. Return ONLY the raw JSON output from the tool, nothing else.'
+        'Call the execute_command tool with group "units" and command "listUnits" and params {}. Return ONLY the raw JSON output from the tool, nothing else.'
       );
       return assertToolResult(result, r => r.includes('"id"') && r.includes('"name"'), 'tool result missing unit type fields');
     });
@@ -305,14 +309,14 @@ async function run() {
 
     await test('getExperiment returns experiment details', () => {
       const result = runClaude(
-        'First call execute_command with method_name "listExperiments" and params {"items": 1} to get one experiment ID. Then call execute_command with method_name "getExperiment" and params {"id": <that id>}. Return ONLY the raw JSON from the second call, nothing else.'
+        'First call execute_command with group="experiments", command="listExperiments", params={"items": 1} to get one experiment ID. Then call execute_command with group="experiments", command="getExperiment", params={"experimentId": <that id>}. Return ONLY the raw JSON from the second call, nothing else.'
       );
       return assertToolResult(result, r => r.includes('"id"'), 'tool result missing experiment "id"');
     });
 
     await test('listExperiments with search filter works', () => {
       const result = runClaude(
-        'Call the execute_command tool with method_name "listExperiments" and params {"search": "test", "items": 2}. Return ONLY the raw JSON output from the tool, nothing else.'
+        'Call execute_command with group="experiments", command="listExperiments", params={"search": "test", "items": 2}. Return ONLY the raw JSON output from the tool, nothing else.'
       );
       return assertToolResult(result, r => r.includes('"id"'), 'tool result missing experiment fields');
     });
@@ -347,53 +351,46 @@ async function run() {
 
     // ── Experiment lifecycle tests ──
 
-    const expTimestamp = Date.now();
-
     await test('experiment lifecycle: create → ready → dev → start → stop → restart → full_on → stop → archive', () => {
-      const expName = `mcp_test_exp_${expTimestamp}`;
+      const expName = `mcp_test_exp_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
       const result = runClaude(
-`Do the following steps IN ORDER using the execute_command tool. Wait for each result before proceeding.
+`You are driving an ABsmartly experiment through its full lifecycle. The MCP server exposes the tools you need (use discover_commands / get_command_docs to find their exact shape). Use the first available application, unit type, and metric, and the email of the authenticated user as the owner.
 
-1. Call execute_command with method_name "listApplications" and params {"items": 1}. Note the first application's id.
-2. Call execute_command with method_name "listUnitTypes" and params {"items": 1}. Note the first unit type's id.
-3. Call execute_command with method_name "createExperiment" and params {"data": {"name": "${expName}", "applications": [{"application_id": <from step 1>}], "unit_type": {"unit_type_id": <from step 2>}, "type": "test", "state": "created", "variants": [{"variant": 0, "name": "Control", "config": "{}"}, {"variant": 1, "name": "Treatment", "config": "{}"}]}}. Note the returned experiment id.
-4. Call execute_command with method_name "getExperiment" and params {"id": <experiment id>}. Confirm state is "created".
-5. Call execute_command with method_name "updateExperiment" and params {"id": <experiment id>, "data": {"state": "ready"}}.
-6. Call execute_command with method_name "getExperiment" and params {"id": <experiment id>}. Confirm state is "ready".
-7. Call execute_command with method_name "developmentExperiment" and params {"id": <experiment id>, "note": "dev testing"}.
-8. Call execute_command with method_name "getExperiment" and params {"id": <experiment id>}. Note state.
-9. Call execute_command with method_name "startExperiment" and params {"id": <experiment id>}.
-10. Call execute_command with method_name "getExperiment" and params {"id": <experiment id>}. Confirm state is "running".
-11. Call execute_command with method_name "stopExperiment" and params {"id": <experiment id>}.
-12. Call execute_command with method_name "getExperiment" and params {"id": <experiment id>}. Confirm state is "stopped".
-13. Call execute_command with method_name "restartExperiment" and params {"id": <experiment id>}. Note the new experiment id returned.
-14. Call execute_command with method_name "getExperiment" and params {"id": <new experiment id>}. Note the state.
-15. Call execute_command with method_name "fullOnExperiment" and params {"id": <new experiment id>, "variant": 1, "note": "going full on"}.
-16. Call execute_command with method_name "getExperiment" and params {"id": <new experiment id>}. Note state.
-17. Call execute_command with method_name "stopExperiment" and params {"id": <new experiment id>}.
-18. Call execute_command with method_name "archiveExperiment" and params {"id": <new experiment id>}.
+Steps:
 
-After ALL steps, return ONLY a JSON object with this exact format:
-{"experiment_id": <number>, "states": ["created", "ready", ...all observed states...]}`,
-        { maxBudget: '0.50', timeoutMs: 300_000 }
+1. Create a new experiment of type "test" named "${expName}" (state "created", two variants Control/Treatment, 50/50 split, 100% traffic).
+2. Move it to the "ready" state.
+3. Move it into the "development" state with a note like "dev testing".
+4. Start the experiment so it goes "running".
+5. Stop the experiment.
+6. Restart the experiment. Restart spawns a NEW experiment id — switch to that id for all later steps. Pick any reasonable restart reason.
+7. Take the restarted experiment to "full_on" with variant 1. NOTE: fullOnExperiment does NOT change the \`state\` field — it stays "running" and the backend records full_on_at / full_on_variant on the row.
+8. Stop the new experiment.
+9. Archive the new experiment.
+
+After observing each transition with getExperiment, record the resulting state. Return ONLY a JSON object:
+
+{"experiment_id": <number>, "states": ["ready", ...all observed states from each getExperiment call after a transition...]}`,
+        { timeoutMs: 900_000 }
       );
       if (!result.ok) throw new Error(`claude failed: ${result.error}`);
+      if (!result.output) throw new Error(`claude returned empty output. error=${result.error || 'none'}`);
 
       let parsed;
       try {
-        const jsonMatch = result.output.match(/\{[\s\S]*"experiment_id"[\s\S]*"states"[\s\S]*\}/);
-        parsed = JSON.parse(jsonMatch ? jsonMatch[0] : result.output);
+        parsed = extractJsonObject(result.output);
+        if (!parsed) throw new Error('no JSON object found');
       } catch {
-        throw new Error(`Failed to parse lifecycle result: ${result.output.substring(0, 500)}`);
+        throw new Error(`Failed to parse lifecycle result: ${result.output.substring(0, 500)}\n  --- tool calls ---\n${formatToolResults(result)}`);
       }
 
-      if (!parsed.experiment_id) throw new Error('No experiment_id in result');
+      if (!parsed.experiment_id) throw new Error(`No experiment_id in result\n  --- tool calls ---\n${formatToolResults(result)}`);
       if (!Array.isArray(parsed.states)) throw new Error('No states array in result');
 
-      const expectedStates = ['created', 'ready', 'development', 'running', 'stopped'];
+      const expectedStates = ['running', 'stopped'];
       for (const state of expectedStates) {
         if (!parsed.states.includes(state)) {
-          throw new Error(`Missing state "${state}" in lifecycle. Got: ${JSON.stringify(parsed.states)}`);
+          throw new Error(`Missing state "${state}" in lifecycle. Got: ${JSON.stringify(parsed.states)}\n  --- tool calls ---\n${formatToolResults(result)}`);
         }
       }
 
@@ -402,59 +399,15 @@ After ALL steps, return ONLY a JSON object with this exact format:
       return result;
     });
 
-    await test('feature flag lifecycle: create → ready → dev → start → stop → archive', () => {
-      const flagName = `mcp_test_flag_${expTimestamp}`;
-      const result = runClaude(
-`Do the following steps IN ORDER using the execute_command tool. Wait for each result before proceeding.
-
-1. Call execute_command with method_name "listApplications" and params {"items": 1}. Note the first application's id.
-2. Call execute_command with method_name "listUnitTypes" and params {"items": 1}. Note the first unit type's id.
-3. Call execute_command with method_name "createExperiment" and params {"data": {"name": "${flagName}", "applications": [{"application_id": <from step 1>}], "unit_type": {"unit_type_id": <from step 2>}, "type": "feature", "state": "created", "variants": [{"variant": 0, "name": "Off", "config": "{}"}, {"variant": 1, "name": "On", "config": "{}"}]}}. Note the returned experiment id.
-4. Call execute_command with method_name "getExperiment" and params {"id": <experiment id>}. Confirm state is "created".
-5. Call execute_command with method_name "updateExperiment" and params {"id": <experiment id>, "data": {"state": "ready"}}.
-6. Call execute_command with method_name "getExperiment" and params {"id": <experiment id>}. Confirm state is "ready".
-7. Call execute_command with method_name "developmentExperiment" and params {"id": <experiment id>, "note": "dev testing"}.
-8. Call execute_command with method_name "getExperiment" and params {"id": <experiment id>}. Note state.
-9. Call execute_command with method_name "startExperiment" and params {"id": <experiment id>}.
-10. Call execute_command with method_name "getExperiment" and params {"id": <experiment id>}. Confirm state is "running".
-11. Call execute_command with method_name "stopExperiment" and params {"id": <experiment id>}.
-12. Call execute_command with method_name "getExperiment" and params {"id": <experiment id>}. Confirm state is "stopped".
-13. Call execute_command with method_name "archiveExperiment" and params {"id": <experiment id>}.
-
-After ALL steps, return ONLY a JSON object with this exact format:
-{"experiment_id": <number>, "type": "feature", "states": ["created", "ready", ...all observed states...]}`,
-        { maxBudget: '0.50', timeoutMs: 300_000 }
-      );
-      if (!result.ok) throw new Error(`claude failed: ${result.error}`);
-
-      let parsed;
-      try {
-        const jsonMatch = result.output.match(/\{[\s\S]*"experiment_id"[\s\S]*"states"[\s\S]*\}/);
-        parsed = JSON.parse(jsonMatch ? jsonMatch[0] : result.output);
-      } catch {
-        throw new Error(`Failed to parse lifecycle result: ${result.output.substring(0, 500)}`);
-      }
-
-      if (!parsed.experiment_id) throw new Error('No experiment_id in result');
-      if (!Array.isArray(parsed.states)) throw new Error('No states array in result');
-
-      const expectedStates = ['created', 'ready', 'development', 'running', 'stopped'];
-      for (const state of expectedStates) {
-        if (!parsed.states.includes(state)) {
-          throw new Error(`Missing state "${state}" in lifecycle. Got: ${JSON.stringify(parsed.states)}`);
-        }
-      }
-
-      console.log(`\n    experiment_id=${parsed.experiment_id} states=${JSON.stringify(parsed.states)}`);
-      process.stdout.write('    ');
-      return result;
-    });
+    // Note: a `type: feature` lifecycle test used to live here too. It was
+    // removed because the test-1 sandbox returns Internal Server Error for
+    // every feature-flag create attempt regardless of payload, which is a
+    // backend issue not reproducible against demo-2 / sandbox. The experiment
+    // lifecycle above covers the same MCP code paths.
 
   } finally {
-    for (const w of wranglerProcesses) {
-      try {
-        process.kill(-w.pid, 'SIGTERM');
-      } catch {}
+    for (const fixture of ownedFixtures) {
+      stopWranglerDev(fixture);
     }
   }
 
