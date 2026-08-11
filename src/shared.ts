@@ -42,7 +42,7 @@ export function buildAuthHeader(authToken: string, isApiKey: boolean): Record<st
   };
 }
 
-const HOSTNAME_PATTERN = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i;
+const HOSTNAME_PATTERN = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i;
 
 export function extractEndpointFromPath(pathname: string, prefix: string | readonly string[]): string | null {
   const prefixes = Array.isArray(prefix) ? prefix : [prefix];

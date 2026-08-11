@@ -130,6 +130,13 @@ export default async function run() {
   test('extractEndpointFromPath returns null for multi-segment paths', () => {
     assert.strictEqual(extractEndpointFromPath('/mcp/foo/bar', ['/sse', '/mcp']), null);
   });
+  test('extractEndpointFromPath returns null for labels with leading or trailing hyphens', () => {
+    assert.strictEqual(extractEndpointFromPath('/mcp/-demo.example.com', ['/sse', '/mcp']), null);
+    assert.strictEqual(extractEndpointFromPath('/mcp/demo-.example.com', ['/sse', '/mcp']), null);
+    assert.strictEqual(extractEndpointFromPath('/mcp/---.example.com', ['/sse', '/mcp']), null);
+    assert.strictEqual(extractEndpointFromPath('/mcp/demo.-example.com', ['/sse', '/mcp']), null);
+    assert.strictEqual(extractEndpointFromPath('/mcp/demo.example-.com', ['/sse', '/mcp']), null);
+  });
 
   test('escapeHtml escapes all special chars', () => {
     assert.strictEqual(escapeHtml('&<>"\''), '&amp;&lt;&gt;&quot;&#39;');
