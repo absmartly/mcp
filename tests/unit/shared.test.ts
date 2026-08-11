@@ -116,6 +116,20 @@ export default async function run() {
   test('extractEndpointFromPath returns null when none of the prefixes match', () => {
     assert.strictEqual(extractEndpointFromPath('/other/dev1', ['/sse', '/mcp']), null);
   });
+  test('extractEndpointFromPath returns null for OAuth discovery probes under the transport prefix', () => {
+    assert.strictEqual(
+      extractEndpointFromPath('/mcp/.well-known/openid-configuration', ['/sse', '/mcp']),
+      null
+    );
+    assert.strictEqual(
+      extractEndpointFromPath('/mcp/.well-known/oauth-authorization-server', ['/sse', '/mcp']),
+      null
+    );
+    assert.strictEqual(extractEndpointFromPath('/mcp/.well-known', ['/sse', '/mcp']), null);
+  });
+  test('extractEndpointFromPath returns null for multi-segment paths', () => {
+    assert.strictEqual(extractEndpointFromPath('/mcp/foo/bar', ['/sse', '/mcp']), null);
+  });
 
   test('escapeHtml escapes all special chars', () => {
     assert.strictEqual(escapeHtml('&<>"\''), '&amp;&lt;&gt;&quot;&#39;');

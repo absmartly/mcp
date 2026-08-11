@@ -42,6 +42,8 @@ export function buildAuthHeader(authToken: string, isApiKey: boolean): Record<st
   };
 }
 
+const HOSTNAME_PATTERN = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i;
+
 export function extractEndpointFromPath(pathname: string, prefix: string | readonly string[]): string | null {
   const prefixes = Array.isArray(prefix) ? prefix : [prefix];
   for (const p of prefixes) {
@@ -49,6 +51,7 @@ export function extractEndpointFromPath(pathname: string, prefix: string | reado
     const hostPart = pathname.slice(p.length + 1).replace(/\/+$/, '');
     if (!hostPart) continue;
     const host = hostPart.includes('.') ? hostPart : `${hostPart}.${DEFAULT_ABSMARTLY_DOMAIN}`;
+    if (!HOSTNAME_PATTERN.test(host)) return null;
     return `https://${host}`;
   }
   return null;
