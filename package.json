@@ -2,13 +2,25 @@
   "name": "@absmartly/mcp",
   "version": "1.1.0",
   "description": "MCP server for ABsmartly — experimentation platform API access for AI assistants",
-  "main": "src/index.ts",
+  "main": "./dist/node-http-server.js",
+  "types": "./dist/node-http-server.d.ts",
   "type": "module",
   "bin": {
     "absmartly-mcp": "./bin/absmartly-mcp.mjs"
   },
+  "exports": {
+    ".": {
+      "types": "./dist/node-http-server.d.ts",
+      "import": "./dist/node-http-server.js"
+    },
+    "./node-http": {
+      "types": "./dist/node-http-server.d.ts",
+      "import": "./dist/node-http-server.js"
+    }
+  },
   "files": [
     "bin/",
+    "dist/",
     "src/",
     "public/docs/"
   ],
