@@ -67,3 +67,4 @@ tests/integration/claude-tests/.git/
 
 # Superpowers plans (local only)
 docs/superpowers/
+.worktrees/
