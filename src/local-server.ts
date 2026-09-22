@@ -13,14 +13,13 @@ import { FetchHttpClient } from "./fetch-adapter.js";
 import { setupTools } from "./tools.js";
 import type { ToolContext } from "./tools.js";
 import { MCP_VERSION } from "./version.js";
+import { buildServerContext } from "./server-context.js";
 
 const CONFIG_FILE_PATH = '.config/absmartly/config.yaml';
 const DEFAULT_PROFILE_NAME = 'default';
 const KEYCHAIN_SERVICE = 'absmartly-cli';
 const KEYCHAIN_ACCOUNT_PREFIX = 'api-key';
 const CREDENTIALS_FILE_PATH = '.config/absmartly/credentials.json';
-const ENTITY_LIST_PAGE_SIZE = 100;
-const ENTITY_LIST_FIRST_PAGE = 1;
 
 interface ProfileConfig {
     endpoint: string;
@@ -182,85 +181,11 @@ async function main() {
         }
     );
 
-    let currentUserId: number | null = null;
-    const entityWarnings: string[] = [];
-    let customFields: CustomSectionField[] = [];
-    let users: any[] = [];
-    let teams: any[] = [];
-    let applications: any[] = [];
-    let unitTypes: any[] = [];
-    let experimentTags: any[] = [];
-    let metrics: any[] = [];
-    let goals: any[] = [];
-
-    const safeCall = async <T>(label: string, fn: () => Promise<T[]>): Promise<T[]> => {
-        try {
-            return await fn();
-        } catch (e) {
-            const msg = `Failed to fetch ${label}: ${e}`;
-            entityWarnings.push(msg);
-            console.error(msg);
-            return [];
-        }
-    };
-
-    try {
-        const user = await apiClient.getCurrentUser();
-        currentUserId = user?.id || null;
-    } catch (e) {
-        const msg = `Failed to fetch current user: ${e}`;
-        entityWarnings.push(msg);
-        console.error(msg);
-    }
-
-    const [
-        rawCustomFields,
-        rawUsers,
-        rawTeams,
-        rawApplications,
-        rawUnitTypes,
-        rawExperimentTags,
-        rawMetrics,
-        rawGoals,
-    ] = await Promise.all([
-        safeCall('customFields', () => apiClient.listCustomSectionFields()),
-        safeCall('users', () => apiClient.listUsers()),
-        safeCall('teams', () => apiClient.listTeams()),
-        safeCall('applications', () => apiClient.listApplications()),
-        safeCall('unitTypes', () => apiClient.listUnitTypes()),
-        safeCall('experimentTags', () => apiClient.listExperimentTags({ items: ENTITY_LIST_PAGE_SIZE, page: ENTITY_LIST_FIRST_PAGE })),
-        safeCall('metrics', () => apiClient.listMetrics({ items: ENTITY_LIST_PAGE_SIZE })),
-        safeCall('goals', () => apiClient.listGoals({ items: ENTITY_LIST_PAGE_SIZE, page: ENTITY_LIST_FIRST_PAGE })),
-    ]);
-
-    customFields = rawCustomFields as CustomSectionField[];
-    users = (rawUsers as any[]).map((u: any) => ({
-        id: u.id,
-        name: `${u.first_name || ''} ${u.last_name || ''}`.trim(),
-        description: u.email || '',
-    }));
-    teams = (rawTeams as any[]).map((t: any) => ({
-        id: t.id,
-        name: t.name,
-        description: t.description || `${t.member_count || 0} members`,
-    }));
-    applications = (rawApplications as any[]).map((a: any) => ({
-        id: a.id,
-        name: a.name,
-        description: `Environment: ${a.environment || 'default'}`,
-    }));
-    unitTypes = (rawUnitTypes as any[]).map((e: any) => ({
-        id: e.id, name: e.name || e.tag, description: e.description || `unit_type: ${e.name || e.tag}`,
-    }));
-    experimentTags = (rawExperimentTags as any[]).map((e: any) => ({
-        id: e.id, name: e.name || e.tag, description: e.description || `experiment_tag: ${e.name || e.tag}`,
-    }));
-    metrics = (rawMetrics as any[]).map((e: any) => ({
-        id: e.id, name: e.name || e.tag, description: e.description || `metric: ${e.name || e.tag}`,
-    }));
-    goals = (rawGoals as any[]).map((e: any) => ({
-        id: e.id, name: e.name || e.tag, description: e.description || `goal: ${e.name || e.tag}`,
-    }));
+    const ctx = await buildServerContext(apiClient, { endpoint: config.endpoint, authType: 'API Key' });
+    const {
+        currentUserId, entityWarnings, customFields,
+        users, teams, applications, unitTypes, experimentTags, metrics, goals,
+    } = ctx;
 
     // ── Register tools (shared with Cloudflare Worker) ──────────────────────
     const toolCtx: ToolContext = {
