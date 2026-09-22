@@ -13,6 +13,8 @@ import { setupTools } from "./tools.js";
 import type { ToolContext } from "./tools.js";
 import type { ServerContext } from "./server-context.js";
 
+const EXPERIMENT_ID_PATTERN = /^\d+$/;
+
 export interface RegisterServerOptions {
   docsDir?: string;
   log?: (level: string, message: string) => void;
@@ -166,16 +168,19 @@ export function registerServer(server: McpServer, ctx: ServerContext, opts: Regi
   server.prompt(
     "analyze-experiment",
     "Fetch and analyze a specific experiment's details, state, and performance",
-    { id: z.string().describe("Experiment ID to analyze") },
-    (args) => ({
-      messages: [{
-        role: "user" as const,
-        content: {
-          type: "text" as const,
-          text: `Analyze experiment with ID ${args.id}.\n\n1. Use execute_command with group "experiments", command "getExperiment", params { "experimentId": ${args.id}, "show": ["experiment_report", "audience"] }\n2. Check experiment state and alerts\n3. Provide a summary with actionable recommendations`,
-        },
-      }],
-    }),
+    { id: z.string().regex(EXPERIMENT_ID_PATTERN).describe("Experiment ID to analyze") },
+    (args) => {
+      const experimentId = Number(args.id);
+      return {
+        messages: [{
+          role: "user" as const,
+          content: {
+            type: "text" as const,
+            text: `Analyze experiment with ID ${experimentId}.\n\n1. Use execute_command with group "experiments", command "getExperiment", params { "experimentId": ${experimentId}, "show": ["experiment_report", "audience"] }\n2. Check experiment state and alerts\n3. Provide a summary with actionable recommendations`,
+          },
+        }],
+      };
+    },
   );
 
   server.prompt(
