@@ -1,19 +1,15 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { completable } from "@modelcontextprotocol/sdk/server/completable.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { z } from "zod";
 import { readFileSync, existsSync } from "fs";
 import { execFileSync } from "child_process";
 import { join } from "path";
 import { homedir } from "os";
 import { APIClient } from "@absmartly/cli/api-client";
-import type { CustomSectionField } from "@absmartly/cli/api-client";
 import { FetchHttpClient } from "./fetch-adapter.js";
-import { setupTools } from "./tools.js";
-import type { ToolContext } from "./tools.js";
 import { MCP_VERSION } from "./version.js";
 import { buildServerContext } from "./server-context.js";
+import { registerServer } from "./register-server.js";
 
 const CONFIG_FILE_PATH = '.config/absmartly/config.yaml';
 const DEFAULT_PROFILE_NAME = 'default';
@@ -120,41 +116,6 @@ function readProfileConfig(profileName: string): ProfileConfig {
     return { endpoint, apiKey };
 }
 
-function buildEntityContext(entities: {
-    applications: any[];
-    unitTypes: any[];
-    metrics: any[];
-    teams: any[];
-    customFields: CustomSectionField[];
-}): string {
-    const sections: string[] = [];
-
-    if (entities.applications.length > 0) {
-        const lines = entities.applications.map((a: any) => `  - id=${a.id}, name="${a.name}"`);
-        sections.push(`Applications:\n${lines.join('\n')}`);
-    }
-    if (entities.unitTypes.length > 0) {
-        const lines = entities.unitTypes.map((u: any) => `  - id=${u.id}, name="${u.name}"`);
-        sections.push(`Unit Types:\n${lines.join('\n')}`);
-    }
-    if (entities.metrics.length > 0) {
-        const lines = entities.metrics.map((m: any) => `  - id=${m.id}, name="${m.name}"`);
-        sections.push(`Metrics:\n${lines.join('\n')}`);
-    }
-    if (entities.teams.length > 0) {
-        const lines = entities.teams.map((t: any) => `  - id=${t.id}, name="${t.name}"`);
-        sections.push(`Teams:\n${lines.join('\n')}`);
-    }
-    if (entities.customFields.length > 0) {
-        const cfLines = entities.customFields
-            .filter(f => !f.archived)
-            .map(f => `  - title="${f.name}", type="${f.type}", default="${f.default_value || ''}", section_type="${f.custom_section?.type || 'unknown'}"`);
-        sections.push(`Custom Fields:\n${cfLines.join('\n')}`);
-    }
-
-    return sections.join('\n\n');
-}
-
 async function main() {
     const profileArg = process.argv.find(a => a.startsWith('--profile='));
     const profileName = profileArg ? profileArg.split('=')[1] : DEFAULT_PROFILE_NAME;
@@ -182,186 +143,10 @@ async function main() {
     );
 
     const ctx = await buildServerContext(apiClient, { endpoint: config.endpoint, authType: 'API Key' });
-    const {
-        currentUserId, entityWarnings, customFields,
-        users, teams, applications, unitTypes, experimentTags, metrics, goals,
-    } = ctx;
 
-    // ── Register tools (shared with Cloudflare Worker) ──────────────────────
-    const toolCtx: ToolContext = {
-        apiClient,
-        endpoint: config.endpoint,
-        authType: 'API Key',
-        profileName,
-        entityWarnings,
-        customFields,
-        currentUserId,
-    };
-    setupTools(mcpServer, toolCtx);
-
-    // ── Entity resources ────────────────────────────────────────────────────
-    const entityConfigs = [
-        { name: "Applications", uri: "absmartly://entities/applications", description: "Cached list of available applications", getData: () => applications },
-        { name: "Unit Types", uri: "absmartly://entities/unit-types", description: "Cached list of available unit types", getData: () => unitTypes },
-        { name: "Teams", uri: "absmartly://entities/teams", description: "Cached list of available teams", getData: () => teams },
-        { name: "Users", uri: "absmartly://entities/users", description: "Cached list of users (summarized)", getData: () => users },
-        { name: "Metrics", uri: "absmartly://entities/metrics", description: "Cached list of available metrics", getData: () => metrics },
-        { name: "Goals", uri: "absmartly://entities/goals", description: "Cached list of available goals", getData: () => goals },
-        { name: "Tags", uri: "absmartly://entities/tags", description: "Cached list of experiment tags", getData: () => experimentTags },
-        {
-            name: "Custom Fields",
-            uri: "absmartly://entities/custom-fields",
-            description: "Cached list of custom fields",
-            getData: () => customFields
-                .filter((f: CustomSectionField) => !f.archived)
-                .map((f: CustomSectionField) => ({
-                    id: f.id,
-                    title: f.name,
-                    type: f.type,
-                    default_value: f.default_value || '',
-                    section_type: f.custom_section?.type || 'unknown',
-                })),
-        },
-    ];
-
-    for (const cfg of entityConfigs) {
-        mcpServer.resource(
-            cfg.name,
-            cfg.uri,
-            { description: cfg.description },
-            async () => ({
-                contents: [{
-                    uri: cfg.uri,
-                    mimeType: "application/json",
-                    text: JSON.stringify(cfg.getData(), null, 2),
-                }]
-            })
-        );
-    }
-
-    // ── Documentation resources (read from local filesystem) ────────────────
+    // ── Register tools, resources, and prompts (shared with Node HTTP transport) ──
     const docsDir = join(new URL('.', import.meta.url).pathname, '..', 'public', 'docs', 'api');
-    const docResources = [
-        { name: "Experiment Templates", uri: "absmartly://docs/templates", file: "templates.md", description: "Markdown templates for creating experiments: A/B test, feature flag, GST, screenshots, custom fields" },
-        { name: "API Examples", uri: "absmartly://examples/api-requests", file: "examples.md", description: "Common API request examples and patterns" },
-    ];
-    for (const doc of docResources) {
-        const filePath = join(docsDir, doc.file);
-        mcpServer.resource(
-            doc.name,
-            doc.uri,
-            { description: doc.description },
-            async () => {
-                let content: string;
-                try {
-                    content = readFileSync(filePath, 'utf-8');
-                } catch (e) {
-                    console.error(`Failed to read doc resource ${doc.file} from ${filePath}:`, e);
-                    content = `# Error\n\nCould not load ${doc.file} from ${filePath}`;
-                }
-                return { contents: [{ uri: doc.uri, mimeType: "text/markdown", text: content }] };
-            }
-        );
-    }
-
-    // ── Prompts ─────────────────────────────────────────────────────────────
-    mcpServer.prompt(
-        "experiment-status",
-        "Quick overview of all running experiments",
-        async () => ({
-            messages: [{
-                role: "user" as const,
-                content: {
-                    type: "text" as const,
-                    text: "Show me all currently running experiments with their key metrics and performance"
-                }
-            }]
-        })
-    );
-
-    mcpServer.prompt(
-        "create-experiment",
-        "Create a new A/B test experiment with all required fields pre-populated from available entities",
-        {
-            name: z.string().describe("Experiment name (snake_case recommended)"),
-            type: completable(
-                z.string().default('test').describe("Experiment type: 'test' or 'feature' (default: 'test')"),
-                (value) => ['test', 'feature'].filter(t => t.startsWith(value || ''))
-            ),
-        },
-        (args) => {
-            const entityContext = buildEntityContext({ applications, unitTypes, metrics, teams, customFields });
-            const expType = args.type || 'test';
-            return {
-                messages: [{
-                    role: "user" as const,
-                    content: {
-                        type: "text" as const,
-                        text: `Create a new ${expType === 'feature' ? 'feature flag' : 'A/B test'} experiment named "${args.name}".
-
-Use the execute_command tool with group "experiments" and command "createExperimentFromTemplate". Read the absmartly://docs/templates resource for the markdown template format. Fill in the template with the context below, then pass the filled template as the "templateContent" parameter.
-
-${entityContext}`
-                    }
-                }]
-            };
-        }
-    );
-
-    mcpServer.prompt(
-        "create-feature-flag",
-        "Create a new feature flag (simplified experiment with type=feature)",
-        {
-            name: z.string().describe("Feature flag name (snake_case recommended)"),
-        },
-        (args) => {
-            const entityContext = buildEntityContext({ applications, unitTypes, metrics, teams, customFields });
-            return {
-                messages: [{
-                    role: "user" as const,
-                    content: {
-                        type: "text" as const,
-                        text: `Create a new feature flag named "${args.name}".
-
-Use the execute_command tool with group "experiments" and command "createExperimentFromTemplate". Read the absmartly://docs/templates resource for the feature flag template. Fill it in with type "feature", two variants (off/on), and the context below, then pass as "templateContent".
-
-${entityContext}`
-                    }
-                }]
-            };
-        }
-    );
-
-    mcpServer.prompt(
-        "analyze-experiment",
-        "Fetch and analyze a specific experiment's details, state, and performance",
-        {
-            id: z.string().describe("Experiment ID to analyze"),
-        },
-        (args) => ({
-            messages: [{
-                role: "user" as const,
-                content: {
-                    type: "text" as const,
-                    text: `Analyze experiment with ID ${args.id}.\n\n1. Use execute_command with group "experiments", command "getExperiment", params { "experimentId": ${args.id}, "show": ["experiment_report", "audience"] }\n2. Check experiment state and alerts\n3. Provide a summary with actionable recommendations`
-                }
-            }]
-        })
-    );
-
-    mcpServer.prompt(
-        "experiment-review",
-        "Review all running experiments and identify ones needing attention",
-        async () => ({
-            messages: [{
-                role: "user" as const,
-                content: {
-                    type: "text" as const,
-                    text: `Review all running experiments and identify any that need attention.\n\n1. Use execute_command with group "experiments", command "listExperiments", params { "state": "running", "show": ["experiment_report"] }\n2. Check for SRM alerts, audience mismatch, sample size reached\n3. Summarize findings and suggest next actions`
-                }
-            }]
-        })
-    );
+    registerServer(mcpServer, ctx, { docsDir, profileName });
 
     const transport = new StdioServerTransport();
     await mcpServer.connect(transport);
