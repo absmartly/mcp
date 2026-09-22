@@ -104,5 +104,29 @@ export default async function run() {
         }
     });
 
+    await asyncTest('registers the 4 tools from setupTools', async () => {
+        const server = new McpServer({ name: 'test', version: '0.0.0' }, { capabilities: { tools: {}, resources: {}, prompts: {} } });
+        registerServer(server, makeContext());
+
+        const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+        const client = new Client({ name: 'test-client', version: '0.0.0' });
+
+        await Promise.all([
+            server.connect(serverTransport),
+            client.connect(clientTransport),
+        ]);
+
+        try {
+            const tools = await client.listTools();
+            const names = tools.tools.map(t => t.name);
+            for (const expected of ['get_auth_status', 'discover_commands', 'get_command_docs', 'execute_command']) {
+                assert.ok(names.includes(expected), `expected tool ${expected} in ${JSON.stringify(names)}`);
+            }
+        } finally {
+            await client.close();
+            await server.close();
+        }
+    });
+
     return { success: failed === 0, message: `${passed} passed, ${failed} failed`, testCount: passed + failed, details };
 }

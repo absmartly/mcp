@@ -27,6 +27,16 @@ export function createStreamableHttpHandler(
 ): NodeMcpHandler {
   return {
     async post(req, res, body) {
+      let transport: StreamableHTTPServerTransport | undefined;
+      let server: McpServer | undefined;
+      let cleanedUp = false;
+      const cleanup = () => {
+        if (cleanedUp) return;
+        cleanedUp = true;
+        transport?.close();
+        server?.close();
+      };
+
       try {
         const requestCtx = await buildContext(req);
         const serverCtx = await buildServerContext(requestCtx.apiClient, {
@@ -34,22 +44,27 @@ export function createStreamableHttpHandler(
           authType: requestCtx.authType,
         });
 
-        const server = new McpServer(
+        server = new McpServer(
           { name: "ABsmartly MCP Server", version: MCP_VERSION },
           { capabilities: { tools: {}, resources: { subscribe: true, listChanged: true }, prompts: {} } },
         );
         registerServer(server, serverCtx, { docsDir: requestCtx.docsDir });
 
-        const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+        transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
         await server.connect(transport);
-        await transport.handleRequest(req, res, body);
+        // Register the close handler before awaiting handleRequest: if the
+        // client disconnects (or handleRequest throws) mid-request, this
+        // listener must already be attached so the per-request McpServer/
+        // transport still get cleaned up instead of leaking.
+        res.on('close', cleanup);
 
-        res.on('close', () => {
-          transport.close();
-          server.close();
-        });
+        await transport.handleRequest(req, res, body);
       } catch (error) {
         console.error('Error handling MCP request:', error);
+        // Clean up immediately on error too — don't rely solely on the
+        // 'close' event, since a synchronous failure before res closes
+        // would otherwise leave this request's McpServer/transport open.
+        cleanup();
         if (!res.headersSent) {
           res.writeHead(500, { 'Content-Type': 'application/json' }).end(JSON.stringify({
             jsonrpc: '2.0',
