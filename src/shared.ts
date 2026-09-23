@@ -103,11 +103,35 @@ function registrationErrorResponse(error: string, description: string, status: n
   });
 }
 
+async function readBodyWithinLimit(request: Request, maxBytes: number): Promise<string | null> {
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    totalBytes += value.byteLength;
+    if (totalBytes > maxBytes) {
+      reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
 export async function rejectDisallowedRedirectUris(request: Request): Promise<Response | null> {
   const tooLarge = registrationErrorResponse(REGISTRATION_TOO_LARGE_ERROR, REGISTRATION_TOO_LARGE_DESCRIPTION, 413);
   if (Number(request.headers.get("Content-Length") || 0) > MAX_REGISTRATION_BODY_BYTES) return tooLarge;
-  const text = await request.clone().text();
-  if (text.length > MAX_REGISTRATION_BODY_BYTES) return tooLarge;
+  const text = await readBodyWithinLimit(request.clone(), MAX_REGISTRATION_BODY_BYTES);
+  if (text === null) return tooLarge;
 
   let body: { redirect_uris?: unknown };
   try {

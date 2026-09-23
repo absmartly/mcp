@@ -7,6 +7,7 @@ const VICTIM_ENDPOINT = 'https://victim.absmartly.com';
 const LEGIT_CLIENT_ID = 'legit-client';
 const LEGIT_REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
 const ATTACKER_REDIRECT = 'https://attacker.example/cb';
+const ATTACKER_ENDPOINT = 'https://attacker.example';
 
 class MockKv {
   store = new Map<string, string>();
@@ -109,7 +110,30 @@ export default async function run() {
     const env = makeEnv(validAuthRequest());
     const { transactionId } = await startConsent(handler, env);
     const res = await postAuthorize(handler, env, { action: 'approve', transaction_id: transactionId! },
-      '__Host-absmartly-oauth-consent=attacker-value');
+      `__Host-absmartly-oauth-consent-${transactionId}=attacker-value`);
+    assert.strictEqual(res.status, 400);
+  });
+
+  await asyncTest('an earlier consent page still works after a second one opens in the same browser', async () => {
+    const handler = new ABsmartlyOAuthHandler();
+    const env = makeEnv(validAuthRequest());
+    const first = await startConsent(handler, env);
+    const second = await startConsent(handler, env);
+    assert.notStrictEqual(first.transactionId, second.transactionId);
+    const bothCookies = `${first.cookie}; ${second.cookie}`;
+
+    const firstRes = await postAuthorize(handler, env, { action: 'cancel', transaction_id: first.transactionId! }, bothCookies);
+    assert.strictEqual(firstRes.status, 302);
+    const secondRes = await postAuthorize(handler, env, { action: 'cancel', transaction_id: second.transactionId! }, bothCookies);
+    assert.strictEqual(secondRes.status, 302);
+  });
+
+  await asyncTest("one transaction's cookie does not unlock another transaction", async () => {
+    const handler = new ABsmartlyOAuthHandler();
+    const env = makeEnv(validAuthRequest());
+    const first = await startConsent(handler, env);
+    const second = await startConsent(handler, env);
+    const res = await postAuthorize(handler, env, { action: 'approve', transaction_id: first.transactionId! }, second.cookie);
     assert.strictEqual(res.status, 400);
   });
 
@@ -179,6 +203,20 @@ export default async function run() {
       headers: { Cookie: approvalCookie!.split(';')[0] },
     }), env);
     assert.strictEqual(next.status, 302);
+  });
+
+  await asyncTest('approval for one ABsmartly endpoint does not skip consent for another', async () => {
+    const handler = new ABsmartlyOAuthHandler();
+    const authRequest = validAuthRequest();
+    const env = makeEnv(authRequest);
+    const { transactionId, cookie } = await startConsent(handler, env);
+    const approve = await postAuthorize(handler, env, { action: 'approve', transaction_id: transactionId! }, cookie);
+    const approvalCookie = approve.headers.getSetCookie().find(c => c.startsWith('__Host-absmartly-oauth-approvals='))!.split(';')[0];
+
+    authRequest.resource = `${MCP_ORIGIN}/mcp?absmartly-endpoint=${ATTACKER_ENDPOINT}`;
+    const next = await handler.fetch(new Request(`${MCP_ORIGIN}/authorize`, { headers: { Cookie: approvalCookie } }), env);
+    assert.strictEqual(next.status, 200, 'a different endpoint must show the consent page again');
+    assert.ok((await next.text()).includes(ATTACKER_ENDPOINT));
   });
 
   await asyncTest('consent page cannot be framed', async () => {
