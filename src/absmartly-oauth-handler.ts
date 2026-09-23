@@ -20,7 +20,15 @@ type OAuthBindings = Env & { OAUTH_PROVIDER: OAuthHelpers };
 type OAuthContext = Context<{ Bindings: OAuthBindings }>;
 type AbsmartlyAuthRequest = AuthRequest & { resource?: string };
 
-const COOKIE_NAME = 'absmartly-oauth-approvals';
+// __Host- cookies are pinned to this exact origin with Path=/, so a sibling
+// *.absmartly.com site cannot plant or overwrite them.
+const APPROVALS_COOKIE_NAME = 'absmartly-oauth-approvals';
+const HOST_COOKIE_PREFIX = 'host';
+const APPROVALS_KV_PREFIX = 'oauth:approvals:';
+const FRAME_PROTECTION_HEADERS = {
+  'X-Frame-Options': 'DENY',
+  'Content-Security-Policy': "frame-ancestors 'none'",
+};
 const PKCE_REQUIRED_MESSAGE = `PKCE with code_challenge_method=${REQUIRED_CODE_CHALLENGE_METHOD} is required`;
 const CONSENT_COOKIE_NAME = 'absmartly-oauth-consent';
 const CONSENT_KV_PREFIX = 'oauth:consent:';
@@ -401,28 +409,46 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
     return descriptions[scope] || scope;
   }
 
+  // Approvals are kept server-side; the cookie only carries a random session id,
+  // so a client cannot forge an approval to skip the consent screen.
   private async getApprovedClients(c: OAuthContext): Promise<string[]> {
-    const cookie = getCookie(c, COOKIE_NAME);
-    if (!cookie) return [];
+    const sessionId = getCookie(c, APPROVALS_COOKIE_NAME, HOST_COOKIE_PREFIX);
+    if (!sessionId) return [];
+    const raw = await safeKvGet(c.env.OAUTH_KV, `${APPROVALS_KV_PREFIX}${sessionId}`);
+    if (!raw) return [];
 
     try {
-      const decoded = JSON.parse(atob(cookie));
-      return decoded.clients || [];
+      const clients = JSON.parse(raw);
+      return Array.isArray(clients) ? clients : [];
     } catch (e) {
-      console.warn('Failed to parse approval cookie:', e);
+      console.warn('Failed to parse stored approvals:', e);
       return [];
     }
   }
 
   private async addApprovedClient(c: OAuthContext, clientId: string) {
+    const existingSessionId = getCookie(c, APPROVALS_COOKIE_NAME, HOST_COOKIE_PREFIX);
     const approvedClients = await this.getApprovedClients(c);
     if (!approvedClients.includes(clientId)) {
       approvedClients.push(clientId);
     }
+    const sessionId = existingSessionId || crypto.randomUUID();
 
-    const cookie = btoa(JSON.stringify({ clients: approvedClients }));
+    try {
+      await c.env.OAUTH_KV.put(
+        `${APPROVALS_KV_PREFIX}${sessionId}`,
+        JSON.stringify(approvedClients),
+        { expirationTtl: APPROVAL_COOKIE_MAX_AGE_SECONDS }
+      );
+    } catch (e) {
+      // Not remembering the approval only means the user sees the consent page again.
+      console.warn('Failed to store client approval:', e);
+      return;
+    }
 
-    setCookie(c, COOKIE_NAME, cookie, {
+    setCookie(c, APPROVALS_COOKIE_NAME, sessionId, {
+      prefix: HOST_COOKIE_PREFIX,
+      path: '/',
       httpOnly: true,
       secure: true,
       sameSite: 'Lax',
@@ -435,10 +461,11 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
     const browserBinding = crypto.randomUUID();
     await this.saveConsentTransaction(c, transactionId, { authRequest, absmartlyEndpoint, browserBinding });
     setCookie(c, CONSENT_COOKIE_NAME, browserBinding, {
+      prefix: HOST_COOKIE_PREFIX,
+      path: '/',
       httpOnly: true,
       secure: true,
       sameSite: 'Lax',
-      path: '/authorize',
       maxAge: CONSENT_TTL_SECONDS
     });
     return transactionId;
@@ -468,7 +495,7 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
     }
 
     // The transaction must be completed by the same browser that received the consent page.
-    const browserBinding = getCookie(c, CONSENT_COOKIE_NAME);
+    const browserBinding = getCookie(c, CONSENT_COOKIE_NAME, HOST_COOKIE_PREFIX);
     if (!browserBinding || browserBinding !== transaction.browserBinding) {
       debug('Consent transaction browser binding mismatch');
       return null;
@@ -483,7 +510,7 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
     } catch (e) {
       console.warn('Failed to delete consent transaction (non-critical):', e);
     }
-    deleteCookie(c, CONSENT_COOKIE_NAME, { path: '/authorize', secure: true });
+    deleteCookie(c, CONSENT_COOKIE_NAME, { prefix: HOST_COOKIE_PREFIX, path: '/', secure: true });
   }
 
   private describeRedirectTarget(redirectUri: string): string {
@@ -546,7 +573,7 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
   </script>
 </body>
 </html>`;
-    return c.html(html);
+    return c.html(html, 200, FRAME_PROTECTION_HEADERS);
   }
 
   private renderApprovalPage(c: OAuthContext, clientInfo: ClientInfo, authRequest: AbsmartlyAuthRequest, absmartlyEndpoint: string, transactionId: string) {
@@ -598,7 +625,7 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
   </div>
 </body>
 </html>`;
-    return c.html(html);
+    return c.html(html, 200, FRAME_PROTECTION_HEADERS);
   }
 
 }

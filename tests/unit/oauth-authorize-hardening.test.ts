@@ -109,7 +109,7 @@ export default async function run() {
     const env = makeEnv(validAuthRequest());
     const { transactionId } = await startConsent(handler, env);
     const res = await postAuthorize(handler, env, { action: 'approve', transaction_id: transactionId! },
-      'absmartly-oauth-consent=attacker-value');
+      '__Host-absmartly-oauth-consent=attacker-value');
     assert.strictEqual(res.status, 400);
   });
 
@@ -154,6 +154,39 @@ export default async function run() {
     const location = new URL(res.headers.get('location')!);
     assert.strictEqual(`${location.origin}${location.pathname}`, LEGIT_REDIRECT);
     assert.strictEqual(location.searchParams.get('error'), 'access_denied');
+  });
+
+  await asyncTest('forged approvals cookie does not skip the consent page', async () => {
+    const handler = new ABsmartlyOAuthHandler();
+    const env = makeEnv(validAuthRequest());
+    const forged = btoa(JSON.stringify({ clients: [LEGIT_CLIENT_ID] }));
+    for (const cookie of [`absmartly-oauth-approvals=${forged}`, `__Host-absmartly-oauth-approvals=${forged}`]) {
+      const res = await handler.fetch(new Request(`${MCP_ORIGIN}/authorize`, { headers: { Cookie: cookie } }), env);
+      assert.strictEqual(res.status, 200, 'expected consent page, not a redirect');
+      assert.ok((await res.text()).includes('Authorize Access'));
+    }
+  });
+
+  await asyncTest('approved client skips consent on the next visit from the same browser', async () => {
+    const handler = new ABsmartlyOAuthHandler();
+    const env = makeEnv(validAuthRequest());
+    const { transactionId, cookie } = await startConsent(handler, env);
+    const approve = await postAuthorize(handler, env, { action: 'approve', transaction_id: transactionId! }, cookie);
+    const approvalCookie = approve.headers.getSetCookie().find(c => c.startsWith('__Host-absmartly-oauth-approvals='));
+    assert.ok(approvalCookie, 'approval must set a __Host- cookie');
+    assert.ok(/Path=\//.test(approvalCookie!) && /Secure/.test(approvalCookie!) && /HttpOnly/.test(approvalCookie!));
+    const next = await handler.fetch(new Request(`${MCP_ORIGIN}/authorize`, {
+      headers: { Cookie: approvalCookie!.split(';')[0] },
+    }), env);
+    assert.strictEqual(next.status, 302);
+  });
+
+  await asyncTest('consent page cannot be framed', async () => {
+    const handler = new ABsmartlyOAuthHandler();
+    const env = makeEnv(validAuthRequest());
+    const { res } = await startConsent(handler, env);
+    assert.strictEqual(res.headers.get('x-frame-options'), 'DENY');
+    assert.ok(res.headers.get('content-security-policy')?.includes("frame-ancestors 'none'"));
   });
 
   await asyncTest('GET /authorize without redirect_uri is rejected', async () => {
