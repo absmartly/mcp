@@ -4,17 +4,23 @@
 // (e.g. office/backend) supplies an already-authenticated APIClient per
 // request via buildContext — this module does zero authentication itself.
 import type { IncomingMessage, ServerResponse } from "http";
+import { fileURLToPath } from "url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { APIClient } from "@absmartly/cli/api-client";
-import { buildServerContext } from "./server-context.js";
+import { createServerContextLoader } from "./server-context.js";
 import { registerServer } from "./register-server.js";
 import { MCP_VERSION } from "./version.js";
+
+// Bundled markdown docs (templates.md, examples.md), shipped in the package's
+// "files" as public/docs/. Resolves identically from src/ (tsx) and dist/.
+const DEFAULT_DOCS_DIR = fileURLToPath(new URL("../public/docs/api", import.meta.url));
 
 export interface NodeMcpRequestContext {
   apiClient: APIClient;
   endpoint: string;
   authType: string;
+  /** Override the bundled docs directory (defaults to DEFAULT_DOCS_DIR). */
   docsDir?: string;
 }
 
@@ -39,7 +45,9 @@ export function createStreamableHttpHandler(
 
       try {
         const requestCtx = await buildContext(req);
-        const serverCtx = await buildServerContext(requestCtx.apiClient, {
+        // Lazy: entity lists are fetched only if this message's handler needs
+        // them, not on every POST (initialize, tools/list, etc. skip it).
+        const serverCtx = createServerContextLoader(requestCtx.apiClient, {
           endpoint: requestCtx.endpoint,
           authType: requestCtx.authType,
         });
@@ -48,7 +56,7 @@ export function createStreamableHttpHandler(
           { name: "ABsmartly MCP Server", version: MCP_VERSION },
           { capabilities: { tools: {}, resources: { subscribe: true, listChanged: true }, prompts: {} } },
         );
-        registerServer(server, serverCtx, { docsDir: requestCtx.docsDir });
+        registerServer(server, serverCtx, { docsDir: requestCtx.docsDir ?? DEFAULT_DOCS_DIR });
 
         transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
         await server.connect(transport);

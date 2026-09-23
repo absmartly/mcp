@@ -3,23 +3,36 @@ import http from 'node:http';
 import { createStreamableHttpHandler } from '../../src/node-http-server.js';
 import type { ServerContext } from '../../src/server-context.js';
 
-function makeMockApiClient() {
+function makeMockApiClient(counter: { calls: number } = { calls: 0 }) {
+    const call = <T>(value: T) => async () => { counter.calls++; return value; };
     return {
-        getCurrentUser: async () => ({ id: 1 }),
-        listCustomSectionFields: async () => [],
-        listUsers: async () => [],
-        listTeams: async () => [],
-        listApplications: async () => [],
-        listUnitTypes: async () => [],
-        listExperimentTags: async () => [],
-        listMetrics: async () => [],
-        listGoals: async () => [],
+        getCurrentUser: call({ id: 1 }),
+        listCustomSectionFields: call([]),
+        listUsers: call([]),
+        listTeams: call([]),
+        listApplications: call([{ id: 3, name: 'Web', environment: 'prod' }]),
+        listUnitTypes: call([]),
+        listExperimentTags: call([]),
+        listMetrics: call([]),
+        listGoals: call([]),
     } as any;
 }
 
-async function withTestServer(fn: (baseUrl: string) => Promise<void>) {
+const ENTITY_FETCH_CALLS = 9;
+
+async function postJson(baseUrl: string, payload: unknown): Promise<string> {
+    const res = await fetch(`${baseUrl}/mcp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' },
+        body: JSON.stringify(payload),
+    });
+    assert.strictEqual(res.status, 200);
+    return res.text();
+}
+
+async function withTestServer(fn: (baseUrl: string) => Promise<void>, counter?: { calls: number }) {
     const mcpHandler = createStreamableHttpHandler(async () => ({
-        apiClient: makeMockApiClient(),
+        apiClient: makeMockApiClient(counter),
         endpoint: 'https://demo.absmartly.com',
         authType: 'API Key',
     }));
@@ -100,6 +113,40 @@ export default async function run() {
             assert.strictEqual(res.status, 200);
             const text = await res.text();
             assert.ok(text.includes('execute_command'), `expected execute_command tool, got: ${text}`);
+        });
+    });
+
+    await test('routine messages (initialize, tools/list, resources/list) make no entity fetches', async () => {
+        const counter = { calls: 0 };
+        await withTestServer(async (baseUrl) => {
+            await postJson(baseUrl, {
+                jsonrpc: '2.0', id: 1, method: 'initialize',
+                params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test-client', version: '0.0.0' } },
+            });
+            await postJson(baseUrl, { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
+            await postJson(baseUrl, { jsonrpc: '2.0', id: 3, method: 'resources/list', params: {} });
+        }, counter);
+        assert.strictEqual(counter.calls, 0);
+    });
+
+    await test('reading an entity resource fetches entities once for that request', async () => {
+        const counter = { calls: 0 };
+        await withTestServer(async (baseUrl) => {
+            const text = await postJson(baseUrl, {
+                jsonrpc: '2.0', id: 4, method: 'resources/read', params: { uri: 'absmartly://entities/applications' },
+            });
+            assert.ok(text.includes('Web'), `expected applications payload, got: ${text}`);
+        }, counter);
+        assert.strictEqual(counter.calls, ENTITY_FETCH_CALLS);
+    });
+
+    await test('absmartly://docs/templates is readable without a host-supplied docsDir', async () => {
+        await withTestServer(async (baseUrl) => {
+            const text = await postJson(baseUrl, {
+                jsonrpc: '2.0', id: 5, method: 'resources/read', params: { uri: 'absmartly://docs/templates' },
+            });
+            assert.ok(!text.includes('"error"'), `expected templates content, got: ${text}`);
+            assert.ok(!text.includes('Could not load'), `templates.md not found at default docs dir: ${text}`);
         });
     });
 

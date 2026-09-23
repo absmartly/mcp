@@ -34,6 +34,12 @@ export interface ToolContext {
   log?: (level: string, message: string) => void;
   /** Optional: request user confirmation for destructive actions via MCP elicitation. */
   elicitConfirmation?: (message: string) => Promise<boolean>;
+  /**
+   * Optional: populate entityWarnings/customFields/currentUserId on demand.
+   * Set when entity data is fetched lazily (Node HTTP transport); handlers
+   * that read those fields await this first.
+   */
+  ensureEntities?: () => Promise<void>;
 }
 
 function formatCommandList(entries: CommandEntry[]): string {
@@ -135,6 +141,7 @@ export function setupTools(server: McpServer, ctx: ToolContext): void {
     {},
     { readOnlyHint: true },
     async () => {
+      await ctx.ensureEntities?.();
       const hasApi = !!ctx.apiClient;
       let text = hasApi
         ? `Authenticated with ${ctx.authType}\n\nEndpoint: ${ctx.endpoint}`
@@ -216,6 +223,7 @@ To create experiments, use execute_command with group "experiments" and command 
         return { content: [{ type: "text" as const, text: `Command "${params.group}.${params.command}" not found.${sugText}` }] };
       }
 
+      await ctx.ensureEntities?.();
       const doc = buildCommandDoc(entry, ctx.customFields);
 
       return { content: [{ type: "text" as const, text: doc }] };
@@ -262,6 +270,7 @@ To create experiments, use group "experiments", command "createExperimentFromTem
       // — without this guard, the call returns success but does nothing).
       const validationErrors = validateCommandParams(entry, params.params || {});
       if (validationErrors.length > 0) {
+        await ctx.ensureEntities?.();
         const docs = buildCommandDoc(entry, ctx.customFields);
         return {
           content: [{
@@ -368,6 +377,7 @@ To create experiments, use group "experiments", command "createExperimentFromTem
 
         // Auto-populate custom fields for createExperiment
         if (params.command === 'createExperiment' && commandParams.data) {
+          await ctx.ensureEntities?.();
           autoPopulateCustomFields(
             commandParams.data as Record<string, unknown>,
             ctx.customFields,

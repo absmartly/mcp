@@ -11,7 +11,8 @@ import { join } from "path";
 import type { CustomSectionField } from "@absmartly/cli/api-client";
 import { setupTools } from "./tools.js";
 import type { ToolContext } from "./tools.js";
-import type { ServerContext } from "./server-context.js";
+import type { ServerContext, ServerContextLoader } from "./server-context.js";
+import { isServerContextLoader } from "./server-context.js";
 
 const EXPERIMENT_ID_PATTERN = /^\d+$/;
 
@@ -51,33 +52,46 @@ function buildEntityContext(ctx: ServerContext): string {
   return sections.join('\n\n');
 }
 
-export function registerServer(server: McpServer, ctx: ServerContext, opts: RegisterServerOptions = {}): void {
+export function registerServer(
+  server: McpServer,
+  source: ServerContext | ServerContextLoader,
+  opts: RegisterServerOptions = {},
+): void {
+  // With a loader, entity lists are fetched on first use by a handler that
+  // needs them rather than up front — see createServerContextLoader.
+  let resolved: ServerContext | undefined = isServerContextLoader(source) ? undefined : source;
+  const getCtx = async (): Promise<ServerContext> => {
+    if (!resolved) resolved = await (source as ServerContextLoader).load();
+    return resolved;
+  };
+
   const toolCtx: ToolContext = {
-    apiClient: ctx.apiClient,
-    endpoint: ctx.endpoint,
-    authType: ctx.authType,
+    apiClient: source.apiClient,
+    endpoint: source.endpoint,
+    authType: source.authType,
     profileName: opts.profileName,
-    entityWarnings: ctx.entityWarnings,
-    customFields: ctx.customFields,
-    currentUserId: ctx.currentUserId,
+    get entityWarnings() { return resolved?.entityWarnings ?? []; },
+    get customFields() { return resolved?.customFields ?? []; },
+    get currentUserId() { return resolved?.currentUserId ?? null; },
     log: opts.log,
     elicitConfirmation: opts.elicitConfirmation,
+    ensureEntities: resolved ? undefined : async () => { await getCtx(); },
   };
   setupTools(server, toolCtx);
 
   const entityConfigs = [
-    { name: "Applications", uri: "absmartly://entities/applications", description: "Cached list of available applications", getData: () => ctx.applications },
-    { name: "Unit Types", uri: "absmartly://entities/unit-types", description: "Cached list of available unit types", getData: () => ctx.unitTypes },
-    { name: "Teams", uri: "absmartly://entities/teams", description: "Cached list of available teams", getData: () => ctx.teams },
-    { name: "Users", uri: "absmartly://entities/users", description: "Cached list of users (summarized)", getData: () => ctx.users },
-    { name: "Metrics", uri: "absmartly://entities/metrics", description: "Cached list of available metrics", getData: () => ctx.metrics },
-    { name: "Goals", uri: "absmartly://entities/goals", description: "Cached list of available goals", getData: () => ctx.goals },
-    { name: "Tags", uri: "absmartly://entities/tags", description: "Cached list of experiment tags", getData: () => ctx.experimentTags },
+    { name: "Applications", uri: "absmartly://entities/applications", description: "Cached list of available applications", getData: (ctx: ServerContext) => ctx.applications },
+    { name: "Unit Types", uri: "absmartly://entities/unit-types", description: "Cached list of available unit types", getData: (ctx: ServerContext) => ctx.unitTypes },
+    { name: "Teams", uri: "absmartly://entities/teams", description: "Cached list of available teams", getData: (ctx: ServerContext) => ctx.teams },
+    { name: "Users", uri: "absmartly://entities/users", description: "Cached list of users (summarized)", getData: (ctx: ServerContext) => ctx.users },
+    { name: "Metrics", uri: "absmartly://entities/metrics", description: "Cached list of available metrics", getData: (ctx: ServerContext) => ctx.metrics },
+    { name: "Goals", uri: "absmartly://entities/goals", description: "Cached list of available goals", getData: (ctx: ServerContext) => ctx.goals },
+    { name: "Tags", uri: "absmartly://entities/tags", description: "Cached list of experiment tags", getData: (ctx: ServerContext) => ctx.experimentTags },
     {
       name: "Custom Fields",
       uri: "absmartly://entities/custom-fields",
       description: "Cached list of custom fields",
-      getData: () => ctx.customFields
+      getData: (ctx: ServerContext) => ctx.customFields
         .filter((f: CustomSectionField) => !f.archived)
         .map((f: CustomSectionField) => ({
           id: f.id,
@@ -90,7 +104,7 @@ export function registerServer(server: McpServer, ctx: ServerContext, opts: Regi
   ];
   for (const cfg of entityConfigs) {
     server.resource(cfg.name, cfg.uri, { description: cfg.description }, async () => ({
-      contents: [{ uri: cfg.uri, mimeType: "application/json", text: JSON.stringify(cfg.getData(), null, 2) }],
+      contents: [{ uri: cfg.uri, mimeType: "application/json", text: JSON.stringify(cfg.getData(await getCtx()), null, 2) }],
     }));
   }
 
@@ -132,8 +146,8 @@ export function registerServer(server: McpServer, ctx: ServerContext, opts: Regi
         (value) => ['test', 'feature'].filter(t => t.startsWith(value || '')),
       ),
     },
-    (args) => {
-      const entityContext = buildEntityContext(ctx);
+    async (args) => {
+      const entityContext = buildEntityContext(await getCtx());
       const expType = args.type || 'test';
       return {
         messages: [{
@@ -151,8 +165,8 @@ export function registerServer(server: McpServer, ctx: ServerContext, opts: Regi
     "create-feature-flag",
     "Create a new feature flag (simplified experiment with type=feature)",
     { name: z.string().describe("Feature flag name (snake_case recommended)") },
-    (args) => {
-      const entityContext = buildEntityContext(ctx);
+    async (args) => {
+      const entityContext = buildEntityContext(await getCtx());
       return {
         messages: [{
           role: "user" as const,

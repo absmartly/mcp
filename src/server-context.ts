@@ -110,3 +110,36 @@ export async function buildServerContext(
     })),
   };
 }
+
+/**
+ * Deferred ServerContext: identity fields are available immediately, while
+ * the entity lists (current user + eight list calls) are fetched only the
+ * first time `load()` is called, then memoized. Lets per-request transports
+ * (node-http-server.ts) skip the prefetch for messages that never touch
+ * entity data (initialize, tools/list, resources/list, most tool calls).
+ */
+export interface ServerContextLoader {
+  apiClient: APIClient;
+  endpoint: string;
+  authType: string;
+  load(): Promise<ServerContext>;
+}
+
+export function createServerContextLoader(
+  apiClient: APIClient,
+  opts: { endpoint: string; authType: string },
+): ServerContextLoader {
+  let pending: Promise<ServerContext> | undefined;
+  return {
+    apiClient,
+    endpoint: opts.endpoint,
+    authType: opts.authType,
+    load: () => (pending ??= buildServerContext(apiClient, opts)),
+  };
+}
+
+export function isServerContextLoader(
+  source: ServerContext | ServerContextLoader,
+): source is ServerContextLoader {
+  return typeof (source as ServerContextLoader).load === 'function';
+}
