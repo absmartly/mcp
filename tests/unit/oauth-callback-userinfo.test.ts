@@ -78,7 +78,8 @@ async function setupCallback(opts: {
   const captured: { auth?: any } = {};
   const state = opts.state || 'test-state';
   const code = opts.code || 'backend-auth-code';
-  await kv.put(`oauth:state:${state}`, JSON.stringify(opts.storedState));
+  const browserBinding = 'test-browser-binding';
+  await kv.put(`oauth:state:${state}`, JSON.stringify({ browserBinding, ...opts.storedState }));
   const env = {
     OAUTH_KV: kv,
     ABSMARTLY_OAUTH_CLIENT_ID: 'mcp-absmartly-universal',
@@ -86,6 +87,14 @@ async function setupCallback(opts: {
     OAUTH_PROVIDER: makeOAuthProvider(captured),
   };
   return { handler, kv, env, captured, state, code };
+}
+
+const CALLBACK_COOKIE_PREFIX = '__Host-absmartly-oauth-cb-';
+
+function callbackRequest(state: string, code: string, browserBinding: string | null = 'test-browser-binding'): Request {
+  const headers: Record<string, string> = {};
+  if (browserBinding !== null) headers.Cookie = `${CALLBACK_COOKIE_PREFIX}${state}=${browserBinding}`;
+  return new Request(`https://mcp.absmartly.com/oauth/callback?code=${code}&state=${state}`, { headers });
 }
 
 export default async function run() {
@@ -138,7 +147,7 @@ export default async function run() {
     ]);
 
     try {
-      const req = new Request(`https://mcp.absmartly.com/oauth/callback?code=${code}&state=${state}`);
+      const req = callbackRequest(state, code);
       const res = await handler.fetch(req, env);
       assert.strictEqual(res.status, 302, `expected 302, got ${res.status}: ${await res.text()}`);
       assert.strictEqual(mock.calls.length, 2, 'expected exactly token + userinfo calls');
@@ -168,7 +177,7 @@ export default async function run() {
     ]);
 
     try {
-      const req = new Request(`https://mcp.absmartly.com/oauth/callback?code=${code}&state=${state}`);
+      const req = callbackRequest(state, code);
       const res = await handler.fetch(req, env);
       assert.strictEqual(res.status, 302);
       assert.strictEqual(captured.auth.props.email, 'bob@example.com');
@@ -195,7 +204,7 @@ export default async function run() {
     ]);
 
     try {
-      const req = new Request(`https://mcp.absmartly.com/oauth/callback?code=${code}&state=${state}`);
+      const req = callbackRequest(state, code);
       const res = await handler.fetch(req, env);
       assert.strictEqual(res.status, 500);
       assert.ok((await res.text()).toLowerCase().includes('user identity'));
@@ -220,13 +229,36 @@ export default async function run() {
     ]);
 
     try {
-      const req = new Request(`https://mcp.absmartly.com/oauth/callback?code=${code}&state=${state}`);
+      const req = callbackRequest(state, code);
       const res = await handler.fetch(req, env);
       assert.strictEqual(res.status, 400);
     } finally {
       mock.restore();
     }
   });
+
+  for (const [label, cookie] of [['missing', null], ['mismatched', 'attacker-binding']] as const) {
+    await asyncTest(`callback with ${label} browser binding is rejected before any backend call`, async () => {
+      const { handler, env, kv, captured, state, code } = await setupCallback({
+        storedState: {
+          authRequest: { clientId: 'cli', scope: ['mcp:access'], redirectUri: 'https://claude.ai/api/mcp/auth_callback' },
+          absmartlyEndpoint: 'https://demo.absmartly.com',
+          codeVerifier: 'v'.repeat(43),
+        },
+        state: `s-${label}`,
+      });
+      const mock = installFetchMock([]);
+      try {
+        const res = await handler.fetch(callbackRequest(state, code, cookie), env);
+        assert.strictEqual(res.status, 400);
+        assert.strictEqual(mock.calls.length, 0, 'the backend code must not be exchanged');
+        assert.strictEqual(captured.auth, undefined, 'no MCP grant may be issued');
+        assert.ok(kv.store.has(`oauth:state:${state}`), 'the real browser must still be able to finish the login');
+      } finally {
+        mock.restore();
+      }
+    });
+  }
 
   return {
     success: failed === 0,

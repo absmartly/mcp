@@ -50,6 +50,7 @@ export default async function run() {
     redirectUrl: URL;
     storedState: any;
     kv: MockKv;
+    setCookies: string[];
   }> {
     const handler = new ABsmartlyOAuthHandler();
     const kv = new MockKv();
@@ -106,8 +107,25 @@ export default async function run() {
     assert.ok(storedRaw, 'state not stored in KV');
     const storedState = JSON.parse(storedRaw!);
 
-    return { redirectUrl, storedState, kv };
+    return { redirectUrl, storedState, kv, setCookies: res.headers.getSetCookie() };
   }
+
+  await asyncTest('approval sets a per-login __Host- callback cookie matching the stored binding', async () => {
+    const { redirectUrl, storedState, setCookies } = await approveAndGetRedirect('https://demo.absmartly.com');
+    const state = redirectUrl.searchParams.get('state')!;
+    const cookie = setCookies.find((c: string) => c.startsWith(`__Host-absmartly-oauth-cb-${state}=`));
+    assert.ok(cookie, 'no callback binding cookie set for this state');
+    assert.ok(cookie!.includes(`=${storedState.browserBinding};`), 'cookie value must match the stored binding');
+    assert.ok(/Path=\//.test(cookie!) && /Secure/.test(cookie!) && /HttpOnly/.test(cookie!) && /SameSite=Lax/.test(cookie!));
+  });
+
+  await asyncTest('parallel logins get independent callback cookies', async () => {
+    const a = await approveAndGetRedirect('https://demo.absmartly.com');
+    const b = await approveAndGetRedirect('https://demo.absmartly.com');
+    const nameOf = (r: any) => `__Host-absmartly-oauth-cb-${r.redirectUrl.searchParams.get('state')}`;
+    assert.notStrictEqual(nameOf(a), nameOf(b));
+    assert.notStrictEqual(a.storedState.browserBinding, b.storedState.browserBinding);
+  });
 
   await asyncTest('redirect includes code_challenge_method=S256', async () => {
     const { redirectUrl } = await approveAndGetRedirect('https://demo.absmartly.com');

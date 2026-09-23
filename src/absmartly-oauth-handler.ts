@@ -25,6 +25,9 @@ type AbsmartlyAuthRequest = AuthRequest & { resource?: string };
 const APPROVALS_COOKIE_NAME = 'absmartly-oauth-approvals';
 const HOST_COOKIE_PREFIX = 'host';
 const APPROVALS_KV_PREFIX = 'oauth:approvals:';
+// One cookie per upstream login, named after its state token, so parallel logins in the
+// same browser don't overwrite each other's binding.
+const CALLBACK_COOKIE_NAME_PREFIX = 'absmartly-oauth-cb-';
 const FRAME_PROTECTION_HEADERS = {
   'X-Frame-Options': 'DENY',
   'Content-Security-Policy': "frame-ancestors 'none'",
@@ -243,12 +246,6 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
         return c.text('Invalid or expired state', 400);
       }
 
-      try {
-        await env.OAUTH_KV.delete(`oauth:state:${state}`);
-      } catch (e) {
-        console.warn('Failed to delete OAuth state token (non-critical):', e);
-      }
-
       let oauthReqInfo;
       try {
         oauthReqInfo = JSON.parse(storedState);
@@ -256,6 +253,20 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
         debug('Failed to parse stored state:', e);
         return c.text('Invalid state data', 400);
       }
+
+      const callbackCookieName = `${CALLBACK_COOKIE_NAME_PREFIX}${state}`;
+      const browserBinding = getCookie(c, callbackCookieName, HOST_COOKIE_PREFIX);
+      if (!oauthReqInfo.browserBinding || browserBinding !== oauthReqInfo.browserBinding) {
+        debug('OAuth callback browser binding mismatch');
+        return c.text('This login was started in a different browser, please restart the connection from your MCP client', 400);
+      }
+
+      try {
+        await env.OAUTH_KV.delete(`oauth:state:${state}`);
+      } catch (e) {
+        console.warn('Failed to delete OAuth state token (non-critical):', e);
+      }
+      deleteCookie(c, callbackCookieName, { prefix: HOST_COOKIE_PREFIX, path: '/', secure: true });
 
       const absmartlyEndpoint = oauthReqInfo.absmartlyEndpoint;
       if (!absmartlyEndpoint) {
@@ -372,10 +383,12 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
     const cleanEndpoint = absmartlyEndpoint.replace(/\/+$/, '');
     const { codeVerifier, codeChallenge } = await generatePkcePair();
     const stateToken = crypto.randomUUID();
+    const browserBinding = crypto.randomUUID();
     const stateData = {
       authRequest,
       absmartlyEndpoint: cleanEndpoint,
       codeVerifier,
+      browserBinding,
     };
 
     try {
@@ -398,6 +411,16 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
     absmartlyOAuthUrl.searchParams.set('code_challenge', codeChallenge);
     absmartlyOAuthUrl.searchParams.set('code_challenge_method', 'S256');
 
+    // Set only after consent was given, so /oauth/callback can require that the browser
+    // finishing the login is the one that approved it (MCP security best practices).
+    setCookie(c, `${CALLBACK_COOKIE_NAME_PREFIX}${stateToken}`, browserBinding, {
+      prefix: HOST_COOKIE_PREFIX,
+      path: '/',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Lax',
+      maxAge: OAUTH_STATE_TTL_SECONDS
+    });
     return c.redirect(absmartlyOAuthUrl.toString());
   }
 
