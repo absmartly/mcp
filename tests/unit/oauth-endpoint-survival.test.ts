@@ -81,6 +81,8 @@ export default async function run() {
         state: 'xyz',
         scope: ['api:read'],
         responseType: 'code',
+        codeChallenge: 'test-challenge',
+        codeChallengeMethod: 'S256',
       }),
     };
 
@@ -110,6 +112,8 @@ export default async function run() {
         state: 'xyz',
         scope: ['api:read'],
         responseType: 'code',
+        codeChallenge: 'test-challenge',
+        codeChallengeMethod: 'S256',
         resource: sseUrl,
       }),
     };
@@ -134,6 +138,8 @@ export default async function run() {
         state: 'xyz',
         scope: ['api:read'],
         responseType: 'code',
+        codeChallenge: 'test-challenge',
+        codeChallengeMethod: 'S256',
       }),
     };
 
@@ -164,6 +170,8 @@ export default async function run() {
         state: 'xyz',
         scope: ['api:read'],
         responseType: 'code',
+        codeChallenge: 'test-challenge',
+        codeChallengeMethod: 'S256',
         // No resource param either — client doesn't include it.
       }),
     };

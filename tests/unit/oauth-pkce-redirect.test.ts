@@ -61,25 +61,36 @@ export default async function run() {
         state: 'orig-state',
         scope: ['mcp:access'],
         responseType: 'code',
+        codeChallenge: 'client-challenge',
+        codeChallengeMethod: 'S256',
       }),
     };
 
+    const getRes = await handler.fetch(new Request('https://mcp.absmartly.com/authorize'), env);
+    const page = await getRes.text();
+    const transactionId = page.match(/name="transaction_id" value="([^"]+)"/)?.[1];
+    assert.ok(transactionId, 'consent page has no transaction_id');
+    const consentCookie = getRes.headers.get('set-cookie')?.split(';')[0];
+    assert.ok(consentCookie, 'consent page did not set the browser-binding cookie');
+
     const formBody = new URLSearchParams({
-      action: 'approve',
-      client_id: 'claude-mcp-test',
-      redirect_uri: 'https://client.example/cb',
-      state: 'orig-state',
-      scope: 'mcp:access',
-      response_type: 'code',
+      action: 'set_endpoint',
+      transaction_id: transactionId!,
       absmartly_endpoint: absmartlyEndpoint,
       code_challenge: TEST_CODE_CHALLENGE,
       code_challenge_method: 'S256',
     });
+    const setRes = await handler.fetch(new Request('https://mcp.absmartly.com/authorize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Cookie: consentCookie! },
+      body: formBody,
+    }), env);
+    assert.strictEqual(setRes.status, 200, `set_endpoint should render the consent page, got ${setRes.status}`);
 
     const req = new Request('https://mcp.absmartly.com/authorize', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: formBody,
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Cookie: consentCookie! },
+      body: new URLSearchParams({ action: 'approve', transaction_id: transactionId! }),
     });
 
     const res = await handler.fetch(req, env);
@@ -171,31 +182,6 @@ export default async function run() {
     ['missing', {}],
     ['plain', { code_challenge: TEST_CODE_CHALLENGE, code_challenge_method: 'plain' }],
   ] as const) {
-    await asyncTest(`POST /authorize rejects ${label} PKCE`, async () => {
-      const handler = new ABsmartlyOAuthHandler();
-      const kv = new MockKv();
-      const env = {
-        OAUTH_KV: kv,
-        OAUTH_PROVIDER: makeOAuthProvider({ redirectUri: 'https://client.example/cb' }),
-      };
-      const req = new Request('https://mcp.absmartly.com/authorize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          action: 'approve',
-          client_id: 'claude-mcp-test',
-          redirect_uri: 'https://client.example/cb',
-          state: 's',
-          response_type: 'code',
-          absmartly_endpoint: 'https://demo.absmartly.com',
-          ...pkceFields,
-        }),
-      });
-      const res = await handler.fetch(req, env);
-      assert.strictEqual(res.status, 400);
-      assert.strictEqual(kv.store.size, 0, 'no state should be stored without S256 PKCE');
-    });
-
     await asyncTest(`GET /authorize rejects ${label} PKCE`, async () => {
       const handler = new ABsmartlyOAuthHandler();
       const env = {

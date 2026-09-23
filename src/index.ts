@@ -37,6 +37,7 @@ import {
 
 const ENTITY_LIST_PAGE_SIZE = 100;
 const ENTITY_LIST_FIRST_PAGE = 1;
+const SUPPORTED_PKCE_METHODS = ["S256"];
 
 const MCP_CORS_OPTIONS = {
     origin: "*",
@@ -790,6 +791,17 @@ export default {
                     error_description: "OAuth not available when using API key authentication"
                 }), { status: 404 });
             }
+        }
+
+        if (url.pathname === '/.well-known/oauth-authorization-server' && request.method === 'GET') {
+            const response = await oauthProvider.fetch(request, env, ctx);
+            if (!response.ok) return response;
+            const metadata = await response.json() as Record<string, unknown>;
+            metadata.code_challenge_methods_supported = SUPPORTED_PKCE_METHODS;
+            return new Response(JSON.stringify(metadata), {
+                status: response.status,
+                headers: response.headers,
+            });
         }
 
         if (isTransportPath(url.pathname, SSE_PATH)) {

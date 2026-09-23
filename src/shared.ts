@@ -77,6 +77,7 @@ export function isAllowedRedirectUri(redirectUri: string): boolean {
   } catch {
     return false;
   }
+  if (parsed.hash || parsed.username || parsed.password) return false;
   if (parsed.protocol === "https:") return ALLOWED_REDIRECT_HTTPS_HOSTS.includes(parsed.hostname);
   if (parsed.protocol === "http:") return ALLOWED_REDIRECT_LOOPBACK_HOSTS.includes(parsed.hostname);
   return ALLOWED_REDIRECT_CUSTOM_SCHEMES.includes(parsed.protocol);
