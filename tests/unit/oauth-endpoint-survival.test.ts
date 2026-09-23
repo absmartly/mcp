@@ -26,12 +26,13 @@ interface AuthRequest {
 }
 
 const TEST_CODE_CHALLENGE = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
+const TEST_CODE_CHALLENGE_METHOD = 'S256';
 
 function makeOAuthProvider(authRequest: AuthRequest) {
   return {
     parseAuthRequest: async (_req: Request) => ({
       codeChallenge: TEST_CODE_CHALLENGE,
-      codeChallengeMethod: 'S256',
+      codeChallengeMethod: TEST_CODE_CHALLENGE_METHOD,
       ...authRequest,
     }),
     lookupClient: async (clientId: string) => ({
@@ -82,7 +83,7 @@ export default async function run() {
         scope: ['api:read'],
         responseType: 'code',
         codeChallenge: 'test-challenge',
-        codeChallengeMethod: 'S256',
+        codeChallengeMethod: TEST_CODE_CHALLENGE_METHOD,
       }),
     };
 
@@ -113,7 +114,7 @@ export default async function run() {
         scope: ['api:read'],
         responseType: 'code',
         codeChallenge: 'test-challenge',
-        codeChallengeMethod: 'S256',
+        codeChallengeMethod: TEST_CODE_CHALLENGE_METHOD,
         resource: sseUrl,
       }),
     };
@@ -139,7 +140,7 @@ export default async function run() {
         scope: ['api:read'],
         responseType: 'code',
         codeChallenge: 'test-challenge',
-        codeChallengeMethod: 'S256',
+        codeChallengeMethod: TEST_CODE_CHALLENGE_METHOD,
       }),
     };
 
@@ -171,7 +172,7 @@ export default async function run() {
         scope: ['api:read'],
         responseType: 'code',
         codeChallenge: 'test-challenge',
-        codeChallengeMethod: 'S256',
+        codeChallengeMethod: TEST_CODE_CHALLENGE_METHOD,
         // No resource param either — client doesn't include it.
       }),
     };

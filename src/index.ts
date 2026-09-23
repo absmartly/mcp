@@ -30,6 +30,7 @@ import {
     normalizeBaseUrl,
     extractEndpointFromPath,
     rejectDisallowedRedirectUris,
+    REQUIRED_CODE_CHALLENGE_METHOD,
     detectApiKey,
     safeKvPut,
     safeKvGet,
@@ -37,7 +38,7 @@ import {
 
 const ENTITY_LIST_PAGE_SIZE = 100;
 const ENTITY_LIST_FIRST_PAGE = 1;
-const SUPPORTED_PKCE_METHODS = ["S256"];
+const SUPPORTED_PKCE_METHODS = [REQUIRED_CODE_CHALLENGE_METHOD];
 
 const MCP_CORS_OPTIONS = {
     origin: "*",

@@ -6,17 +6,24 @@ export const DEFAULT_ABSMARTLY_DOMAIN = "absmartly.com";
 export const CLAUDE_AUTH_CALLBACK_URI = "https://claude.ai/api/mcp/auth_callback";
 export const REQUIRED_CODE_CHALLENGE_METHOD = "S256";
 
-const ALLOWED_REDIRECT_HTTPS_HOSTS = [
-  "claude.ai",
-  "claude.com",
-  "chatgpt.com",
-  "playground.ai.cloudflare.com",
-  "vscode.dev",
-  "insiders.vscode.dev",
-  "www.cursor.com",
+const ALLOWED_REDIRECT_HTTPS_CALLBACKS = [
+  "https://claude.ai/api/mcp/auth_callback",
+  "https://chatgpt.com/connector_platform_oauth_redirect",
+  "https://chatgpt.com/connector/oauth/",
+  "https://playground.ai.cloudflare.com/oauth/callback",
+  "https://vscode.dev/redirect",
+  "https://insiders.vscode.dev/redirect",
+  "https://www.cursor.com/agents/mcp/oauth/callback",
 ];
 const ALLOWED_REDIRECT_LOOPBACK_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
 const ALLOWED_REDIRECT_CUSTOM_SCHEMES = ["cursor:"];
+const MAX_REGISTRATION_BODY_BYTES = 1024 * 1024;
+const MAX_LOGGED_REDIRECT_URI_LENGTH = 200;
+export const INVALID_REDIRECT_URI_ERROR = "invalid_redirect_uri";
+export const INVALID_REDIRECT_URI_MESSAGE = "Invalid redirect URI";
+const REDIRECT_URI_NOT_ALLOWED_DESCRIPTION = "One or more redirect_uris are not allowed";
+const REGISTRATION_TOO_LARGE_ERROR = "invalid_request";
+const REGISTRATION_TOO_LARGE_DESCRIPTION = "Request payload too large, must be under 1 MiB";
 
 export const API_KEY_SESSION_TTL_SECONDS = 300;
 export const SESSION_TTL_SECONDS = 86400;
@@ -78,29 +85,41 @@ export function isAllowedRedirectUri(redirectUri: string): boolean {
     return false;
   }
   if (parsed.hash || parsed.username || parsed.password) return false;
-  if (parsed.protocol === "https:") return ALLOWED_REDIRECT_HTTPS_HOSTS.includes(parsed.hostname);
+  if (parsed.protocol === "https:") {
+    const callback = `${parsed.origin}${parsed.pathname}`;
+    return ALLOWED_REDIRECT_HTTPS_CALLBACKS.some((allowed) =>
+      allowed.endsWith("/") ? callback.startsWith(allowed) && callback.length > allowed.length : callback === allowed
+    );
+  }
   if (parsed.protocol === "http:") return ALLOWED_REDIRECT_LOOPBACK_HOSTS.includes(parsed.hostname);
   return ALLOWED_REDIRECT_CUSTOM_SCHEMES.includes(parsed.protocol);
 }
 
+function registrationErrorResponse(error: string, description: string, status: number): Response {
+  return new Response(JSON.stringify({ error, error_description: description }), {
+    status,
+    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+  });
+}
+
 export async function rejectDisallowedRedirectUris(request: Request): Promise<Response | null> {
+  const tooLarge = registrationErrorResponse(REGISTRATION_TOO_LARGE_ERROR, REGISTRATION_TOO_LARGE_DESCRIPTION, 413);
+  if (Number(request.headers.get("Content-Length") || 0) > MAX_REGISTRATION_BODY_BYTES) return tooLarge;
+  const text = await request.clone().text();
+  if (text.length > MAX_REGISTRATION_BODY_BYTES) return tooLarge;
+
   let body: { redirect_uris?: unknown };
   try {
-    body = await request.clone().json();
+    body = JSON.parse(text);
   } catch {
     return null;
   }
   const redirectUris = body?.redirect_uris;
   if (!Array.isArray(redirectUris)) return null;
-  const disallowed = redirectUris.filter((uri) => typeof uri !== 'string' || !isAllowedRedirectUri(uri));
-  if (disallowed.length === 0) return null;
-  return new Response(JSON.stringify({
-    error: 'invalid_redirect_uri',
-    error_description: `Redirect URI not allowed: ${disallowed.join(', ')}`,
-  }), {
-    status: 400,
-    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-  });
+  const disallowed = redirectUris.find((uri) => typeof uri !== "string" || !isAllowedRedirectUri(uri));
+  if (disallowed === undefined) return null;
+  console.warn("Rejected client registration redirect URI:", String(disallowed).slice(0, MAX_LOGGED_REDIRECT_URI_LENGTH));
+  return registrationErrorResponse(INVALID_REDIRECT_URI_ERROR, REDIRECT_URI_NOT_ALLOWED_DESCRIPTION, 400);
 }
 
 export function pickDefined(source: Record<string, unknown>, keys: string[]): Record<string, unknown> {

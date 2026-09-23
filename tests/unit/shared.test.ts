@@ -277,6 +277,7 @@ export default async function run() {
   for (const uri of [
     'https://claude.ai/api/mcp/auth_callback',
     'https://chatgpt.com/connector_platform_oauth_redirect',
+    'https://chatgpt.com/connector/oauth/abc123',
     'https://playground.ai.cloudflare.com/oauth/callback',
     'http://localhost:33418/callback',
     'http://127.0.0.1:5000/cb',
@@ -294,6 +295,11 @@ export default async function run() {
 
   for (const uri of [
     'https://attacker.com/cb',
+    'https://claude.ai/not-a-callback',
+    'https://claude.ai/api/mcp/auth_callback/extra',
+    'https://chatgpt.com/connector/oauth/',
+    'https://chatgpt.com/share/abc',
+    'https://vscode.dev/',
     'https://claude.ai.attacker.com/cb',
     'https://attacker.com/claude.ai',
     'http://claude.ai/api/mcp/auth_callback',
@@ -332,6 +338,18 @@ export default async function run() {
   await asyncTest('rejectDisallowedRedirectUris rejects non-string redirect entries', async () => {
     const response = await rejectDisallowedRedirectUris(registrationRequest({ redirect_uris: [42] }));
     assert.strictEqual(response?.status, 400);
+  });
+
+  await asyncTest('rejectDisallowedRedirectUris returns 413 for oversized bodies without reflecting them', async () => {
+    const oversizedUri = `https://attacker.com/${'a'.repeat(1024 * 1024)}`;
+    const response = await rejectDisallowedRedirectUris(registrationRequest({ redirect_uris: [oversizedUri] }));
+    assert.strictEqual(response?.status, 413);
+    assert.ok((await response!.text()).length < 200);
+  });
+
+  await asyncTest('rejectDisallowedRedirectUris does not reflect the rejected URI', async () => {
+    const response = await rejectDisallowedRedirectUris(registrationRequest({ redirect_uris: ['https://attacker.com/cb'] }));
+    assert.ok(!(await response!.text()).includes('attacker.com'));
   });
 
   await asyncTest('rejectDisallowedRedirectUris accepts the full VS Code DCR redirect set', async () => {

@@ -1,5 +1,7 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
+import type { AuthRequest, ClientInfo, OAuthHelpers } from '@cloudflare/workers-oauth-provider';
 import { debug } from './config';
 import type { Env } from './types';
 import {
@@ -10,15 +12,12 @@ import {
   escapeHtml,
   generatePkcePair,
   REQUIRED_CODE_CHALLENGE_METHOD,
+  INVALID_REDIRECT_URI_MESSAGE,
 } from './shared';
 
-interface OAuthEnv extends Env {
-  OAUTH_PROVIDER: {
-    parseAuthRequest(request: Request): Promise<any>;
-    lookupClient(clientId: string): Promise<any>;
-    completeAuthorization(options: any): Promise<{ redirectTo: string }>;
-  };
-}
+type OAuthBindings = Env & { OAUTH_PROVIDER: OAuthHelpers };
+type OAuthContext = Context<{ Bindings: OAuthBindings }>;
+type AbsmartlyAuthRequest = AuthRequest & { resource?: string };
 
 const COOKIE_NAME = 'absmartly-oauth-approvals';
 const PKCE_REQUIRED_MESSAGE = `PKCE with code_challenge_method=${REQUIRED_CODE_CHALLENGE_METHOD} is required`;
@@ -27,7 +26,7 @@ const CONSENT_KV_PREFIX = 'oauth:consent:';
 const CONSENT_TTL_SECONDS = 10 * 60;
 
 type ConsentTransaction = {
-  authRequest: any;
+  authRequest: AbsmartlyAuthRequest;
   absmartlyEndpoint: string | null;
   browserBinding: string;
 };
@@ -36,8 +35,8 @@ function hasRequiredPkce(codeChallenge: string | null | undefined, codeChallenge
   return !!codeChallenge && codeChallengeMethod === REQUIRED_CODE_CHALLENGE_METHOD;
 }
 
-export class ABsmartlyOAuthHandler extends Hono {
-  private extractEndpointFromResource(resourceParam: string | null): string | null {
+export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
+  private extractEndpointFromResource(resourceParam: string | null | undefined): string | null {
     if (!resourceParam) return null;
     try {
       const resourceUrl = new URL(resourceParam);
@@ -65,11 +64,11 @@ export class ABsmartlyOAuthHandler extends Hono {
 
     this.get('/authorize', async (c) => {
       debug('ABsmartlyOAuthHandler: Hit /authorize endpoint');
-      const env = c.env as OAuthEnv;
+      const env = c.env;
       const url = new URL(c.req.url);
 
-      let authRequest;
-      let clientInfo;
+      let authRequest: AbsmartlyAuthRequest;
+      let clientInfo: ClientInfo | null;
       try {
         authRequest = await env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw);
         clientInfo = await env.OAUTH_PROVIDER.lookupClient(authRequest.clientId);
@@ -83,7 +82,7 @@ export class ABsmartlyOAuthHandler extends Hono {
       // The provider only checks redirect_uri when one is supplied; an empty value
       // must not reach completeAuthorization, which redirects there unchecked.
       if (!authRequest.redirectUri || !clientInfo.redirectUris?.includes(authRequest.redirectUri)) {
-        return c.text('Invalid redirect URI', 400);
+        return c.text(INVALID_REDIRECT_URI_MESSAGE, 400);
       }
       if (!hasRequiredPkce(authRequest.codeChallenge, authRequest.codeChallengeMethod)) {
         return c.text(PKCE_REQUIRED_MESSAGE, 400);
@@ -125,7 +124,7 @@ export class ABsmartlyOAuthHandler extends Hono {
     });
 
     this.post('/authorize', async (c) => {
-      const env = c.env as OAuthEnv;
+      const env = c.env;
       let formData;
       try {
         formData = await c.req.formData();
@@ -147,7 +146,7 @@ export class ABsmartlyOAuthHandler extends Hono {
       const clientInfo = await env.OAUTH_PROVIDER.lookupClient(authRequest.clientId);
       if (!clientInfo || !clientInfo.redirectUris?.includes(authRequest.redirectUri)) {
         await this.deleteConsentTransaction(c, transactionId);
-        return c.text('Invalid redirect URI', 400);
+        return c.text(INVALID_REDIRECT_URI_MESSAGE, 400);
       }
 
       if (action === 'cancel') {
@@ -203,7 +202,7 @@ export class ABsmartlyOAuthHandler extends Hono {
     });
 
     this.get('/oauth/callback', async (c) => {
-      const env = c.env as OAuthEnv;
+      const env = c.env;
       const url = new URL(c.req.url);
 
       const code = url.searchParams.get('code');
@@ -351,9 +350,9 @@ export class ABsmartlyOAuthHandler extends Hono {
     });
   }
 
-  private async redirectToAbsmartlyOAuth(c: any, authRequest: any, absmartlyEndpoint: string) {
+  private async redirectToAbsmartlyOAuth(c: OAuthContext, authRequest: AbsmartlyAuthRequest, absmartlyEndpoint: string) {
     const url = new URL(c.req.url);
-    const env = c.env as OAuthEnv;
+    const env = c.env;
 
     debug(`ABsmartly endpoint for OAuth redirect: ${absmartlyEndpoint}`);
 
@@ -397,7 +396,7 @@ export class ABsmartlyOAuthHandler extends Hono {
     return descriptions[scope] || scope;
   }
 
-  private async getApprovedClients(c: any): Promise<string[]> {
+  private async getApprovedClients(c: OAuthContext): Promise<string[]> {
     const cookie = getCookie(c, COOKIE_NAME);
     if (!cookie) return [];
 
@@ -410,7 +409,7 @@ export class ABsmartlyOAuthHandler extends Hono {
     }
   }
 
-  private async addApprovedClient(c: any, clientId: string) {
+  private async addApprovedClient(c: OAuthContext, clientId: string) {
     const approvedClients = await this.getApprovedClients(c);
     if (!approvedClients.includes(clientId)) {
       approvedClients.push(clientId);
@@ -426,7 +425,7 @@ export class ABsmartlyOAuthHandler extends Hono {
     });
   }
 
-  private async createConsentTransaction(c: any, authRequest: any, absmartlyEndpoint: string | null): Promise<string> {
+  private async createConsentTransaction(c: OAuthContext, authRequest: AbsmartlyAuthRequest, absmartlyEndpoint: string | null): Promise<string> {
     const transactionId = crypto.randomUUID();
     const browserBinding = crypto.randomUUID();
     await this.saveConsentTransaction(c, transactionId, { authRequest, absmartlyEndpoint, browserBinding });
@@ -440,8 +439,8 @@ export class ABsmartlyOAuthHandler extends Hono {
     return transactionId;
   }
 
-  private async saveConsentTransaction(c: any, transactionId: string, transaction: ConsentTransaction): Promise<void> {
-    const env = c.env as OAuthEnv;
+  private async saveConsentTransaction(c: OAuthContext, transactionId: string, transaction: ConsentTransaction): Promise<void> {
+    const env = c.env;
     await env.OAUTH_KV.put(
       `${CONSENT_KV_PREFIX}${transactionId}`,
       JSON.stringify(transaction),
@@ -449,9 +448,9 @@ export class ABsmartlyOAuthHandler extends Hono {
     );
   }
 
-  private async loadConsentTransaction(c: any, transactionId: string): Promise<ConsentTransaction | null> {
+  private async loadConsentTransaction(c: OAuthContext, transactionId: string): Promise<ConsentTransaction | null> {
     if (!transactionId) return null;
-    const env = c.env as OAuthEnv;
+    const env = c.env;
     const raw = await safeKvGet(env.OAUTH_KV, `${CONSENT_KV_PREFIX}${transactionId}`);
     if (!raw) return null;
 
@@ -472,8 +471,8 @@ export class ABsmartlyOAuthHandler extends Hono {
     return transaction;
   }
 
-  private async deleteConsentTransaction(c: any, transactionId: string): Promise<void> {
-    const env = c.env as OAuthEnv;
+  private async deleteConsentTransaction(c: OAuthContext, transactionId: string): Promise<void> {
+    const env = c.env;
     try {
       await env.OAUTH_KV.delete(`${CONSENT_KV_PREFIX}${transactionId}`);
     } catch (e) {
@@ -490,7 +489,7 @@ export class ABsmartlyOAuthHandler extends Hono {
     }
   }
 
-  private renderEndpointForm(c: any, transactionId: string) {
+  private renderEndpointForm(c: OAuthContext, transactionId: string) {
     const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -545,7 +544,7 @@ export class ABsmartlyOAuthHandler extends Hono {
     return c.html(html);
   }
 
-  private renderApprovalPage(c: any, clientInfo: any, authRequest: any, absmartlyEndpoint: string, transactionId: string) {
+  private renderApprovalPage(c: OAuthContext, clientInfo: ClientInfo, authRequest: AbsmartlyAuthRequest, absmartlyEndpoint: string, transactionId: string) {
     const scopes = authRequest.scope || [];
     const redirectTarget = this.describeRedirectTarget(authRequest.redirectUri);
     const scopeListHtml = scopes.map((s: string) => `<li>${escapeHtml(this.getScopeDescription(s))}</li>`).join('');

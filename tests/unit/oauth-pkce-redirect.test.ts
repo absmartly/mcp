@@ -27,6 +27,7 @@ function makeOAuthProvider(authRequest: any) {
 }
 
 const TEST_CODE_CHALLENGE = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
+const TEST_CODE_CHALLENGE_METHOD = 'S256';
 
 async function sha256Base64Url(input: string): Promise<string> {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
@@ -62,7 +63,7 @@ export default async function run() {
         scope: ['mcp:access'],
         responseType: 'code',
         codeChallenge: 'client-challenge',
-        codeChallengeMethod: 'S256',
+        codeChallengeMethod: TEST_CODE_CHALLENGE_METHOD,
       }),
     };
 
@@ -78,7 +79,7 @@ export default async function run() {
       transaction_id: transactionId!,
       absmartly_endpoint: absmartlyEndpoint,
       code_challenge: TEST_CODE_CHALLENGE,
-      code_challenge_method: 'S256',
+      code_challenge_method: TEST_CODE_CHALLENGE_METHOD,
     });
     const setRes = await handler.fetch(new Request('https://mcp.absmartly.com/authorize', {
       method: 'POST',
@@ -110,7 +111,7 @@ export default async function run() {
 
   await asyncTest('redirect includes code_challenge_method=S256', async () => {
     const { redirectUrl } = await approveAndGetRedirect('https://demo.absmartly.com');
-    assert.strictEqual(redirectUrl.searchParams.get('code_challenge_method'), 'S256');
+    assert.strictEqual(redirectUrl.searchParams.get('code_challenge_method'), TEST_CODE_CHALLENGE_METHOD);
   });
 
   await asyncTest('redirect includes a non-empty code_challenge', async () => {
@@ -154,27 +155,43 @@ export default async function run() {
   });
 
   for (const action of ['approve', 'set_endpoint', 'cancel']) {
-    await asyncTest(`POST /authorize action=${action} rejects unregistered redirect_uri`, async () => {
+    await asyncTest(`POST /authorize action=${action} rejects a redirect_uri no longer registered`, async () => {
       const handler = new ABsmartlyOAuthHandler();
       const kv = new MockKv();
+      const authRequest = {
+        clientId: 'claude-mcp-test',
+        redirectUri: 'https://client.example/cb',
+        state: 's',
+        scope: ['mcp:access'],
+        responseType: 'code',
+        codeChallenge: TEST_CODE_CHALLENGE,
+        codeChallengeMethod: TEST_CODE_CHALLENGE_METHOD,
+      };
+      let registeredRedirectUris = [authRequest.redirectUri];
       const env = {
         OAUTH_KV: kv,
-        OAUTH_PROVIDER: makeOAuthProvider({ redirectUri: 'https://client.example/cb' }),
+        OAUTH_PROVIDER: {
+          parseAuthRequest: async () => authRequest,
+          lookupClient: async (clientId: string) => ({ clientId, clientName: 'Test Client', redirectUris: registeredRedirectUris }),
+          completeAuthorization: async () => ({ redirectTo: 'https://example.com/done' }),
+        },
       };
-      const req = new Request('https://mcp.absmartly.com/authorize', {
+      const getRes = await handler.fetch(
+        new Request('https://mcp.absmartly.com/authorize?absmartly-endpoint=https://demo.absmartly.com'),
+        env,
+      );
+      const transactionId = (await getRes.text()).match(/name="transaction_id" value="([^"]+)"/)?.[1];
+      const consentCookie = getRes.headers.get('set-cookie')?.split(';')[0];
+      assert.ok(transactionId && consentCookie, 'GET /authorize did not start a consent transaction');
+
+      registeredRedirectUris = [];
+      const res = await handler.fetch(new Request('https://mcp.absmartly.com/authorize', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          action,
-          client_id: 'claude-mcp-test',
-          redirect_uri: 'https://attacker.example/steal',
-          state: 's',
-          absmartly_endpoint: 'https://demo.absmartly.com',
-        }),
-      });
-      const res = await handler.fetch(req, env);
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', Cookie: consentCookie! },
+        body: new URLSearchParams({ action, transaction_id: transactionId!, absmartly_endpoint: 'https://demo.absmartly.com' }),
+      }), env);
       assert.strictEqual(res.status, 400);
-      assert.strictEqual(kv.store.size, 0, 'no state should be stored for a rejected request');
+      assert.ok(![...kv.store.keys()].some((key) => key.startsWith('oauth:state:')), 'no OAuth state should be stored');
     });
   }
 
