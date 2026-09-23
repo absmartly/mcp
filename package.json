@@ -16,6 +16,11 @@
     "./node-http": {
       "types": "./dist/node-http-server.d.ts",
       "import": "./dist/node-http-server.js"
+    },
+    "./oauth": {
+      "types": "./dist/oauth/index.d.ts",
+      "import": "./dist/oauth/index.js",
+      "default": "./dist/oauth/index.js"
     }
   },
   "files": [

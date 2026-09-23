@@ -21,7 +21,6 @@ import {
     DEFAULT_API_KEY_USER_NAME,
     ENTITIES_CACHE_TTL_MS,
     CORS_HEADERS,
-    CLAUDE_AUTH_CALLBACK_URI,
     API_KEY_SESSION_TTL_SECONDS,
     SESSION_TTL_SECONDS,
     OAUTH_STATE_TTL_SECONDS,
@@ -570,47 +569,9 @@ const oauthProvider = new OAuthProvider({
     accessTokenTTL: 3600,
     scopesSupported: ["mcp:access", "user:info"],
     disallowPublicClientRegistration: false,
-    defaultHandler: oauthHandler,
-    clientLookup: async (clientId: string, env: any) => {
-        const clientData = await safeKvGet(env.OAUTH_KV, `client:${clientId}`);
-        if (clientData) {
-            try {
-                const client = JSON.parse(clientData);
-                return {
-                    clientId: client.clientId,
-                    clientSecret: client.clientSecret,
-                    redirectUris: client.redirectUris,
-                    clientName: client.clientName,
-                    tokenEndpointAuthMethod: client.tokenEndpointAuthMethod || 'client_secret_basic'
-                };
-            } catch (e) {
-                console.warn(`Corrupt client data for ${clientId}, removing:`, e);
-                try { await env.OAUTH_KV.delete(`client:${clientId}`); } catch (deleteErr) {
-                    console.error(`Failed to remove corrupt client data for "${clientId}":`, deleteErr);
-                }
-            }
-        }
-
-        if (clientId.startsWith("claude-mcp-") || clientId.startsWith("C0")) {
-            debug("Auto-registering public client:", clientId);
-            const newClient = {
-                clientId: clientId,
-                redirectUris: [CLAUDE_AUTH_CALLBACK_URI],
-                clientName: "Claude Desktop",
-                tokenEndpointAuthMethod: 'none'
-            };
-
-            await safeKvPut(env.OAUTH_KV, `client:${clientId}`, JSON.stringify({
-                ...newClient,
-                registrationDate: Date.now()
-            }));
-
-            return newClient;
-        }
-
-        return null;
-    },
-} as any);
+    // Hono's fetch(request, env?) is typed against its own bindings, not ExportedHandler.
+    defaultHandler: oauthHandler as unknown as ExportedHandler,
+});
 
 type McpTransportRoute = {
     pathPrefix: string;
