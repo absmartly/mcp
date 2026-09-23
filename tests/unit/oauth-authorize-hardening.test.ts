@@ -5,7 +5,7 @@ import { isAllowedRedirectUri } from '../../src/shared';
 const MCP_ORIGIN = 'https://mcp.absmartly.com';
 const VICTIM_ENDPOINT = 'https://victim.absmartly.com';
 const LEGIT_CLIENT_ID = 'legit-client';
-const LEGIT_REDIRECT = 'https://client.example/cb';
+const LEGIT_REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
 const ATTACKER_REDIRECT = 'https://attacker.example/cb';
 
 class MockKv {
@@ -170,6 +170,17 @@ export default async function run() {
     assert.strictEqual(res.status, 400);
   });
 
+  await asyncTest('client registered before the allowlist cannot authorize to an attacker redirect', async () => {
+    const handler = new ABsmartlyOAuthHandler();
+    // The attacker's redirect is registered on its own client (as in the reported PoC),
+    // so only the allowlist check at /authorize stops it.
+    const env = makeEnv(validAuthRequest({ redirectUri: ATTACKER_REDIRECT }), [ATTACKER_REDIRECT]);
+    const res = await handler.fetch(new Request(`${MCP_ORIGIN}/authorize`), env);
+    assert.strictEqual(res.status, 400);
+    const consentKeys = [...env.OAUTH_KV.store.keys()].filter(k => k.startsWith('oauth:consent:'));
+    assert.strictEqual(consentKeys.length, 0, 'no consent page may be offered for a disallowed redirect');
+  });
+
   await asyncTest('GET /authorize without PKCE is rejected', async () => {
     const handler = new ABsmartlyOAuthHandler();
     const env = makeEnv(validAuthRequest({ codeChallenge: undefined }));
@@ -188,7 +199,7 @@ export default async function run() {
     const handler = new ABsmartlyOAuthHandler();
     const env = makeEnv(validAuthRequest());
     const { page } = await startConsent(handler, env);
-    assert.ok(page.includes('client.example'), 'consent page must show the redirect host');
+    assert.ok(page.includes('claude.ai'), 'consent page must show the redirect host');
     assert.ok(!page.includes('name="redirect_uri"'), 'consent form must not carry redirect_uri');
   });
 

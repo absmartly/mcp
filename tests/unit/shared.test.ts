@@ -287,6 +287,8 @@ export default async function run() {
     'https://vscode.dev/redirect',
     'https://insiders.vscode.dev/redirect',
     'http://127.0.0.1:33418/',
+    'claude://claude.ai/mcp-auth-callback/sdk',
+    'https://integrations.productboard.com/oauth2/callback',
   ]) {
     test(`isAllowedRedirectUri allows ${uri}`, () => {
       assert.strictEqual(isAllowedRedirectUri(uri), true);
@@ -299,6 +301,7 @@ export default async function run() {
     'https://claude.ai/api/mcp/auth_callback/extra',
     'https://chatgpt.com/connector/oauth/',
     'https://chatgpt.com/share/abc',
+    'https://integrations.productboard.com/other',
     'https://vscode.dev/',
     'https://claude.ai.attacker.com/cb',
     'https://attacker.com/claude.ai',

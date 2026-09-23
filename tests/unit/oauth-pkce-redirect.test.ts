@@ -58,7 +58,7 @@ export default async function run() {
       ABSMARTLY_OAUTH_CLIENT_ID: 'mcp-absmartly-universal',
       OAUTH_PROVIDER: makeOAuthProvider({
         clientId: 'claude-mcp-test',
-        redirectUri: 'https://client.example/cb',
+        redirectUri: 'https://claude.ai/api/mcp/auth_callback',
         state: 'orig-state',
         scope: ['mcp:access'],
         responseType: 'code',
@@ -160,7 +160,7 @@ export default async function run() {
       const kv = new MockKv();
       const authRequest = {
         clientId: 'claude-mcp-test',
-        redirectUri: 'https://client.example/cb',
+        redirectUri: 'https://claude.ai/api/mcp/auth_callback',
         state: 's',
         scope: ['mcp:access'],
         responseType: 'code',
@@ -205,7 +205,7 @@ export default async function run() {
         OAUTH_KV: new MockKv(),
         OAUTH_PROVIDER: makeOAuthProvider({
           clientId: 'claude-mcp-test',
-          redirectUri: 'https://client.example/cb',
+          redirectUri: 'https://claude.ai/api/mcp/auth_callback',
           state: 's',
           scope: ['mcp:access'],
           responseType: 'code',

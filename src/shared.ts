@@ -14,9 +14,10 @@ const ALLOWED_REDIRECT_HTTPS_CALLBACKS = [
   "https://vscode.dev/redirect",
   "https://insiders.vscode.dev/redirect",
   "https://www.cursor.com/agents/mcp/oauth/callback",
+  "https://integrations.productboard.com/oauth2/callback",
 ];
 const ALLOWED_REDIRECT_LOOPBACK_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
-const ALLOWED_REDIRECT_CUSTOM_SCHEMES = ["cursor:"];
+const ALLOWED_REDIRECT_CUSTOM_SCHEMES = ["cursor:", "claude:"];
 const MAX_REGISTRATION_BODY_BYTES = 1024 * 1024;
 const MAX_LOGGED_REDIRECT_URI_LENGTH = 200;
 export const INVALID_REDIRECT_URI_ERROR = "invalid_redirect_uri";

@@ -13,6 +13,7 @@ import {
   generatePkcePair,
   REQUIRED_CODE_CHALLENGE_METHOD,
   INVALID_REDIRECT_URI_MESSAGE,
+  isAllowedRedirectUri,
 } from './shared';
 
 type OAuthBindings = Env & { OAUTH_PROVIDER: OAuthHelpers };
@@ -81,7 +82,10 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
       }
       // The provider only checks redirect_uri when one is supplied; an empty value
       // must not reach completeAuthorization, which redirects there unchecked.
-      if (!authRequest.redirectUri || !clientInfo.redirectUris?.includes(authRequest.redirectUri)) {
+      // The allowlist is also enforced at /register, but clients registered before it
+      // existed are still in KV and must not be able to receive codes.
+      if (!authRequest.redirectUri || !clientInfo.redirectUris?.includes(authRequest.redirectUri) ||
+          !isAllowedRedirectUri(authRequest.redirectUri)) {
         return c.text(INVALID_REDIRECT_URI_MESSAGE, 400);
       }
       if (!hasRequiredPkce(authRequest.codeChallenge, authRequest.codeChallengeMethod)) {
@@ -144,7 +148,8 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
       const { authRequest } = transaction;
 
       const clientInfo = await env.OAUTH_PROVIDER.lookupClient(authRequest.clientId);
-      if (!clientInfo || !clientInfo.redirectUris?.includes(authRequest.redirectUri)) {
+      if (!clientInfo || !clientInfo.redirectUris?.includes(authRequest.redirectUri) ||
+          !isAllowedRedirectUri(authRequest.redirectUri)) {
         await this.deleteConsentTransaction(c, transactionId);
         return c.text(INVALID_REDIRECT_URI_MESSAGE, 400);
       }

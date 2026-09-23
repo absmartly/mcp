@@ -78,7 +78,7 @@ export default async function run() {
       OAUTH_KV: kv,
       OAUTH_PROVIDER: makeOAuthProvider({
         clientId,
-        redirectUri: 'https://client.example/callback',
+        redirectUri: 'https://claude.ai/api/mcp/auth_callback',
         state: 'xyz',
         scope: ['api:read'],
         responseType: 'code',
@@ -88,7 +88,7 @@ export default async function run() {
     };
 
     // /authorize call WITHOUT the absmartly-endpoint query param (typical OAuth redirect).
-    const res = await callAuthorize(handler, 'https://mcp.absmartly.com/authorize?client_id=' + clientId + '&redirect_uri=https://client.example/callback&state=xyz&response_type=code&scope=api:read', env);
+    const res = await callAuthorize(handler, 'https://mcp.absmartly.com/authorize?client_id=' + clientId + '&redirect_uri=https://claude.ai/api/mcp/auth_callback&state=xyz&response_type=code&scope=api:read', env);
 
     // If endpoint is found, handler renders approval page (200 HTML). If form, it's also 200 HTML but with the endpoint input.
     const body = await res.text();
@@ -109,7 +109,7 @@ export default async function run() {
       OAUTH_KV: kv,
       OAUTH_PROVIDER: makeOAuthProvider({
         clientId,
-        redirectUri: 'https://client.example/callback',
+        redirectUri: 'https://claude.ai/api/mcp/auth_callback',
         state: 'xyz',
         scope: ['api:read'],
         responseType: 'code',
@@ -135,7 +135,7 @@ export default async function run() {
       OAUTH_KV: kv,
       OAUTH_PROVIDER: makeOAuthProvider({
         clientId,
-        redirectUri: 'https://client.example/callback',
+        redirectUri: 'https://claude.ai/api/mcp/auth_callback',
         state: 'xyz',
         scope: ['api:read'],
         responseType: 'code',
@@ -167,7 +167,7 @@ export default async function run() {
       OAUTH_KV: kv,
       OAUTH_PROVIDER: makeOAuthProvider({
         clientId,
-        redirectUri: 'https://client.example/callback',
+        redirectUri: 'https://claude.ai/api/mcp/auth_callback',
         state: 'xyz',
         scope: ['api:read'],
         responseType: 'code',
