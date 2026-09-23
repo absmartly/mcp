@@ -44,7 +44,7 @@ export type AuthorizationRequest = {
   state: string;
   codeChallenge?: string;
   codeChallengeMethod?: string;
-  resource?: string;
+  resource?: string | string[];
 };
 
 export type OAuthClientInfo = {

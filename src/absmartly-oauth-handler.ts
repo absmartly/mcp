@@ -23,7 +23,7 @@ import {
 
 type OAuthBindings = Env & { OAUTH_PROVIDER: OAuthHelpers };
 type OAuthContext = Context<{ Bindings: OAuthBindings }>;
-type AbsmartlyAuthRequest = AuthRequest & { resource?: string };
+type AbsmartlyAuthRequest = AuthRequest;
 
 const AUTHORIZE_PATH = '/authorize';
 const HOST_COOKIE_PREFIX = 'host';
@@ -44,14 +44,18 @@ function kvStateStore(kv: KVNamespace): OAuthStateStore {
 }
 
 export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
-  private extractEndpointFromResource(resourceParam: string | null | undefined): string | null {
-    if (!resourceParam) return null;
-    try {
-      const resourceUrl = new URL(resourceParam);
-      return resourceUrl.searchParams.get(ENDPOINT_QUERY_PARAM);
-    } catch {
-      return null;
+  // The resource parameter may repeat (RFC 8707); use the first that names an endpoint.
+  private extractEndpointFromResource(resourceParam: string | string[] | null | undefined): string | null {
+    const resources = Array.isArray(resourceParam) ? resourceParam : resourceParam ? [resourceParam] : [];
+    for (const resource of resources) {
+      try {
+        const endpoint = new URL(resource).searchParams.get(ENDPOINT_QUERY_PARAM);
+        if (endpoint) return endpoint;
+      } catch {
+        continue;
+      }
     }
+    return null;
   }
 
   private consentOptions(c: OAuthContext): ConsentOptions {

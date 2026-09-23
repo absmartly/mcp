@@ -1,10 +1,12 @@
-import OAuthProvider from "@cloudflare/workers-oauth-provider";
+import OAuthProvider, { OAuthError } from "@cloudflare/workers-oauth-provider";
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { completable } from "@modelcontextprotocol/sdk/server/completable.js";
 import { z } from "zod";
 import { ABsmartlyResources } from "./resources";
 import { ABsmartlyOAuthHandler } from "./absmartly-oauth-handler";
+import { SCOPE_MCP_ACCESS, SUPPORTED_SCOPES, validateClientRegistration } from "./oauth/index.js";
+import { checkBackendSessionOnRefresh, normalizeResourceParameter, protectedResourceMetadataUrl, rejectUntrustedCimdClient } from "./oauth-worker-guards";
 import { Env } from "./types";
 import { debug } from "./config";
 import { MCP_VERSION } from "./version";
@@ -28,7 +30,6 @@ import {
     MCP_PATH,
     normalizeBaseUrl,
     extractEndpointFromPath,
-    rejectDisallowedRedirectUris,
     handleOAuthDiscovery,
     API_KEY_SESSION_KV_PREFIX,
     detectApiKey,
@@ -38,6 +39,8 @@ import {
 
 const ENTITY_LIST_PAGE_SIZE = 100;
 const ENTITY_LIST_FIRST_PAGE = 1;
+const ACCESS_TOKEN_TTL_SECONDS = 3600;
+const RESOURCE_NAME = 'ABsmartly MCP';
 
 const MCP_CORS_OPTIONS = {
     origin: "*",
@@ -566,9 +569,23 @@ const oauthProvider = new OAuthProvider({
     authorizeEndpoint: "/authorize",
     tokenEndpoint: "/token",
     clientRegistrationEndpoint: "/register",
-    accessTokenTTL: 3600,
-    scopesSupported: ["mcp:access", "user:info"],
+    accessTokenTTL: ACCESS_TOKEN_TTL_SECONDS,
+    scopesSupported: [...SUPPORTED_SCOPES],
     disallowPublicClientRegistration: false,
+    // Only clients in TRUSTED_CIMD_CLIENT_IDS reach the library; see rejectUntrustedCimdClient.
+    clientIdMetadataDocumentEnabled: true,
+    // `resource` is deliberately not set: the library would then require an exact
+    // resource match, which breaks ?absmartly-endpoint= and the /sse transport.
+    resourceMetadata: {
+        scopes_supported: [SCOPE_MCP_ACCESS],
+        resource_name: RESOURCE_NAME,
+    },
+    clientRegistrationCallback: ({ clientMetadata }) => {
+        const result = validateClientRegistration(clientMetadata);
+        if (result.ok) return;
+        return { code: result.error.error, description: result.error.description, status: result.error.status };
+    },
+    tokenExchangeCallback: (options) => checkBackendSessionOnRefresh(options, OAuthError),
     // Hono's fetch(request, env?) is typed against its own bindings, not ExportedHandler.
     defaultHandler: oauthHandler as unknown as ExportedHandler,
 });
@@ -679,7 +696,7 @@ async function handleMcpTransportRequest(
             status: 401,
             headers: {
                 ...CORS_HEADERS,
-                "WWW-Authenticate": 'Bearer realm="OAuth"',
+                "WWW-Authenticate": `Bearer realm="OAuth", resource_metadata="${protectedResourceMetadataUrl(url, route.pathPrefix)}", scope="${SCOPE_MCP_ACCESS}"`,
             },
         });
     }
@@ -746,6 +763,10 @@ export default {
         );
         if (discoveryResponse) return discoveryResponse;
 
+        const untrustedCimd = await rejectUntrustedCimdClient(request, url);
+        if (untrustedCimd) return untrustedCimd;
+        request = await normalizeResourceParameter(request, url);
+
         if (isTransportPath(url.pathname, SSE_PATH)) {
             return await handleMcpTransportRequest(
                 request, env, ctx,
@@ -765,8 +786,6 @@ export default {
         }
 
         if (url.pathname === '/register' && request.method === 'POST') {
-            const rejection = await rejectDisallowedRedirectUris(request);
-            if (rejection) return rejection;
             const pendingEndpoint = await safeKvGet(env.OAUTH_KV, `oauth_endpoint_pending:${clientFingerprint}`);
             const response = await oauthProvider.fetch(request, env, ctx);
 
