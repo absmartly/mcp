@@ -29,6 +29,7 @@ import {
     MCP_PATH,
     normalizeBaseUrl,
     extractEndpointFromPath,
+    rejectDisallowedRedirectUris,
     detectApiKey,
     safeKvPut,
     safeKvGet,
@@ -810,6 +811,8 @@ export default {
         }
 
         if (url.pathname === '/register' && request.method === 'POST') {
+            const rejection = await rejectDisallowedRedirectUris(request);
+            if (rejection) return rejection;
             const pendingEndpoint = await safeKvGet(env.OAUTH_KV, `oauth_endpoint_pending:${clientFingerprint}`);
             const response = await oauthProvider.fetch(request, env, ctx);
 

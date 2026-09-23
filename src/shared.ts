@@ -4,6 +4,19 @@ export const DEFAULT_API_KEY_USER_EMAIL = "api-key-user";
 export const DEFAULT_API_KEY_USER_NAME = "API Key User";
 export const DEFAULT_ABSMARTLY_DOMAIN = "absmartly.com";
 export const CLAUDE_AUTH_CALLBACK_URI = "https://claude.ai/api/mcp/auth_callback";
+export const REQUIRED_CODE_CHALLENGE_METHOD = "S256";
+
+const ALLOWED_REDIRECT_HTTPS_HOSTS = [
+  "claude.ai",
+  "claude.com",
+  "chatgpt.com",
+  "playground.ai.cloudflare.com",
+  "vscode.dev",
+  "insiders.vscode.dev",
+  "www.cursor.com",
+];
+const ALLOWED_REDIRECT_LOOPBACK_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
+const ALLOWED_REDIRECT_CUSTOM_SCHEMES = ["cursor:"];
 
 export const API_KEY_SESSION_TTL_SECONDS = 300;
 export const SESSION_TTL_SECONDS = 86400;
@@ -55,6 +68,38 @@ export function extractEndpointFromPath(pathname: string, prefix: string | reado
     return `https://${host}`;
   }
   return null;
+}
+
+export function isAllowedRedirectUri(redirectUri: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(redirectUri);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol === "https:") return ALLOWED_REDIRECT_HTTPS_HOSTS.includes(parsed.hostname);
+  if (parsed.protocol === "http:") return ALLOWED_REDIRECT_LOOPBACK_HOSTS.includes(parsed.hostname);
+  return ALLOWED_REDIRECT_CUSTOM_SCHEMES.includes(parsed.protocol);
+}
+
+export async function rejectDisallowedRedirectUris(request: Request): Promise<Response | null> {
+  let body: { redirect_uris?: unknown };
+  try {
+    body = await request.clone().json();
+  } catch {
+    return null;
+  }
+  const redirectUris = body?.redirect_uris;
+  if (!Array.isArray(redirectUris)) return null;
+  const disallowed = redirectUris.filter((uri) => typeof uri !== 'string' || !isAllowedRedirectUri(uri));
+  if (disallowed.length === 0) return null;
+  return new Response(JSON.stringify({
+    error: 'invalid_redirect_uri',
+    error_description: `Redirect URI not allowed: ${disallowed.join(', ')}`,
+  }), {
+    status: 400,
+    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+  });
 }
 
 export function pickDefined(source: Record<string, unknown>, keys: string[]): Record<string, unknown> {

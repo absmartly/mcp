@@ -26,6 +26,8 @@ function makeOAuthProvider(authRequest: any) {
   };
 }
 
+const TEST_CODE_CHALLENGE = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
+
 async function sha256Base64Url(input: string): Promise<string> {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
   let binary = '';
@@ -70,6 +72,8 @@ export default async function run() {
       scope: 'mcp:access',
       response_type: 'code',
       absmartly_endpoint: absmartlyEndpoint,
+      code_challenge: TEST_CODE_CHALLENGE,
+      code_challenge_method: 'S256',
     });
 
     const req = new Request('https://mcp.absmartly.com/authorize', {
@@ -137,6 +141,82 @@ export default async function run() {
     assert.strictEqual(storedState.absmartlyEndpoint, 'https://demo-2.absmartly.com');
     assert.ok(storedState.authRequest, 'authRequest missing from state');
   });
+
+  for (const action of ['approve', 'set_endpoint', 'cancel']) {
+    await asyncTest(`POST /authorize action=${action} rejects unregistered redirect_uri`, async () => {
+      const handler = new ABsmartlyOAuthHandler();
+      const kv = new MockKv();
+      const env = {
+        OAUTH_KV: kv,
+        OAUTH_PROVIDER: makeOAuthProvider({ redirectUri: 'https://client.example/cb' }),
+      };
+      const req = new Request('https://mcp.absmartly.com/authorize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          action,
+          client_id: 'claude-mcp-test',
+          redirect_uri: 'https://attacker.example/steal',
+          state: 's',
+          absmartly_endpoint: 'https://demo.absmartly.com',
+        }),
+      });
+      const res = await handler.fetch(req, env);
+      assert.strictEqual(res.status, 400);
+      assert.strictEqual(kv.store.size, 0, 'no state should be stored for a rejected request');
+    });
+  }
+
+  for (const [label, pkceFields] of [
+    ['missing', {}],
+    ['plain', { code_challenge: TEST_CODE_CHALLENGE, code_challenge_method: 'plain' }],
+  ] as const) {
+    await asyncTest(`POST /authorize rejects ${label} PKCE`, async () => {
+      const handler = new ABsmartlyOAuthHandler();
+      const kv = new MockKv();
+      const env = {
+        OAUTH_KV: kv,
+        OAUTH_PROVIDER: makeOAuthProvider({ redirectUri: 'https://client.example/cb' }),
+      };
+      const req = new Request('https://mcp.absmartly.com/authorize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          action: 'approve',
+          client_id: 'claude-mcp-test',
+          redirect_uri: 'https://client.example/cb',
+          state: 's',
+          response_type: 'code',
+          absmartly_endpoint: 'https://demo.absmartly.com',
+          ...pkceFields,
+        }),
+      });
+      const res = await handler.fetch(req, env);
+      assert.strictEqual(res.status, 400);
+      assert.strictEqual(kv.store.size, 0, 'no state should be stored without S256 PKCE');
+    });
+
+    await asyncTest(`GET /authorize rejects ${label} PKCE`, async () => {
+      const handler = new ABsmartlyOAuthHandler();
+      const env = {
+        OAUTH_KV: new MockKv(),
+        OAUTH_PROVIDER: makeOAuthProvider({
+          clientId: 'claude-mcp-test',
+          redirectUri: 'https://client.example/cb',
+          state: 's',
+          scope: ['mcp:access'],
+          responseType: 'code',
+          codeChallenge: 'code_challenge' in pkceFields ? pkceFields.code_challenge : undefined,
+          codeChallengeMethod: 'code_challenge_method' in pkceFields ? pkceFields.code_challenge_method : 'plain',
+        }),
+      };
+      const res = await handler.fetch(
+        new Request('https://mcp.absmartly.com/authorize?absmartly-endpoint=https://demo.absmartly.com'),
+        env,
+      );
+      assert.strictEqual(res.status, 400);
+    });
+  }
 
   return {
     success: failed === 0,

@@ -25,9 +25,15 @@ interface AuthRequest {
   codeChallengeMethod?: string;
 }
 
+const TEST_CODE_CHALLENGE = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
+
 function makeOAuthProvider(authRequest: AuthRequest) {
   return {
-    parseAuthRequest: async (_req: Request) => authRequest,
+    parseAuthRequest: async (_req: Request) => ({
+      codeChallenge: TEST_CODE_CHALLENGE,
+      codeChallengeMethod: 'S256',
+      ...authRequest,
+    }),
     lookupClient: async (clientId: string) => ({
       clientId,
       clientName: 'Test Client',

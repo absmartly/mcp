@@ -9,6 +9,7 @@ import {
   safeKvGet,
   escapeHtml,
   generatePkcePair,
+  REQUIRED_CODE_CHALLENGE_METHOD,
 } from './shared';
 
 interface OAuthEnv extends Env {
@@ -20,6 +21,11 @@ interface OAuthEnv extends Env {
 }
 
 const COOKIE_NAME = 'absmartly-oauth-approvals';
+const PKCE_REQUIRED_MESSAGE = `PKCE with code_challenge_method=${REQUIRED_CODE_CHALLENGE_METHOD} is required`;
+
+function hasRequiredPkce(codeChallenge: string | null | undefined, codeChallengeMethod: string | null | undefined): boolean {
+  return !!codeChallenge && codeChallengeMethod === REQUIRED_CODE_CHALLENGE_METHOD;
+}
 
 export class ABsmartlyOAuthHandler extends Hono {
   private extractEndpointFromResource(resourceParam: string | null): string | null {
@@ -56,6 +62,9 @@ export class ABsmartlyOAuthHandler extends Hono {
       }
       if (!clientInfo) {
         return c.text('Client not found', 400);
+      }
+      if (!hasRequiredPkce(authRequest.codeChallenge, authRequest.codeChallengeMethod)) {
+        return c.text(PKCE_REQUIRED_MESSAGE, 400);
       }
 
       let absmartlyEndpoint = this.extractEndpointFromResource(authRequest.resource) ||
@@ -97,21 +106,19 @@ export class ABsmartlyOAuthHandler extends Hono {
         return c.text('Invalid form data', 400);
       }
       const action = formData.get('action');
+      const redirectUri = formData.get('redirect_uri') as string;
+      const clientId = formData.get('client_id') as string;
+
+      if (!redirectUri || !clientId) {
+        return c.text('Invalid redirect URI', 400);
+      }
+      const client = await env.OAUTH_PROVIDER.lookupClient(clientId);
+      if (!client || !client.redirectUris?.includes(redirectUri)) {
+        return c.text('Invalid redirect URI', 400);
+      }
 
       if (action === 'cancel') {
-        const redirectUri = formData.get('redirect_uri') as string;
-        const clientId = formData.get('client_id') as string;
         const state = formData.get('state') as string;
-
-        if (redirectUri && clientId) {
-          const client = await env.OAUTH_PROVIDER.lookupClient(clientId);
-          if (!client || !client.redirectUris?.includes(redirectUri)) {
-            return c.text('Invalid redirect URI', 400);
-          }
-        } else if (redirectUri) {
-          return c.text('Invalid redirect URI', 400);
-        }
-
         return c.redirect(`${redirectUri}?error=access_denied&state=${encodeURIComponent(state)}`);
       }
 
@@ -123,14 +130,20 @@ export class ABsmartlyOAuthHandler extends Hono {
         return c.text('ABsmartly endpoint is required', 400);
       }
 
+      const codeChallenge = formData.get('code_challenge') as string;
+      const codeChallengeMethod = formData.get('code_challenge_method') as string;
+      if (!hasRequiredPkce(codeChallenge, codeChallengeMethod)) {
+        return c.text(PKCE_REQUIRED_MESSAGE, 400);
+      }
+
       const authRequest = {
-        clientId: formData.get('client_id') as string,
-        redirectUri: formData.get('redirect_uri') as string,
+        clientId,
+        redirectUri,
         state: formData.get('state') as string,
         scope: (formData.get('scope') as string || '').split(' '),
         responseType: formData.get('response_type') as string,
-        codeChallenge: formData.get('code_challenge') as string,
-        codeChallengeMethod: formData.get('code_challenge_method') as string,
+        codeChallenge,
+        codeChallengeMethod,
       };
 
       if (env.OAUTH_KV) {
@@ -413,7 +426,7 @@ export class ABsmartlyOAuthHandler extends Hono {
       <input type="hidden" name="code_challenge_method" value="${escapeHtml(params.get('code_challenge_method') || '')}">
       <label for="absmartly_endpoint">ABsmartly URL</label>
       <input type="url" id="absmartly_endpoint" name="absmartly_endpoint" placeholder="https://your-instance.absmartly.com" required>
-      <div class="hint">Example: https://demo-2.absmartly.com</div>
+      <div class="hint">Example: https://your-company.absmartly.com</div>
       <button type="submit">Continue</button>
     </form>
   </div>
