@@ -31,6 +31,11 @@ const CALLBACK_COOKIE_NAME_PREFIX = 'absmartly-oauth-cb-';
 const HTTP_STATUS_BAD_REQUEST = 400;
 const ENDPOINT_QUERY_PARAM = 'absmartly-endpoint';
 const ENDPOINT_HEADER = 'x-absmartly-endpoint';
+// 0.10.x defaults completeAuthorization to revoking every other grant for the same
+// user+client. A user can hold concurrent grants for the same client against different
+// ABsmartly endpoints (#42 keys approvals per endpoint) or on a second device with a
+// fixed-redirect-URI CIMD client; keep 0.0.5's behaviour of leaving those grants alone.
+const REVOKE_EXISTING_GRANTS_ON_NEW_LOGIN = false;
 
 function kvStateStore(kv: KVNamespace): OAuthStateStore {
   return {
@@ -282,7 +287,8 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
             oauth_jwt: tokenData.access_token,
             user_id: finalUserId,
             absmartly_api_key: tokenData.api_key || tokenData.absmartly_api_key || undefined
-          }
+          },
+          revokeExistingGrants: REVOKE_EXISTING_GRANTS_ON_NEW_LOGIN
         });
       } catch (e) {
         debug('Failed to complete authorization:', e);
