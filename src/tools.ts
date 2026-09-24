@@ -87,6 +87,16 @@ export function autoPopulateCustomFields(
   data.custom_section_field_values = fieldValues;
 }
 
+function formatParamSummary(entry: CommandEntry): string {
+  if (entry.params.length === 0) {
+    return `${entry.group}.${entry.command} takes no parameters.`;
+  }
+  const paramList = entry.params
+    .map((p) => `${p.name} (${p.type}${p.required ? ', required' : ''})`)
+    .join(', ');
+  return `${entry.group}.${entry.command} params: ${paramList}.`;
+}
+
 function buildCommandDoc(entry: CommandEntry, customFields: readonly any[]): string {
   let doc = `# ${entry.group}.${entry.command}\n\n**Group:** ${entry.group}\n**Description:** ${entry.description}\n`;
   if (entry.dangerous) {
@@ -275,13 +285,12 @@ To create experiments, use group "experiments", command "createExperimentFromTem
       // — without this guard, the call returns success but does nothing).
       const validationErrors = validateCommandParams(entry, params.params || {});
       if (validationErrors.length > 0) {
-        const docs = buildCommandDoc(entry, ctx.customFields);
         return {
           content: [{
             type: "text" as const,
             text: `Param validation failed for ${params.group}.${params.command}:\n` +
               validationErrors.map((e) => `  - ${e}`).join('\n') +
-              `\n\n---\n\n${docs}`,
+              `\n\n${formatParamSummary(entry)} Use get_command_docs for full details.`,
           }],
         };
       }
