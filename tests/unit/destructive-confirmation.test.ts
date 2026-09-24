@@ -124,6 +124,15 @@ export default async function run() {
     assert.ok(!/destructive action/i.test(text), `non-dangerous command must not mention destructive-action gating, got: ${text}`);
   });
 
+  await asyncTest('local-server.ts wires elicitConfirmation into ToolContext using mcpServer.server.elicitInput', async () => {
+    const fs = await import('node:fs/promises');
+    const source = await fs.readFile(new URL('../../src/local-server.ts', import.meta.url), 'utf-8');
+    assert.ok(/elicitConfirmation\s*:\s*async/.test(source),
+      'local-server.ts must define elicitConfirmation on the ToolContext it builds');
+    assert.ok(/mcpServer\.server\.elicitInput\(/.test(source),
+      'local-server.ts must call mcpServer.server.elicitInput(...) the same way index.ts does');
+  });
+
   return {
     success: failed === 0,
     message: `${passed} passed, ${failed} failed`,

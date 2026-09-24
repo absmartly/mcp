@@ -16,6 +16,9 @@ const DEFAULT_PROFILE_NAME = 'default';
 const KEYCHAIN_SERVICE = 'absmartly-cli';
 const KEYCHAIN_ACCOUNT_PREFIX = 'api-key';
 const CREDENTIALS_FILE_PATH = '.config/absmartly/credentials.json';
+const ELICIT_CONFIRM_TITLE = 'Confirm';
+const ELICIT_CONFIRM_DESCRIPTION = "Type 'yes' to confirm this destructive action";
+const ELICIT_CONFIRM_ANSWER = 'yes';
 
 interface ProfileConfig {
     endpoint: string;
@@ -145,8 +148,25 @@ async function main() {
     const ctx = await buildServerContext(apiClient, { endpoint: config.endpoint, authType: 'API Key' });
 
     // ── Register tools, resources, and prompts (shared with Node HTTP transport) ──
+    const elicitConfirmation = async (message: string): Promise<boolean> => {
+        const result = await mcpServer.server.elicitInput({
+            message,
+            requestedSchema: {
+                type: "object" as const,
+                properties: {
+                    confirm: {
+                        type: "string",
+                        title: ELICIT_CONFIRM_TITLE,
+                        description: ELICIT_CONFIRM_DESCRIPTION,
+                    }
+                },
+                required: ["confirm"]
+            }
+        });
+        return result.action === 'accept' && result.content?.confirm === ELICIT_CONFIRM_ANSWER;
+    };
     const docsDir = join(new URL('.', import.meta.url).pathname, '..', 'public', 'docs', 'api');
-    registerServer(mcpServer, ctx, { docsDir, profileName });
+    registerServer(mcpServer, ctx, { docsDir, profileName, elicitConfirmation });
 
     const transport = new StdioServerTransport();
     await mcpServer.connect(transport);
