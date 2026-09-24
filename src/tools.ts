@@ -388,13 +388,18 @@ To create experiments, use group "experiments", command "createExperimentFromTem
           );
         }
 
-        // Apply default items limit for list operations
-        const itemsLimit = params.limit ?? DEFAULT_LIST_ITEMS;
+        // Apply default items limit for list operations — but only when the
+        // command actually declares an `items`/`page` param. Commands with no
+        // declared pagination params (empty params: []) or a single catch-all
+        // `params` object (e.g. listEvents, listActivity) would otherwise get an
+        // unsupported/inert key silently attached to commandParams.
         if (params.command.startsWith('list') || params.command.startsWith('search')) {
-          if (commandParams.items === undefined) {
+          const itemsLimit = params.limit ?? DEFAULT_LIST_ITEMS;
+          const declaredParamNames = new Set(entry.params.map((p) => p.name));
+          if (declaredParamNames.has('items') && commandParams.items === undefined) {
             commandParams.items = itemsLimit;
           }
-          if (commandParams.page === undefined) {
+          if (declaredParamNames.has('page') && commandParams.page === undefined) {
             commandParams.page = 1;
           }
         }
