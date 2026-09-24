@@ -87,6 +87,28 @@ export default async function run() {
     assert.strictEqual(await rejectUntrustedCimdClient(new Request(other), other), null, 'only /authorize and /token are gated');
   });
 
+  // Regression coverage for the three shapes that reached the provider's own, broader
+  // CIMD-URL check (isClientIdMetadataDocumentUrl) while slipping past this guard.
+  await asyncTest('untrusted root-path client_id is rejected (provider treats "/" as a CIMD path)', async () => {
+    const rootUrl = 'https://attacker.example/';
+    const url = new URL(`${ORIGIN}/authorize?client_id=${encodeURIComponent(rootUrl)}`);
+    const res = await rejectUntrustedCimdClient(new Request(url), url);
+    assert.strictEqual(res?.status, 401);
+  });
+
+  await asyncTest('untrusted client_id is rejected even via a percent-encoded /authorize path', async () => {
+    const url = new URL(`${ORIGIN}/%61uthorize?client_id=${encodeURIComponent(UNTRUSTED_CIMD)}`);
+    const res = await rejectUntrustedCimdClient(new Request(url), url);
+    assert.strictEqual(res?.status, 401, 'Hono routes the decoded path to the /authorize handler, so the guard must too');
+  });
+
+  await asyncTest('untrusted client_id via Basic auth is rejected when the scheme is tab-separated', async () => {
+    const url = new URL(`${ORIGIN}/token`);
+    const basic = `Basic\t${btoa(`${encodeURIComponent(UNTRUSTED_CIMD)}:x`)}`;
+    const res = await rejectUntrustedCimdClient(tokenRequest({ grant_type: 'refresh_token' }, { Authorization: basic }), url);
+    assert.strictEqual(res?.status, 401, 'the provider\'s own Basic parser accepts a tab after the scheme');
+  });
+
   // --- Refresh check ---
   await asyncTest('refresh with a live backend session succeeds after calling userinfo with the JWT', async () => {
     await withFetch(200, async (calls) => {

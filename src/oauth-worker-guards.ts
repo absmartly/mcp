@@ -1,7 +1,7 @@
 import type { OAuthError, TokenExchangeCallbackOptions } from "@cloudflare/workers-oauth-provider";
 import { debug } from "./config";
 import { CORS_HEADERS, type ABsmartlyProps } from "./shared";
-import { isCimdClientId, isTrustedCimdClientId } from "./oauth/index.js";
+import { isTrustedCimdClientId } from "./oauth/index.js";
 
 const REFRESH_GRANT_TYPE = 'refresh_token';
 const OAUTH_ERROR_INVALID_GRANT = 'invalid_grant';
@@ -54,10 +54,19 @@ export async function checkBackendSessionOnRefresh(options: TokenExchangeCallbac
     }
 }
 
+// RFC 6749 Basic credentials: the scheme ends at the first space OR tab (not just a
+// space), matching the provider's own parseBasicAuthorizationHeader. Using a
+// space-only prefix let `Authorization: Basic\t<creds>` skip this guard entirely
+// while still authenticating with the library.
+const BASIC_AUTH_SCHEME_BOUNDARY = /[ \t]/;
+
 function clientIdFromBasicAuth(header: string | null): string | null {
-    if (!header || !header.toLowerCase().startsWith(BASIC_AUTH_PREFIX)) return null;
+    if (!header) return null;
+    const boundary = header.search(BASIC_AUTH_SCHEME_BOUNDARY);
+    const scheme = boundary === -1 ? header : header.slice(0, boundary);
+    if (scheme.toLowerCase() !== BASIC_AUTH_PREFIX.trim() || boundary === -1) return null;
     try {
-        const decoded = atob(header.slice(BASIC_AUTH_PREFIX.length).trim());
+        const decoded = atob(header.slice(boundary).trim());
         const separator = decoded.indexOf(':');
         return decodeURIComponent(separator >= 0 ? decoded.slice(0, separator) : decoded);
     } catch {
@@ -65,14 +74,42 @@ function clientIdFromBasicAuth(header: string | null): string | null {
     }
 }
 
+// Hono routes on a decoded path (see getPath in hono/dist/utils/url.js), so a request to
+// e.g. /%61uthorize still reaches the /authorize handler. Comparing url.pathname (which
+// keeps percent-escapes literal) against a plain "/authorize" string would miss that
+// request entirely, so decode the same way before comparing.
+function decodedPathname(url: URL): string {
+    try {
+        return decodeURI(url.pathname);
+    } catch {
+        return url.pathname;
+    }
+}
+
+// Matches the provider's own CIMD-shape test (isClientIdMetadataDocumentUrl: an
+// https/http URL), deliberately broader than the strict MCP definition used to pick a
+// document to fetch (oauth/cimd.ts#isCimdClientId requires a non-root path). This guard
+// must never be narrower than what the library will treat as a metadata-document URL —
+// including root-path URLs like "https://evil.example/" — or an untrusted client_id can
+// still reach the library's fetch.
+function looksLikeUrlClientId(clientId: string): boolean {
+    try {
+        const { protocol } = new URL(clientId);
+        return protocol === 'https:' || protocol === 'http:';
+    } catch {
+        return false;
+    }
+}
+
 // The library fetches a CIMD document for any URL-shaped client_id, from parseAuthRequest,
 // completeAuthorization and the token endpoint, and has no allowlist option. Reject
 // untrusted ones before the library sees the request, so it never makes that request.
 export async function rejectUntrustedCimdClient(request: Request, url: URL): Promise<Response | null> {
+    const pathname = decodedPathname(url);
     let clientId: string | null = null;
-    if (url.pathname === AUTHORIZE_PATH) {
+    if (pathname === AUTHORIZE_PATH) {
         clientId = url.searchParams.get('client_id');
-    } else if (url.pathname === TOKEN_PATH && request.method === 'POST') {
+    } else if (pathname === TOKEN_PATH && request.method === 'POST') {
         clientId = clientIdFromBasicAuth(request.headers.get('Authorization'));
         const contentType = request.headers.get('Content-Type') || '';
         if (!clientId && contentType.toLowerCase().startsWith(FORM_CONTENT_TYPE)) {
@@ -83,7 +120,7 @@ export async function rejectUntrustedCimdClient(request: Request, url: URL): Pro
             }
         }
     }
-    if (!clientId || !isCimdClientId(clientId) || isTrustedCimdClientId(clientId)) return null;
+    if (!clientId || !looksLikeUrlClientId(clientId) || isTrustedCimdClientId(clientId)) return null;
     debug(`Rejected untrusted CIMD client_id: ${clientId}`);
     return new Response(JSON.stringify({
         error: OAUTH_ERROR_INVALID_CLIENT,
