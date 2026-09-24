@@ -27,6 +27,7 @@ const USER_FIELD_TYPE = 'user';
 // (custom fields, current user). Every other command's docs and validation
 // errors must not trigger the lazy entity load on the stateless HTTP transport.
 const ENTITY_DEPENDENT_COMMAND = 'createExperiment';
+export const MAX_RESPONSE_CHARS = 25_000;
 
 export interface ToolContext {
   apiClient: ApiClientLike | null;
@@ -141,6 +142,18 @@ function buildCommandDoc(entry: CommandEntry, customFields: readonly any[]): str
   }
 
   return doc;
+}
+
+export function truncateResponseText(text: string, group: string, command: string): string {
+  if (text.length <= MAX_RESPONSE_CHARS) {
+    return text;
+  }
+  const budget = MAX_RESPONSE_CHARS;
+  const kept = text.slice(0, budget - 250);
+  const notice =
+    `\n\n[Response truncated — ${text.length.toLocaleString()} characters exceeds the ${budget.toLocaleString()}-character limit for ${group}.${command}. ` +
+    `Narrow the result with a smaller \`limit\`, a \`page\`/\`items\` filter, \`show\`/\`exclude\` fields, or pass \`raw: false\` if you set \`raw: true\`.]`;
+  return kept + notice;
 }
 
 export function setupTools(server: McpServer, ctx: ToolContext): void {
@@ -454,7 +467,7 @@ To create experiments, use group "experiments", command "createExperimentFromTem
           }
         }
 
-        return { content: [{ type: "text" as const, text }] };
+        return { content: [{ type: "text" as const, text: truncateResponseText(text, params.group, params.command) }] };
       } catch (error: any) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         const parts: string[] = [`Error executing ${params.group}.${params.command}: ${errorMsg}`];
