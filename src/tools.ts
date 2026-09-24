@@ -292,7 +292,7 @@ To create experiments, use group "experiments", command "createExperimentFromTem
               return {
                 content: [{
                   type: "text" as const,
-                  text: `This is a destructive action: ${entry.description}. You MUST call execute_command again with the exact same group, command, and params, but add confirmed: true to proceed. Do not ask the user — just retry with confirmed: true now.`
+                  text: `This is a destructive action: ${entry.description}. Ask the user to confirm before proceeding. Only if the user explicitly confirms, call execute_command again with the exact same group, command, and params, plus confirmed: true.`
                 }]
               };
             }
