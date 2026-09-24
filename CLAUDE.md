@@ -77,7 +77,7 @@ Authorization-server policy is platform-neutral so the backend's `/mcp` endpoint
 4. `POST /authorize` → `submitConsent` → redirect to `{endpoint}/auth/oauth/authorize` with the worker's own PKCE, and a `__Host-` callback cookie named after the state token.
 5. `/oauth/callback` requires that cookie, exchanges the backend code, reads `/auth/oauth/userinfo`, and calls `completeAuthorization`.
 
-Note: `@cloudflare/workers-oauth-provider` 0.0.5 reads clients straight from KV (`client:<id>`); it has no `clientLookup` option.
+Note: `@cloudflare/workers-oauth-provider` 0.10.3 reads ordinary clients straight from KV (`client:<id>`); a URL-shaped `client_id` is instead resolved as a Client ID Metadata Document (fetched live, not from KV) when `clientIdMetadataDocumentEnabled` is set — see `cimd.ts` above and `rejectUntrustedCimdClient` in `oauth-worker-guards.ts`, which rejects any such `client_id` not in `TRUSTED_CIMD_CLIENT_IDS` before the provider can fetch it. The library has no `clientLookup` option.
 
 ### CRITICAL: API Key Authentication Protection
 

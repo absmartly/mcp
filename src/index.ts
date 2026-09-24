@@ -40,6 +40,11 @@ import {
 const ENTITY_LIST_PAGE_SIZE = 100;
 const ENTITY_LIST_FIRST_PAGE = 1;
 const ACCESS_TOKEN_TTL_SECONDS = 3600;
+// workers-oauth-provider 0.10.x defaults both of these; pin them explicitly (at the
+// library's own defaults) so a future library upgrade can't silently change how long a
+// dynamically registered client or a refresh token survives.
+const CLIENT_REGISTRATION_TTL_SECONDS = 90 * 24 * 60 * 60;
+const REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
 const RESOURCE_NAME = 'ABsmartly MCP';
 
 const MCP_CORS_OPTIONS = {
@@ -570,6 +575,8 @@ const oauthProvider = new OAuthProvider({
     tokenEndpoint: "/token",
     clientRegistrationEndpoint: "/register",
     accessTokenTTL: ACCESS_TOKEN_TTL_SECONDS,
+    refreshTokenTTL: REFRESH_TOKEN_TTL_SECONDS,
+    clientRegistrationTTL: CLIENT_REGISTRATION_TTL_SECONDS,
     scopesSupported: [...SUPPORTED_SCOPES],
     disallowPublicClientRegistration: false,
     // Only clients in TRUSTED_CIMD_CLIENT_IDS reach the library; see rejectUntrustedCimdClient.
