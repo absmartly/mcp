@@ -1,4 +1,5 @@
-import { setupTools, type ToolContext } from '../../src/tools';
+import { setupTools, applyDefaultPagination, type ToolContext } from '../../src/tools';
+import { getCommandEntry } from '../../src/cli-catalog';
 
 class CapturedHandlers {
   tools = new Map<string, { handler: Function }>();
@@ -50,24 +51,47 @@ export default async function runTests() {
     assert(capturedCall.page === 1, 'listGoals still gets default page=1 injected', JSON.stringify(capturedCall));
   }
 
-  // A command with params: [] (no declared items/page, e.g. listPermissions) does NOT get items/page injected.
+  // A command with params: [] (no declared items/page, e.g. listPermissions) does NOT get
+  // items/page injected. Verified directly against the injection guard (applyDefaultPagination)
+  // rather than via the mocked client call, since listPermissions' core function calls
+  // client.listPermissions() with no arguments at all regardless of what commandParams holds —
+  // asserting on the mocked call would pass even if the guard were removed entirely.
   {
-    let capturedCall: any;
-    const client = { listPermissions: async (opts: any) => { capturedCall = opts; return []; } } as any;
-    const handler = getExecuteHandler(client);
-    await handler({ group: 'permissions', command: 'listPermissions', params: {} });
-    assert(capturedCall === undefined || capturedCall.items === undefined,
-      'listPermissions does not get an unsupported items key injected', JSON.stringify(capturedCall));
+    const entry = getCommandEntry('permissions', 'listPermissions')!;
+    const commandParams: Record<string, unknown> = {};
+    applyDefaultPagination(entry, commandParams, undefined);
+    assert(commandParams.items === undefined,
+      'listPermissions does not get an unsupported items key injected', JSON.stringify(commandParams));
+    assert(commandParams.page === undefined,
+      'listPermissions does not get an unsupported page key injected', JSON.stringify(commandParams));
   }
 
-  // A command with a single catch-all `params` object (listEvents) does NOT get top-level items/page injected.
+  // A command with a single catch-all `params` object (listEvents) does NOT get top-level
+  // items/page injected. Verified directly against the injection guard, since listEvents' core
+  // function builds its own filters/body from named fields and never forwards items/page to the
+  // client call — asserting on the mocked call would pass even if the guard were removed entirely.
+  {
+    const entry = getCommandEntry('events', 'listEvents')!;
+    const commandParams: Record<string, unknown> = {};
+    applyDefaultPagination(entry, commandParams, undefined);
+    assert(commandParams.items === undefined,
+      'listEvents does not get a top-level items key injected onto its catch-all params', JSON.stringify(commandParams));
+    assert(commandParams.page === undefined,
+      'listEvents does not get a top-level page key injected onto its catch-all params', JSON.stringify(commandParams));
+  }
+
+  // A command whose catalog entry says params: [] but whose CLI core function actually reads
+  // params.items/params.page directly (apps.listApps) DOES get the default injected end-to-end.
+  // This is the exact regression scenario the Critical final-review finding identified: Task 2's
+  // guard reads the catalog's declared params, and the catalog previously omitted items/page for
+  // this command even though the core function consumes them.
   {
     let capturedCall: any;
-    const client = { listEvents: async (opts: any) => { capturedCall = opts; return []; } } as any;
+    const client = { listApplications: async (opts: any) => { capturedCall = opts; return []; } } as any;
     const handler = getExecuteHandler(client);
-    await handler({ group: 'events', command: 'listEvents', params: {} });
-    assert(capturedCall === undefined || capturedCall.items === undefined,
-      'listEvents does not get a top-level items key injected onto its catch-all params', JSON.stringify(capturedCall));
+    await handler({ group: 'apps', command: 'listApps', params: {} });
+    assert(capturedCall.items === 20, 'apps.listApps gets default items=20 injected into the core call', JSON.stringify(capturedCall));
+    assert(capturedCall.page === 1, 'apps.listApps gets default page=1 injected into the core call', JSON.stringify(capturedCall));
   }
 
   // An explicit params.limit still overrides the default for a command that supports items/page.
