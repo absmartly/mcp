@@ -29,6 +29,9 @@ import {
     MCP_PATH,
     normalizeBaseUrl,
     extractEndpointFromPath,
+    rejectDisallowedRedirectUris,
+    handleOAuthDiscovery,
+    API_KEY_SESSION_KV_PREFIX,
     detectApiKey,
     safeKvPut,
     safeKvGet,
@@ -771,25 +774,16 @@ export default {
         const clientFingerprint = `${request.headers.get('CF-Connecting-IP') || 'unknown'}-${request.headers.get('User-Agent') || 'unknown'}`;
 
         if (apiKey) {
-            await safeKvPut(env.OAUTH_KV, `api_key_session:${clientFingerprint}`, 'active', {
+            await safeKvPut(env.OAUTH_KV, `${API_KEY_SESSION_KV_PREFIX}${clientFingerprint}`, 'active', {
                 expirationTtl: API_KEY_SESSION_TTL_SECONDS,
             });
         }
 
-        const isOAuthDiscoveryEndpoint = url.pathname === '/.well-known/oauth-authorization-server' ||
-                                        url.pathname === '/.well-known/oauth-protected-resource' ||
-                                        url.pathname.startsWith('/.well-known/oauth-authorization-server/') ||
-                                        url.pathname.startsWith('/.well-known/oauth-protected-resource/');
-
-        if (isOAuthDiscoveryEndpoint) {
-            const apiKeySession = await safeKvGet(env.OAUTH_KV, `api_key_session:${clientFingerprint}`);
-            if (apiKeySession) {
-                return new Response(JSON.stringify({
-                    error: "oauth_not_available",
-                    error_description: "OAuth not available when using API key authentication"
-                }), { status: 404 });
-            }
-        }
+        const discoveryResponse = await handleOAuthDiscovery(
+            request, env.OAUTH_KV, clientFingerprint, !!apiKey,
+            () => oauthProvider.fetch(request, env, ctx)
+        );
+        if (discoveryResponse) return discoveryResponse;
 
         if (isTransportPath(url.pathname, SSE_PATH)) {
             return await handleMcpTransportRequest(
@@ -810,6 +804,8 @@ export default {
         }
 
         if (url.pathname === '/register' && request.method === 'POST') {
+            const rejection = await rejectDisallowedRedirectUris(request);
+            if (rejection) return rejection;
             const pendingEndpoint = await safeKvGet(env.OAUTH_KV, `oauth_endpoint_pending:${clientFingerprint}`);
             const response = await oauthProvider.fetch(request, env, ctx);
 

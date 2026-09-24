@@ -1,5 +1,7 @@
 import { Hono } from 'hono';
-import { getCookie, setCookie } from 'hono/cookie';
+import type { Context } from 'hono';
+import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
+import type { AuthRequest, ClientInfo, OAuthHelpers } from '@cloudflare/workers-oauth-provider';
 import { debug } from './config';
 import type { Env } from './types';
 import {
@@ -9,20 +11,48 @@ import {
   safeKvGet,
   escapeHtml,
   generatePkcePair,
+  REQUIRED_CODE_CHALLENGE_METHOD,
+  INVALID_REDIRECT_URI_MESSAGE,
+  isAllowedRedirectUri,
 } from './shared';
 
-interface OAuthEnv extends Env {
-  OAUTH_PROVIDER: {
-    parseAuthRequest(request: Request): Promise<any>;
-    lookupClient(clientId: string): Promise<any>;
-    completeAuthorization(options: any): Promise<{ redirectTo: string }>;
-  };
+type OAuthBindings = Env & { OAUTH_PROVIDER: OAuthHelpers };
+type OAuthContext = Context<{ Bindings: OAuthBindings }>;
+type AbsmartlyAuthRequest = AuthRequest & { resource?: string };
+
+// __Host- cookies are pinned to this exact origin with Path=/, so a sibling
+// *.absmartly.com site cannot plant or overwrite them.
+const APPROVALS_COOKIE_NAME = 'absmartly-oauth-approvals';
+const HOST_COOKIE_PREFIX = 'host';
+const APPROVALS_KV_PREFIX = 'oauth:approvals:';
+// Consent and callback cookies are named after their transaction id / state token, so
+// parallel logins in the same browser don't overwrite each other's binding.
+const CALLBACK_COOKIE_NAME_PREFIX = 'absmartly-oauth-cb-';
+const FRAME_PROTECTION_HEADERS = {
+  'X-Frame-Options': 'DENY',
+  'Content-Security-Policy': "frame-ancestors 'none'",
+};
+const PKCE_REQUIRED_MESSAGE = `PKCE with code_challenge_method=${REQUIRED_CODE_CHALLENGE_METHOD} is required`;
+const CONSENT_COOKIE_NAME_PREFIX = 'absmartly-oauth-consent-';
+const CONSENT_KV_PREFIX = 'oauth:consent:';
+const CONSENT_TTL_SECONDS = 10 * 60;
+
+type ConsentTransaction = {
+  authRequest: AbsmartlyAuthRequest;
+  absmartlyEndpoint: string | null;
+  browserBinding: string;
+};
+
+function approvalKey(clientId: string, absmartlyEndpoint: string): string {
+  return JSON.stringify([clientId, absmartlyEndpoint.replace(/\/+$/, '')]);
 }
 
-const COOKIE_NAME = 'absmartly-oauth-approvals';
+function hasRequiredPkce(codeChallenge: string | null | undefined, codeChallengeMethod: string | null | undefined): boolean {
+  return !!codeChallenge && codeChallengeMethod === REQUIRED_CODE_CHALLENGE_METHOD;
+}
 
-export class ABsmartlyOAuthHandler extends Hono {
-  private extractEndpointFromResource(resourceParam: string | null): string | null {
+export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
+  private extractEndpointFromResource(resourceParam: string | null | undefined): string | null {
     if (!resourceParam) return null;
     try {
       const resourceUrl = new URL(resourceParam);
@@ -30,6 +60,14 @@ export class ABsmartlyOAuthHandler extends Hono {
     } catch {
       return null;
     }
+  }
+
+  private normalizeEndpoint(raw: string): string {
+    let endpoint = raw.trim().replace(/\/+$/, '');
+    if (endpoint && !endpoint.startsWith('http://') && !endpoint.startsWith('https://')) {
+      endpoint = 'https://' + endpoint;
+    }
+    return endpoint;
   }
 
   constructor() {
@@ -42,11 +80,11 @@ export class ABsmartlyOAuthHandler extends Hono {
 
     this.get('/authorize', async (c) => {
       debug('ABsmartlyOAuthHandler: Hit /authorize endpoint');
-      const env = c.env as OAuthEnv;
+      const env = c.env;
       const url = new URL(c.req.url);
 
-      let authRequest;
-      let clientInfo;
+      let authRequest: AbsmartlyAuthRequest;
+      let clientInfo: ClientInfo | null;
       try {
         authRequest = await env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw);
         clientInfo = await env.OAUTH_PROVIDER.lookupClient(authRequest.clientId);
@@ -56,6 +94,17 @@ export class ABsmartlyOAuthHandler extends Hono {
       }
       if (!clientInfo) {
         return c.text('Client not found', 400);
+      }
+      // The provider only checks redirect_uri when one is supplied; an empty value
+      // must not reach completeAuthorization, which redirects there unchecked.
+      // The allowlist is also enforced at /register, but clients registered before it
+      // existed are still in KV and must not be able to receive codes.
+      if (!authRequest.redirectUri || !clientInfo.redirectUris?.includes(authRequest.redirectUri) ||
+          !isAllowedRedirectUri(authRequest.redirectUri)) {
+        return c.text(INVALID_REDIRECT_URI_MESSAGE, 400);
+      }
+      if (!hasRequiredPkce(authRequest.codeChallenge, authRequest.codeChallengeMethod)) {
+        return c.text(PKCE_REQUIRED_MESSAGE, 400);
       }
 
       let absmartlyEndpoint = this.extractEndpointFromResource(authRequest.resource) ||
@@ -70,25 +119,31 @@ export class ABsmartlyOAuthHandler extends Hono {
         }
       }
 
+      if (absmartlyEndpoint) {
+        debug('Resolved ABsmartly endpoint:', absmartlyEndpoint);
+        const approvals = await this.getApprovals(c);
+        if (approvals.includes(approvalKey(authRequest.clientId, absmartlyEndpoint))) {
+          debug('Client is pre-approved, redirecting to ABsmartly OAuth');
+          return this.redirectToAbsmartlyOAuth(c, authRequest, absmartlyEndpoint);
+        }
+      }
+
+      let transactionId;
+      try {
+        transactionId = await this.createConsentTransaction(c, authRequest, absmartlyEndpoint || null);
+      } catch (e) {
+        console.error('Failed to store consent transaction:', e);
+        return c.text('Service temporarily unavailable, please try again', 503);
+      }
+
       if (!absmartlyEndpoint) {
-        return this.renderEndpointForm(c, url);
+        return this.renderEndpointForm(c, transactionId);
       }
-
-      debug('Resolved ABsmartly endpoint:', absmartlyEndpoint);
-
-      const approvedClients = await this.getApprovedClients(c);
-      const isApproved = approvedClients.includes(authRequest.clientId);
-
-      if (isApproved) {
-        debug('Client is pre-approved, redirecting to ABsmartly OAuth');
-        return this.redirectToAbsmartlyOAuth(c, authRequest, absmartlyEndpoint);
-      }
-
-      return this.renderApprovalPage(c, clientInfo, authRequest, absmartlyEndpoint);
+      return this.renderApprovalPage(c, clientInfo, authRequest, absmartlyEndpoint, transactionId);
     });
 
     this.post('/authorize', async (c) => {
-      const env = c.env as OAuthEnv;
+      const env = c.env;
       let formData;
       try {
         formData = await c.req.formData();
@@ -97,41 +152,56 @@ export class ABsmartlyOAuthHandler extends Hono {
         return c.text('Invalid form data', 400);
       }
       const action = formData.get('action');
+      const transactionId = formData.get('transaction_id') as string || '';
+
+      // Every authorization parameter comes from the transaction stored at GET /authorize,
+      // never from the form, so a forged POST cannot pick its own client or redirect URI.
+      const transaction = await this.loadConsentTransaction(c, transactionId);
+      if (!transaction) {
+        return c.text('Authorization request expired or invalid, please restart the connection from your MCP client', 400);
+      }
+      const { authRequest } = transaction;
+
+      const clientInfo = await env.OAUTH_PROVIDER.lookupClient(authRequest.clientId);
+      if (!clientInfo || !clientInfo.redirectUris?.includes(authRequest.redirectUri) ||
+          !isAllowedRedirectUri(authRequest.redirectUri)) {
+        await this.deleteConsentTransaction(c, transactionId);
+        return c.text(INVALID_REDIRECT_URI_MESSAGE, 400);
+      }
 
       if (action === 'cancel') {
-        const redirectUri = formData.get('redirect_uri') as string;
-        const clientId = formData.get('client_id') as string;
-        const state = formData.get('state') as string;
-
-        if (redirectUri && clientId) {
-          const client = await env.OAUTH_PROVIDER.lookupClient(clientId);
-          if (!client || !client.redirectUris?.includes(redirectUri)) {
-            return c.text('Invalid redirect URI', 400);
-          }
-        } else if (redirectUri) {
-          return c.text('Invalid redirect URI', 400);
+        await this.deleteConsentTransaction(c, transactionId);
+        const denyUrl = new URL(authRequest.redirectUri);
+        denyUrl.searchParams.set('error', 'access_denied');
+        if (authRequest.state) {
+          denyUrl.searchParams.set('state', authRequest.state);
         }
-
-        return c.redirect(`${redirectUri}?error=access_denied&state=${encodeURIComponent(state)}`);
+        return c.redirect(denyUrl.toString());
       }
 
-      let absmartlyEndpoint = (formData.get('absmartly_endpoint') as string || '').trim().replace(/\/+$/, '');
-      if (absmartlyEndpoint && !absmartlyEndpoint.startsWith('http://') && !absmartlyEndpoint.startsWith('https://')) {
-        absmartlyEndpoint = 'https://' + absmartlyEndpoint;
+      if (action === 'set_endpoint') {
+        const absmartlyEndpoint = this.normalizeEndpoint(formData.get('absmartly_endpoint') as string || '');
+        if (!absmartlyEndpoint) {
+          return c.text('ABsmartly endpoint is required', 400);
+        }
+        transaction.absmartlyEndpoint = absmartlyEndpoint;
+        try {
+          await this.saveConsentTransaction(c, transactionId, transaction);
+        } catch (e) {
+          console.error('Failed to update consent transaction:', e);
+          return c.text('Service temporarily unavailable, please try again', 503);
+        }
+        return this.renderApprovalPage(c, clientInfo, authRequest, absmartlyEndpoint, transactionId);
       }
+
+      if (action !== 'approve') {
+        return c.text('Invalid action', 400);
+      }
+
+      const absmartlyEndpoint = transaction.absmartlyEndpoint;
       if (!absmartlyEndpoint) {
         return c.text('ABsmartly endpoint is required', 400);
       }
-
-      const authRequest = {
-        clientId: formData.get('client_id') as string,
-        redirectUri: formData.get('redirect_uri') as string,
-        state: formData.get('state') as string,
-        scope: (formData.get('scope') as string || '').split(' '),
-        responseType: formData.get('response_type') as string,
-        codeChallenge: formData.get('code_challenge') as string,
-        codeChallengeMethod: formData.get('code_challenge_method') as string,
-      };
 
       if (env.OAUTH_KV) {
         try {
@@ -146,14 +216,13 @@ export class ABsmartlyOAuthHandler extends Hono {
         }
       }
 
-      if (action !== 'set_endpoint') {
-        await this.addApprovedClient(c, authRequest.clientId);
-      }
+      await this.addApproval(c, approvalKey(authRequest.clientId, absmartlyEndpoint));
+      await this.deleteConsentTransaction(c, transactionId);
       return this.redirectToAbsmartlyOAuth(c, authRequest, absmartlyEndpoint);
     });
 
     this.get('/oauth/callback', async (c) => {
-      const env = c.env as OAuthEnv;
+      const env = c.env;
       const url = new URL(c.req.url);
 
       const code = url.searchParams.get('code');
@@ -181,12 +250,6 @@ export class ABsmartlyOAuthHandler extends Hono {
         return c.text('Invalid or expired state', 400);
       }
 
-      try {
-        await env.OAUTH_KV.delete(`oauth:state:${state}`);
-      } catch (e) {
-        console.warn('Failed to delete OAuth state token (non-critical):', e);
-      }
-
       let oauthReqInfo;
       try {
         oauthReqInfo = JSON.parse(storedState);
@@ -194,6 +257,20 @@ export class ABsmartlyOAuthHandler extends Hono {
         debug('Failed to parse stored state:', e);
         return c.text('Invalid state data', 400);
       }
+
+      const callbackCookieName = `${CALLBACK_COOKIE_NAME_PREFIX}${state}`;
+      const browserBinding = getCookie(c, callbackCookieName, HOST_COOKIE_PREFIX);
+      if (!oauthReqInfo.browserBinding || browserBinding !== oauthReqInfo.browserBinding) {
+        debug('OAuth callback browser binding mismatch');
+        return c.text('This login was started in a different browser, please restart the connection from your MCP client', 400);
+      }
+
+      try {
+        await env.OAUTH_KV.delete(`oauth:state:${state}`);
+      } catch (e) {
+        console.warn('Failed to delete OAuth state token (non-critical):', e);
+      }
+      deleteCookie(c, callbackCookieName, { prefix: HOST_COOKIE_PREFIX, path: '/', secure: true });
 
       const absmartlyEndpoint = oauthReqInfo.absmartlyEndpoint;
       if (!absmartlyEndpoint) {
@@ -301,19 +378,21 @@ export class ABsmartlyOAuthHandler extends Hono {
     });
   }
 
-  private async redirectToAbsmartlyOAuth(c: any, authRequest: any, absmartlyEndpoint: string) {
+  private async redirectToAbsmartlyOAuth(c: OAuthContext, authRequest: AbsmartlyAuthRequest, absmartlyEndpoint: string) {
     const url = new URL(c.req.url);
-    const env = c.env as OAuthEnv;
+    const env = c.env;
 
     debug(`ABsmartly endpoint for OAuth redirect: ${absmartlyEndpoint}`);
 
     const cleanEndpoint = absmartlyEndpoint.replace(/\/+$/, '');
     const { codeVerifier, codeChallenge } = await generatePkcePair();
     const stateToken = crypto.randomUUID();
+    const browserBinding = crypto.randomUUID();
     const stateData = {
       authRequest,
       absmartlyEndpoint: cleanEndpoint,
       codeVerifier,
+      browserBinding,
     };
 
     try {
@@ -334,8 +413,18 @@ export class ABsmartlyOAuthHandler extends Hono {
     absmartlyOAuthUrl.searchParams.set('response_type', 'code');
     absmartlyOAuthUrl.searchParams.set('state', stateToken);
     absmartlyOAuthUrl.searchParams.set('code_challenge', codeChallenge);
-    absmartlyOAuthUrl.searchParams.set('code_challenge_method', 'S256');
+    absmartlyOAuthUrl.searchParams.set('code_challenge_method', REQUIRED_CODE_CHALLENGE_METHOD);
 
+    // Set only after consent was given, so /oauth/callback can require that the browser
+    // finishing the login is the one that approved it (MCP security best practices).
+    setCookie(c, `${CALLBACK_COOKIE_NAME_PREFIX}${stateToken}`, browserBinding, {
+      prefix: HOST_COOKIE_PREFIX,
+      path: '/',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Lax',
+      maxAge: OAUTH_STATE_TTL_SECONDS
+    });
     return c.redirect(absmartlyOAuthUrl.toString());
   }
 
@@ -347,28 +436,45 @@ export class ABsmartlyOAuthHandler extends Hono {
     return descriptions[scope] || scope;
   }
 
-  private async getApprovedClients(c: any): Promise<string[]> {
-    const cookie = getCookie(c, COOKIE_NAME);
-    if (!cookie) return [];
+  // Approvals are kept server-side; the cookie only carries a random session id,
+  // so a client cannot forge an approval to skip the consent screen.
+  private async getApprovals(c: OAuthContext): Promise<string[]> {
+    const sessionId = getCookie(c, APPROVALS_COOKIE_NAME, HOST_COOKIE_PREFIX);
+    if (!sessionId) return [];
+    const raw = await safeKvGet(c.env.OAUTH_KV, `${APPROVALS_KV_PREFIX}${sessionId}`);
+    if (!raw) return [];
 
     try {
-      const decoded = JSON.parse(atob(cookie));
-      return decoded.clients || [];
+      const approvals = JSON.parse(raw);
+      return Array.isArray(approvals) ? approvals : [];
     } catch (e) {
-      console.warn('Failed to parse approval cookie:', e);
+      console.warn('Failed to parse stored approvals:', e);
       return [];
     }
   }
 
-  private async addApprovedClient(c: any, clientId: string) {
-    const approvedClients = await this.getApprovedClients(c);
-    if (!approvedClients.includes(clientId)) {
-      approvedClients.push(clientId);
+  private async addApproval(c: OAuthContext, approval: string) {
+    const existingSessionId = getCookie(c, APPROVALS_COOKIE_NAME, HOST_COOKIE_PREFIX);
+    const approvals = await this.getApprovals(c);
+    if (!approvals.includes(approval)) {
+      approvals.push(approval);
+    }
+    const sessionId = existingSessionId || crypto.randomUUID();
+
+    try {
+      await c.env.OAUTH_KV.put(
+        `${APPROVALS_KV_PREFIX}${sessionId}`,
+        JSON.stringify(approvals),
+        { expirationTtl: APPROVAL_COOKIE_MAX_AGE_SECONDS }
+      );
+    } catch (e) {
+      console.warn('Failed to store client approval:', e);
+      return;
     }
 
-    const cookie = btoa(JSON.stringify({ clients: approvedClients }));
-
-    setCookie(c, COOKIE_NAME, cookie, {
+    setCookie(c, APPROVALS_COOKIE_NAME, sessionId, {
+      prefix: HOST_COOKIE_PREFIX,
+      path: '/',
       httpOnly: true,
       secure: true,
       sameSite: 'Lax',
@@ -376,8 +482,71 @@ export class ABsmartlyOAuthHandler extends Hono {
     });
   }
 
-  private renderEndpointForm(c: any, url: URL) {
-    const params = url.searchParams;
+  private async createConsentTransaction(c: OAuthContext, authRequest: AbsmartlyAuthRequest, absmartlyEndpoint: string | null): Promise<string> {
+    const transactionId = crypto.randomUUID();
+    const browserBinding = crypto.randomUUID();
+    await this.saveConsentTransaction(c, transactionId, { authRequest, absmartlyEndpoint, browserBinding });
+    setCookie(c, `${CONSENT_COOKIE_NAME_PREFIX}${transactionId}`, browserBinding, {
+      prefix: HOST_COOKIE_PREFIX,
+      path: '/',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Lax',
+      maxAge: CONSENT_TTL_SECONDS
+    });
+    return transactionId;
+  }
+
+  private async saveConsentTransaction(c: OAuthContext, transactionId: string, transaction: ConsentTransaction): Promise<void> {
+    const env = c.env;
+    await env.OAUTH_KV.put(
+      `${CONSENT_KV_PREFIX}${transactionId}`,
+      JSON.stringify(transaction),
+      { expirationTtl: CONSENT_TTL_SECONDS }
+    );
+  }
+
+  private async loadConsentTransaction(c: OAuthContext, transactionId: string): Promise<ConsentTransaction | null> {
+    if (!transactionId) return null;
+    const env = c.env;
+    const raw = await safeKvGet(env.OAUTH_KV, `${CONSENT_KV_PREFIX}${transactionId}`);
+    if (!raw) return null;
+
+    let transaction: ConsentTransaction;
+    try {
+      transaction = JSON.parse(raw);
+    } catch (e) {
+      console.warn('Failed to parse consent transaction:', e);
+      return null;
+    }
+
+    const browserBinding = getCookie(c, `${CONSENT_COOKIE_NAME_PREFIX}${transactionId}`, HOST_COOKIE_PREFIX);
+    if (!browserBinding || browserBinding !== transaction.browserBinding) {
+      debug('Consent transaction browser binding mismatch');
+      return null;
+    }
+    return transaction;
+  }
+
+  private async deleteConsentTransaction(c: OAuthContext, transactionId: string): Promise<void> {
+    const env = c.env;
+    try {
+      await env.OAUTH_KV.delete(`${CONSENT_KV_PREFIX}${transactionId}`);
+    } catch (e) {
+      console.warn('Failed to delete consent transaction (non-critical):', e);
+    }
+    deleteCookie(c, `${CONSENT_COOKIE_NAME_PREFIX}${transactionId}`, { prefix: HOST_COOKIE_PREFIX, path: '/', secure: true });
+  }
+
+  private describeRedirectTarget(redirectUri: string): string {
+    try {
+      return new URL(redirectUri).host || redirectUri;
+    } catch {
+      return redirectUri;
+    }
+  }
+
+  private renderEndpointForm(c: OAuthContext, transactionId: string) {
     const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -404,16 +573,10 @@ export class ABsmartlyOAuthHandler extends Hono {
     <p>Enter your ABsmartly instance URL to continue the authorization flow.</p>
     <form method="POST" action="/authorize" id="endpoint-form">
       <input type="hidden" name="action" value="set_endpoint">
-      <input type="hidden" name="client_id" value="${escapeHtml(params.get('client_id') || '')}">
-      <input type="hidden" name="redirect_uri" value="${escapeHtml(params.get('redirect_uri') || '')}">
-      <input type="hidden" name="state" value="${escapeHtml(params.get('state') || '')}">
-      <input type="hidden" name="scope" value="${escapeHtml(params.get('scope') || '')}">
-      <input type="hidden" name="response_type" value="${escapeHtml(params.get('response_type') || '')}">
-      <input type="hidden" name="code_challenge" value="${escapeHtml(params.get('code_challenge') || '')}">
-      <input type="hidden" name="code_challenge_method" value="${escapeHtml(params.get('code_challenge_method') || '')}">
+      <input type="hidden" name="transaction_id" value="${escapeHtml(transactionId)}">
       <label for="absmartly_endpoint">ABsmartly URL</label>
       <input type="url" id="absmartly_endpoint" name="absmartly_endpoint" placeholder="https://your-instance.absmartly.com" required>
-      <div class="hint">Example: https://demo-2.absmartly.com</div>
+      <div class="hint">Example: https://your-company.absmartly.com</div>
       <button type="submit">Continue</button>
     </form>
   </div>
@@ -435,11 +598,12 @@ export class ABsmartlyOAuthHandler extends Hono {
   </script>
 </body>
 </html>`;
-    return c.html(html);
+    return c.html(html, 200, FRAME_PROTECTION_HEADERS);
   }
 
-  private renderApprovalPage(c: any, clientInfo: any, authRequest: any, absmartlyEndpoint: string) {
+  private renderApprovalPage(c: OAuthContext, clientInfo: ClientInfo, authRequest: AbsmartlyAuthRequest, absmartlyEndpoint: string, transactionId: string) {
     const scopes = authRequest.scope || [];
+    const redirectTarget = this.describeRedirectTarget(authRequest.redirectUri);
     const scopeListHtml = scopes.map((s: string) => `<li>${escapeHtml(this.getScopeDescription(s))}</li>`).join('');
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -461,39 +625,32 @@ export class ABsmartlyOAuthHandler extends Hono {
     .approve:hover { background: #4338ca; }
     .cancel { background: #f3f4f6; color: #374151; }
     .cancel:hover { background: #e5e7eb; }
+    .warning { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 12px; color: #78350f; word-break: break-word; }
   </style>
 </head>
 <body>
   <div class="card">
     <h1>Authorize Access</h1>
     <p><span class="client-name">${escapeHtml(clientInfo.clientName || authRequest.clientId)}</span> is requesting access to your ABsmartly account.</p>
+    <p class="warning">After you approve, access to your account at <strong>${escapeHtml(absmartlyEndpoint)}</strong> will be sent to <strong>${escapeHtml(redirectTarget)}</strong>. Only continue if you started this connection yourself and you trust that site.</p>
     <p>This application will be able to:</p>
     <ul>${scopeListHtml}</ul>
     <div class="actions">
       <form method="POST" action="/authorize" style="flex:1;display:flex;">
         <input type="hidden" name="action" value="cancel">
-        <input type="hidden" name="client_id" value="${escapeHtml(authRequest.clientId)}">
-        <input type="hidden" name="redirect_uri" value="${escapeHtml(authRequest.redirectUri)}">
-        <input type="hidden" name="state" value="${escapeHtml(authRequest.state)}">
+        <input type="hidden" name="transaction_id" value="${escapeHtml(transactionId)}">
         <button type="submit" class="cancel" style="width:100%;">Deny</button>
       </form>
       <form method="POST" action="/authorize" style="flex:1;display:flex;">
         <input type="hidden" name="action" value="approve">
-        <input type="hidden" name="client_id" value="${escapeHtml(authRequest.clientId)}">
-        <input type="hidden" name="redirect_uri" value="${escapeHtml(authRequest.redirectUri)}">
-        <input type="hidden" name="state" value="${escapeHtml(authRequest.state)}">
-        <input type="hidden" name="scope" value="${escapeHtml(scopes.join(' '))}">
-        <input type="hidden" name="response_type" value="${escapeHtml(authRequest.responseType)}">
-        <input type="hidden" name="code_challenge" value="${escapeHtml(authRequest.codeChallenge || '')}">
-        <input type="hidden" name="code_challenge_method" value="${escapeHtml(authRequest.codeChallengeMethod || '')}">
-        <input type="hidden" name="absmartly_endpoint" value="${escapeHtml(absmartlyEndpoint)}">
+        <input type="hidden" name="transaction_id" value="${escapeHtml(transactionId)}">
         <button type="submit" class="approve" style="width:100%;">Approve</button>
       </form>
     </div>
   </div>
 </body>
 </html>`;
-    return c.html(html);
+    return c.html(html, 200, FRAME_PROTECTION_HEADERS);
   }
 
 }

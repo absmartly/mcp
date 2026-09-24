@@ -4,6 +4,27 @@ export const DEFAULT_API_KEY_USER_EMAIL = "api-key-user";
 export const DEFAULT_API_KEY_USER_NAME = "API Key User";
 export const DEFAULT_ABSMARTLY_DOMAIN = "absmartly.com";
 export const CLAUDE_AUTH_CALLBACK_URI = "https://claude.ai/api/mcp/auth_callback";
+export const REQUIRED_CODE_CHALLENGE_METHOD = "S256";
+
+const ALLOWED_REDIRECT_HTTPS_CALLBACKS = [
+  "https://claude.ai/api/mcp/auth_callback",
+  "https://chatgpt.com/connector_platform_oauth_redirect",
+  "https://chatgpt.com/connector/oauth/",
+  "https://playground.ai.cloudflare.com/oauth/callback",
+  "https://vscode.dev/redirect",
+  "https://insiders.vscode.dev/redirect",
+  "https://www.cursor.com/agents/mcp/oauth/callback",
+  "https://integrations.productboard.com/oauth2/callback",
+];
+const ALLOWED_REDIRECT_LOOPBACK_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
+const ALLOWED_REDIRECT_CUSTOM_SCHEMES = ["cursor:", "claude:"];
+const MAX_REGISTRATION_BODY_BYTES = 1024 * 1024;
+const MAX_LOGGED_REDIRECT_URI_LENGTH = 200;
+export const INVALID_REDIRECT_URI_ERROR = "invalid_redirect_uri";
+export const INVALID_REDIRECT_URI_MESSAGE = "Invalid redirect URI";
+const REDIRECT_URI_NOT_ALLOWED_DESCRIPTION = "One or more redirect_uris are not allowed";
+const REGISTRATION_TOO_LARGE_ERROR = "invalid_request";
+const REGISTRATION_TOO_LARGE_DESCRIPTION = "Request payload too large, must be under 1 MiB";
 
 export const API_KEY_SESSION_TTL_SECONDS = 300;
 export const SESSION_TTL_SECONDS = 86400;
@@ -55,6 +76,114 @@ export function extractEndpointFromPath(pathname: string, prefix: string | reado
     return `https://${host}`;
   }
   return null;
+}
+
+export function isAllowedRedirectUri(redirectUri: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(redirectUri);
+  } catch {
+    return false;
+  }
+  if (parsed.hash || parsed.username || parsed.password) return false;
+  if (parsed.protocol === "https:") {
+    const callback = `${parsed.origin}${parsed.pathname}`;
+    return ALLOWED_REDIRECT_HTTPS_CALLBACKS.some((allowed) =>
+      allowed.endsWith("/") ? callback.startsWith(allowed) && callback.length > allowed.length : callback === allowed
+    );
+  }
+  if (parsed.protocol === "http:") return ALLOWED_REDIRECT_LOOPBACK_HOSTS.includes(parsed.hostname);
+  return ALLOWED_REDIRECT_CUSTOM_SCHEMES.includes(parsed.protocol);
+}
+
+function registrationErrorResponse(error: string, description: string, status: number): Response {
+  return new Response(JSON.stringify({ error, error_description: description }), {
+    status,
+    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+  });
+}
+
+async function readBodyWithinLimit(request: Request, maxBytes: number): Promise<string | null> {
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    totalBytes += value.byteLength;
+    if (totalBytes > maxBytes) {
+      reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+export async function rejectDisallowedRedirectUris(request: Request): Promise<Response | null> {
+  const tooLarge = registrationErrorResponse(REGISTRATION_TOO_LARGE_ERROR, REGISTRATION_TOO_LARGE_DESCRIPTION, 413);
+  if (Number(request.headers.get("Content-Length") || 0) > MAX_REGISTRATION_BODY_BYTES) return tooLarge;
+  const text = await readBodyWithinLimit(request.clone(), MAX_REGISTRATION_BODY_BYTES);
+  if (text === null) return tooLarge;
+
+  let body: { redirect_uris?: unknown };
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  const redirectUris = body?.redirect_uris;
+  if (!Array.isArray(redirectUris)) return null;
+  const disallowed = redirectUris.find((uri) => typeof uri !== "string" || !isAllowedRedirectUri(uri));
+  if (disallowed === undefined) return null;
+  console.warn("Rejected client registration redirect URI:", String(disallowed).slice(0, MAX_LOGGED_REDIRECT_URI_LENGTH));
+  return registrationErrorResponse(INVALID_REDIRECT_URI_ERROR, REDIRECT_URI_NOT_ALLOWED_DESCRIPTION, 400);
+}
+
+const OAUTH_AUTHORIZATION_SERVER_METADATA_PATH = "/.well-known/oauth-authorization-server";
+const OAUTH_PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource";
+export const API_KEY_SESSION_KV_PREFIX = "api_key_session:";
+const OAUTH_NOT_AVAILABLE_ERROR = "oauth_not_available";
+const OAUTH_NOT_AVAILABLE_DESCRIPTION = "OAuth not available when using API key authentication";
+
+function isOAuthDiscoveryPath(pathname: string): boolean {
+  return [OAUTH_AUTHORIZATION_SERVER_METADATA_PATH, OAUTH_PROTECTED_RESOURCE_METADATA_PATH]
+    .some((path) => pathname === path || pathname.startsWith(`${path}/`));
+}
+
+export async function handleOAuthDiscovery(
+  request: Request,
+  kv: KVNamespace | undefined,
+  clientFingerprint: string,
+  requestHasApiKey: boolean,
+  fetchProviderResponse: () => Promise<Response>
+): Promise<Response | null> {
+  const url = new URL(request.url);
+  if (!isOAuthDiscoveryPath(url.pathname)) return null;
+
+  if (requestHasApiKey || await safeKvGet(kv, `${API_KEY_SESSION_KV_PREFIX}${clientFingerprint}`)) {
+    return new Response(JSON.stringify({
+      error: OAUTH_NOT_AVAILABLE_ERROR,
+      error_description: OAUTH_NOT_AVAILABLE_DESCRIPTION,
+    }), { status: 404 });
+  }
+
+  if (url.pathname !== OAUTH_AUTHORIZATION_SERVER_METADATA_PATH || request.method !== "GET") return null;
+  const response = await fetchProviderResponse();
+  if (!response.ok) return response;
+  const metadata = await response.json() as Record<string, unknown>;
+  metadata.code_challenge_methods_supported = [REQUIRED_CODE_CHALLENGE_METHOD];
+  return new Response(JSON.stringify(metadata), {
+    status: response.status,
+    headers: response.headers,
+  });
 }
 
 export function pickDefined(source: Record<string, unknown>, keys: string[]): Record<string, unknown> {
