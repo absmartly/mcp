@@ -124,6 +124,17 @@ export default async function run() {
     assert.ok(!/destructive action/i.test(text), `non-dangerous command must not mention destructive-action gating, got: ${text}`);
   });
 
+  await asyncTest('no elicitConfirmation hook wired fails closed without executing the command', async () => {
+    const client = makeApiClient();
+    const { handler } = getExecuteHandler(client, undefined);
+    const res = await handler(STOP_PARAMS);
+    const text = res.content[0].text as string;
+    assert.ok(/ask the user|confirm with the user|get (the )?user('s)? confirmation/i.test(text),
+      `message must instruct the AI to get user confirmation first, got: ${text}`);
+    assert.ok(text.includes('confirmed: true'), `message must still mention the confirmed:true retry mechanics, got: ${text}`);
+    assert.strictEqual(client._stopCalls, 0, 'stopExperiment must NOT have been called when no elicitConfirmation hook is wired up');
+  });
+
   await asyncTest('local-server.ts wires elicitConfirmation into ToolContext using mcpServer.server.elicitInput', async () => {
     const fs = await import('node:fs/promises');
     const source = await fs.readFile(new URL('../../src/local-server.ts', import.meta.url), 'utf-8');

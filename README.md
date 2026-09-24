@@ -557,13 +557,13 @@ Execute any ABsmartly command. Common commands are listed in the tool descriptio
 - `group` (required) — command group (e.g. `experiments`, `metrics`, `goals`)
 - `command` (required) — command name (e.g. `listExperiments`, `createExperimentFromTemplate`)
 - `params` (optional) — command parameters as JSON object
-- `confirmed` (optional) — set to `true` to confirm destructive actions
+- `confirmed` (optional) — set to `true` only after the user has explicitly confirmed the action; never set it on your own initiative
 - `raw` (optional) — return full CommandResult with rows/detail/warnings/pagination
 - `limit` (optional) — max items for list operations (default: 20)
 
-**Destructive actions** (start, stop, archive, delete) require confirmation. The server returns a confirmation prompt; call again with `confirmed: true` to proceed.
+**Destructive actions** (start, stop, archive, delete) require confirmation. The server returns a confirmation prompt; only after the user has explicitly confirmed should you call again with `confirmed: true` to proceed.
 
-**Experiment creation from templates** also requires confirmation. The first call to `createExperimentFromTemplate` returns a *preview* — the resolved API payload (with names mapped to IDs) plus any warnings — without creating the experiment. Show the preview to the user, then call again with `confirmed: true` to actually create.
+**Experiment creation from templates** also requires confirmation. The first call to `createExperimentFromTemplate` returns a *preview* — the resolved API payload (with names mapped to IDs) plus any warnings — without creating the experiment. Show the preview to the user, and only after they have explicitly confirmed should you call again with `confirmed: true` to actually create.
 
 ### Creating Experiments with Templates
 

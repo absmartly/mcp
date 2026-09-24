@@ -241,7 +241,7 @@ To create experiments, use group "experiments", command "createExperimentFromTem
       group: z.string().describe("Command group (e.g. 'experiments', 'metrics'). Use discover_commands to find available groups."),
       command: z.string().describe("Command name within the group (e.g. 'listExperiments', 'cloneExperiment')"),
       params: z.record(z.unknown()).optional().describe("Command parameters as a JSON object. Keys match the parameter names from command docs."),
-      confirmed: z.boolean().optional().describe("Set to true to confirm a destructive action (start, stop, archive, delete) OR to confirm createExperimentFromTemplate after the user has reviewed the preview. Without confirmed=true, destructive commands return a confirmation prompt and createExperimentFromTemplate returns a resolved-payload preview."),
+      confirmed: z.boolean().optional().describe("Only set to true after the user has explicitly confirmed this specific action (start, stop, archive, delete) — or, for createExperimentFromTemplate, after the user has reviewed the resolved-payload preview. Do not set this on your own initiative. Without confirmed=true, destructive commands return a confirmation prompt and createExperimentFromTemplate returns a preview instead of creating anything."),
       raw: z.boolean().optional().describe("Return the raw CommandResult instead of just .data (includes .rows, .detail, .warnings, .pagination)"),
       limit: z.number().optional().describe("Max items for list operations (default: 20). Sets 'items' in params if not already set."),
     },
@@ -275,6 +275,13 @@ To create experiments, use group "experiments", command "createExperimentFromTem
 
       // Confirm destructive actions
       if (entry.dangerous && !params.confirmed) {
+        // Shared fallback: tells the AI to get real user confirmation before
+        // retrying with confirmed: true. Used both when elicitation is
+        // unsupported by the client AND when no elicitConfirmation hook is
+        // wired up at all — in both cases we must NOT fall through and
+        // execute the dangerous command unconfirmed.
+        const ASK_USER_FALLBACK_MESSAGE = `This is a destructive action: ${entry.description}. Ask the user to confirm before proceeding. Only if the user explicitly confirms, call execute_command again with the exact same group, command, and params, plus confirmed: true.`;
+
         // Try MCP elicitation first (works in interactive clients like Claude Desktop)
         if (ctx.elicitConfirmation) {
           try {
@@ -289,12 +296,7 @@ To create experiments, use group "experiments", command "createExperimentFromTem
             const msg = elicitError?.message || String(elicitError);
             // Only treat "not supported" / "method not found" as expected (e.g. claude -p)
             if (msg.includes('not supported') || msg.includes('Method not found') || msg.includes('elicit')) {
-              return {
-                content: [{
-                  type: "text" as const,
-                  text: `This is a destructive action: ${entry.description}. Ask the user to confirm before proceeding. Only if the user explicitly confirms, call execute_command again with the exact same group, command, and params, plus confirmed: true.`
-                }]
-              };
+              return { content: [{ type: "text" as const, text: ASK_USER_FALLBACK_MESSAGE }] };
             }
             // Unexpected error — do NOT auto-confirm
             ctx.log?.('error', `Elicitation failed unexpectedly: ${msg}`);
@@ -305,6 +307,11 @@ To create experiments, use group "experiments", command "createExperimentFromTem
               }]
             };
           }
+        } else {
+          // No elicitation hook wired up (e.g. an HTTP transport, a future
+          // entry point, or a test harness that forgot to set it). Fail
+          // closed instead of falling through and executing unconfirmed.
+          return { content: [{ type: "text" as const, text: ASK_USER_FALLBACK_MESSAGE }] };
         }
       }
 
