@@ -56,7 +56,7 @@ export default async function runTests() {
     const handler = getExecuteHandler(client);
     const res = await handler({ group: 'goals', command: 'getGoal', params: {} });
     const text = res.content[0].text as string;
-    assert(text.includes('id'), 'error mentions the missing required param name', text.slice(0, 300));
+    assert(text.includes('"goalId"'), 'error mentions the specific missing required param name (goalId)', text.slice(0, 300));
     assert(!text.includes('## Usage with execute_command'), 'missing-required-param error also skips the full doc');
   }
 
@@ -67,7 +67,7 @@ export default async function runTests() {
     const res = await handler({ group: 'permissions', command: 'listPermissions', params: { bogus: true } });
     const text = res.content[0].text as string;
     assert(text.includes('bogus'), 'error for a zero-param command still names the bad param', text.slice(0, 300));
-    assert(/no parameters|\(none\)|takes no params/i.test(text), 'error for a zero-param command says so plainly', text.slice(0, 300));
+    assert(text.includes('takes no parameters'), 'error for a zero-param command uses formatParamSummary\'s exact phrase', text.slice(0, 500));
   }
 
   return {
