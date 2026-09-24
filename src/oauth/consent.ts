@@ -61,7 +61,7 @@ export interface OAuthStateStore {
   delete(key: string): Promise<void>;
 }
 
-export type ConsentOptions = CookieOptions & {
+export type ConsentOptions<Req extends AuthorizationRequest = AuthorizationRequest> = CookieOptions & {
   store: OAuthStateStore;
   // Path the consent and endpoint forms post to.
   formAction: string;
@@ -70,6 +70,10 @@ export type ConsentOptions = CookieOptions & {
   requireEndpoint?: boolean;
   // Remember approvals per browser so a returning client skips the consent page.
   rememberApprovals?: boolean;
+  // Runs on approve, before the transaction is discarded, so the host can do its own
+  // work (e.g. persist the endpoint) while still able to fail back to a retryable state.
+  // If it throws, the transaction and its binding cookie are kept so the client can retry.
+  onApprove?: (authRequest: Req, endpoint: string | null) => Promise<void>;
 };
 
 export type ConsentOutcome<Req extends AuthorizationRequest = AuthorizationRequest> =
@@ -282,6 +286,17 @@ export async function submitConsent<Req extends AuthorizationRequest>(
 
   const endpoint = transaction.absmartlyEndpoint;
   if (options.requireEndpoint && !endpoint) return respond(textResult(HTTP_STATUS_BAD_REQUEST, MESSAGE_ENDPOINT_REQUIRED));
+
+  if (options.onApprove) {
+    try {
+      await options.onApprove(authRequest, endpoint);
+    } catch (e) {
+      // Keep the transaction and its binding cookie so the client can retry the same
+      // approval instead of restarting consent from scratch.
+      console.error("onApprove failed, keeping the consent transaction for retry:", e);
+      return respond(textResult(HTTP_STATUS_SERVICE_UNAVAILABLE, MESSAGE_SERVICE_UNAVAILABLE));
+    }
+  }
 
   const setCookies = await discardTransaction(transactionId, options);
   if (options.rememberApprovals && endpoint) setCookies.push(...await rememberApproval(cookieHeader, approvalKey(authRequest.clientId, endpoint), options));

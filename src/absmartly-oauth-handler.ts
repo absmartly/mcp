@@ -13,9 +13,7 @@ import {
   beginAuthorization,
   generatePkcePair,
   submitConsent,
-  textResult,
   toFetchResponse,
-  MESSAGE_SERVICE_UNAVAILABLE,
   type ConsentOptions,
   type ConsentOutcome,
   type OAuthStateStore,
@@ -31,7 +29,6 @@ const HOST_COOKIE_PREFIX = 'host';
 // same browser don't overwrite each other's binding.
 const CALLBACK_COOKIE_NAME_PREFIX = 'absmartly-oauth-cb-';
 const HTTP_STATUS_BAD_REQUEST = 400;
-const HTTP_STATUS_SERVICE_UNAVAILABLE = 503;
 const ENDPOINT_QUERY_PARAM = 'absmartly-endpoint';
 const ENDPOINT_HEADER = 'x-absmartly-endpoint';
 
@@ -58,29 +55,28 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
     return null;
   }
 
-  private consentOptions(c: OAuthContext): ConsentOptions {
+  private consentOptions(c: OAuthContext): ConsentOptions<AbsmartlyAuthRequest> {
     return {
       store: kvStateStore(c.env.OAUTH_KV),
       formAction: AUTHORIZE_PATH,
       lookupClient: (clientId) => c.env.OAUTH_PROVIDER.lookupClient(clientId),
       requireEndpoint: true,
       rememberApprovals: true,
+      // Runs before the transaction is discarded, so a failed write leaves the
+      // transaction (and its binding cookie) in place for the client to retry.
+      onApprove: async (authRequest, endpoint) => {
+        await c.env.OAUTH_KV.put(
+          `oauth_endpoint:client:${authRequest.clientId}`,
+          endpoint as string,
+          { expirationTtl: OAUTH_STATE_TTL_SECONDS }
+        );
+      },
     };
   }
 
   private async finishConsent(c: OAuthContext, outcome: ConsentOutcome<AbsmartlyAuthRequest>): Promise<Response> {
     if (outcome.type === 'respond') return toFetchResponse(outcome.response);
     const endpoint = outcome.endpoint as string;
-    try {
-      await c.env.OAUTH_KV.put(
-        `oauth_endpoint:client:${outcome.authRequest.clientId}`,
-        endpoint,
-        { expirationTtl: OAUTH_STATE_TTL_SECONDS }
-      );
-    } catch (e) {
-      console.error('Failed to store OAuth endpoint:', e);
-      return toFetchResponse(textResult(HTTP_STATUS_SERVICE_UNAVAILABLE, MESSAGE_SERVICE_UNAVAILABLE));
-    }
     const response = await this.redirectToAbsmartlyOAuth(c, outcome.authRequest, endpoint);
     for (const cookie of outcome.setCookies) response.headers.append('Set-Cookie', cookie);
     return response;

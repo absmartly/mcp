@@ -167,6 +167,32 @@ export default async function run() {
     assert.strictEqual(beginAAgain.type, 'approved', 'the originally approved endpoint must still skip consent');
   });
 
+  await asyncTest('onApprove failing keeps the transaction so approve can be retried', async () => {
+    const store = memoryStore();
+    const { transactionId, cookie } = await start(store);
+    let failNext = true;
+    const seen: Array<string | null> = [];
+    const extra: Partial<ConsentOptions> = {
+      onApprove: async (_authRequest, endpoint) => {
+        seen.push(endpoint);
+        if (failNext) {
+          failNext = false;
+          throw new Error('endpoint write failed');
+        }
+      },
+    };
+
+    const failed = await submitConsent({ form: { action: 'approve', transactionId }, cookieHeader: cookie }, options(store, extra));
+    assert.strictEqual(failed.type, 'respond');
+    if (failed.type === 'respond') assert.strictEqual(failed.response.status, 503);
+    // The transaction must still be there for a retry.
+    assert.ok(store.data.has(`oauth:consent:${transactionId}`), 'transaction must survive a failed onApprove');
+
+    const retry = await submitConsent({ form: { action: 'approve', transactionId }, cookieHeader: cookie }, options(store, extra));
+    assert.strictEqual(retry.type, 'approved');
+    assert.strictEqual(seen.length, 2, 'onApprove must be called again on retry');
+  });
+
   return {
     success: failed === 0,
     message: `${passed} passed, ${failed} failed`,
