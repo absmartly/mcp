@@ -185,5 +185,76 @@ export default async function run() {
         }
     });
 
+    await test('get_command_docs for an entity-independent command makes no entity fetches', async () => {
+        const counter = { calls: 0 };
+        await withTestServer(async (baseUrl) => {
+            const text = await postJson(baseUrl, {
+                jsonrpc: '2.0', id: 6, method: 'tools/call',
+                params: { name: 'get_command_docs', arguments: { group: 'experiments', command: 'listExperiments' } },
+            });
+            assert.ok(text.includes('experiments.listExperiments'), `expected docs for listExperiments, got: ${text}`);
+        }, counter);
+        assert.strictEqual(counter.calls, 0);
+    });
+
+    await test('execute_command with invalid params for a non-entity-dependent command makes no entity fetches', async () => {
+        const counter = { calls: 0 };
+        await withTestServer(async (baseUrl) => {
+            const text = await postJson(baseUrl, {
+                jsonrpc: '2.0', id: 7, method: 'tools/call',
+                // getExperiment requires experimentId; omitting it triggers the
+                // param-validation-failure path, which also builds command docs.
+                params: { name: 'execute_command', arguments: { group: 'experiments', command: 'getExperiment', params: {} } },
+            });
+            assert.ok(text.includes('Param validation failed'), `expected a validation error, got: ${text}`);
+        }, counter);
+        assert.strictEqual(counter.calls, 0);
+    });
+
+    await test('get_command_docs for createExperiment still fetches entities and includes custom fields', async () => {
+        const counter = { calls: 0 };
+        const mcpHandler = createStreamableHttpHandler(async () => ({
+            apiClient: {
+                getCurrentUser: async () => { counter.calls++; return { id: 1 }; },
+                listCustomSectionFields: async () => { counter.calls++; return [{ name: 'priority', type: 'string', default_value: 'low', custom_section: { type: 'experiment' } }]; },
+                listUsers: async () => { counter.calls++; return []; },
+                listTeams: async () => { counter.calls++; return []; },
+                listApplications: async () => { counter.calls++; return []; },
+                listUnitTypes: async () => { counter.calls++; return []; },
+                listExperimentTags: async () => { counter.calls++; return []; },
+                listMetrics: async () => { counter.calls++; return []; },
+                listGoals: async () => { counter.calls++; return []; },
+            } as any,
+            endpoint: 'https://demo.absmartly.com',
+            authType: 'API Key',
+        }));
+
+        const server = http.createServer((req, res) => {
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', () => {
+                const parsed = body ? JSON.parse(body) : undefined;
+                mcpHandler.post(req, res, parsed).catch(err => {
+                    res.writeHead(500).end(JSON.stringify({ error: String(err) }));
+                });
+            });
+        });
+
+        await new Promise<void>(resolve => server.listen(0, resolve));
+        const address = server.address();
+        const port = typeof address === 'object' && address ? address.port : 0;
+        try {
+            const text = await postJson(`http://127.0.0.1:${port}`, {
+                jsonrpc: '2.0', id: 8, method: 'tools/call',
+                params: { name: 'get_command_docs', arguments: { group: 'experiments', command: 'createExperiment' } },
+            });
+            assert.ok(text.includes('Available Custom Fields'), `expected custom fields section, got: ${text}`);
+            assert.ok(text.includes('priority'), `expected the priority custom field, got: ${text}`);
+        } finally {
+            await new Promise<void>(resolve => server.close(() => resolve()));
+        }
+        assert.strictEqual(counter.calls, ENTITY_FETCH_CALLS);
+    });
+
     return { success: failed === 0, message: `${passed} passed, ${failed} failed`, testCount: passed + failed, details };
 }
