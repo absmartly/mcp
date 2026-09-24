@@ -271,6 +271,23 @@ async function main() {
         entityWarnings,
         customFields,
         currentUserId,
+        elicitConfirmation: async (message: string) => {
+            const result = await mcpServer.server.elicitInput({
+                message,
+                requestedSchema: {
+                    type: "object" as const,
+                    properties: {
+                        confirm: {
+                            type: "string",
+                            title: "Confirm",
+                            description: "Type 'yes' to confirm this destructive action",
+                        }
+                    },
+                    required: ["confirm"]
+                }
+            });
+            return result.action === 'accept' && result.content?.confirm === 'yes';
+        },
     };
     setupTools(mcpServer, toolCtx);
 
