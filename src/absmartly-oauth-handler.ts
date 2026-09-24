@@ -202,7 +202,6 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
       if (!absmartlyEndpoint) {
         return c.text('ABsmartly endpoint is required', 400);
       }
-      await this.deleteConsentTransaction(c, transactionId);
 
       if (env.OAUTH_KV) {
         try {
@@ -218,6 +217,7 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
       }
 
       await this.addApproval(c, approvalKey(authRequest.clientId, absmartlyEndpoint));
+      await this.deleteConsentTransaction(c, transactionId);
       return this.redirectToAbsmartlyOAuth(c, authRequest, absmartlyEndpoint);
     });
 

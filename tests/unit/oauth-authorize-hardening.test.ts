@@ -165,6 +165,25 @@ export default async function run() {
     assert.strictEqual(replay.status, 400);
   });
 
+  await asyncTest('approve can be retried after a failed endpoint write', async () => {
+    const handler = new ABsmartlyOAuthHandler();
+    const env = makeEnv(validAuthRequest());
+    const { transactionId, cookie } = await startConsent(handler, env);
+    const kvPut = env.OAUTH_KV.put.bind(env.OAUTH_KV);
+    let failNextEndpointWrite = true;
+    env.OAUTH_KV.put = async (key: string, value: string, opts?: any) => {
+      if (failNextEndpointWrite && key.startsWith('oauth_endpoint:client:')) {
+        failNextEndpointWrite = false;
+        throw new Error('KV write failed');
+      }
+      return kvPut(key, value, opts);
+    };
+    const failed = await postAuthorize(handler, env, { action: 'approve', transaction_id: transactionId! }, cookie);
+    assert.strictEqual(failed.status, 503);
+    const retry = await postAuthorize(handler, env, { action: 'approve', transaction_id: transactionId! }, cookie);
+    assert.strictEqual(retry.status, 302);
+  });
+
   await asyncTest('cancel redirects only to the stored, registered redirect_uri', async () => {
     const handler = new ABsmartlyOAuthHandler();
     const env = makeEnv(validAuthRequest());
