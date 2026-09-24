@@ -42,7 +42,7 @@ export default async function runTests() {
   {
     const huge = 'x'.repeat(MAX_RESPONSE_CHARS * 10);
     const result = truncateResponseText(huge, 'statistics', 'getPowerMatrix');
-    assert(result.length <= MAX_RESPONSE_CHARS + 500, 'truncated output stays close to the cap even for huge input', `got length ${result.length}`);
+    assert(result.length <= MAX_RESPONSE_CHARS, 'truncated output never exceeds the cap even for huge input', `got length ${result.length}`);
   }
 
   // The truncation notice suggests concrete next steps.
@@ -93,7 +93,7 @@ export default async function runTests() {
 
     const res = await handler({ group: 'apps', command: 'listApps', params: {} });
     const text = res.content[0].text as string;
-    assert(text.length <= MAX_RESPONSE_CHARS + 500, 'execute_command truncates a huge listApps response', `got length ${text.length}`);
+    assert(text.length <= MAX_RESPONSE_CHARS, 'execute_command truncates a huge listApps response', `got length ${text.length}`);
     assert(text.includes('truncated'), 'execute_command response includes the truncation notice for a huge result');
   }
 

@@ -579,7 +579,10 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
       // Custom fields (experiment-level)
       listCustomFields: {
         description: 'List custom fields for experiments',
-        params: [],
+        params: [
+          { name: 'items', type: 'number', required: false, description: 'Results per page' },
+          { name: 'page', type: 'number', required: false, description: 'Page number' },
+        ],
         returns: 'Array of custom field definitions',
       },
       getCustomField: {
@@ -832,7 +835,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
       updateUser: { description: 'Update a user', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated user' },
       archiveUser: { description: 'Archive a user', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }], returns: 'Archive result', dangerous: true },
       resetUserPassword: { description: 'Reset a user password', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }], returns: 'Reset result', dangerous: true },
-      listUserApiKeys: { description: 'List API keys for a user', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }], returns: 'Array of API keys' },
+      listUserApiKeys: { description: 'List API keys for a user', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }, { name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of API keys' },
       createUserApiKey: { description: 'Create an API key for a user', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }, { name: 'data', type: 'object', required: false, description: 'Key data' }], returns: 'Created API key' },
       deleteUserApiKey: { description: 'Delete a user API key', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }, { name: 'keyId', type: 'number', required: true, description: 'API key ID' }], returns: 'Deletion result', dangerous: true },
     },
@@ -841,7 +844,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   apps: {
     description: 'Application management',
     commands: {
-      listApps: { description: 'List applications', params: [], returns: 'Array of applications' },
+      listApps: { description: 'List applications', params: [{ name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of applications' },
       getApp: { description: 'Get application details', params: [{ name: 'appId', type: 'number', required: true, description: 'Application ID' }], returns: 'Application details' },
       createApp: { description: 'Create an application', params: [{ name: 'data', type: 'object', required: true, description: 'App data: { name }' }], returns: 'Created application' },
       updateApp: { description: 'Update an application', params: [{ name: 'appId', type: 'number', required: true, description: 'Application ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated application' },
@@ -852,7 +855,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   envs: {
     description: 'Environment management',
     commands: {
-      listEnvs: { description: 'List environments', params: [], returns: 'Array of environments' },
+      listEnvs: { description: 'List environments', params: [{ name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of environments' },
       getEnv: { description: 'Get environment details', params: [{ name: 'envId', type: 'number', required: true, description: 'Environment ID' }], returns: 'Environment details' },
       createEnv: { description: 'Create an environment', params: [{ name: 'data', type: 'object', required: true, description: 'Environment data' }], returns: 'Created environment' },
       updateEnv: { description: 'Update an environment', params: [{ name: 'envId', type: 'number', required: true, description: 'Environment ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated environment' },
@@ -863,7 +866,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   units: {
     description: 'Unit type management',
     commands: {
-      listUnits: { description: 'List unit types', params: [], returns: 'Array of unit types' },
+      listUnits: { description: 'List unit types', params: [{ name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of unit types' },
       getUnit: { description: 'Get unit type details', params: [{ name: 'unitId', type: 'number', required: true, description: 'Unit type ID' }], returns: 'Unit type details' },
       createUnit: { description: 'Create a unit type', params: [{ name: 'data', type: 'object', required: true, description: 'Unit type data' }], returns: 'Created unit type' },
       updateUnit: { description: 'Update a unit type', params: [{ name: 'unitId', type: 'number', required: true, description: 'Unit type ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated unit type' },
@@ -874,7 +877,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   tags: {
     description: 'Experiment tag management',
     commands: {
-      listTags: { description: 'List experiment tags', params: [], returns: 'Array of tags' },
+      listTags: { description: 'List experiment tags', params: [{ name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of tags' },
       getTag: { description: 'Get tag details', params: [{ name: 'tagId', type: 'number', required: true, description: 'Tag ID' }], returns: 'Tag details' },
       createTag: { description: 'Create a tag', params: [{ name: 'data', type: 'object', required: true, description: 'Tag data: { name }' }], returns: 'Created tag' },
       updateTag: { description: 'Update a tag', params: [{ name: 'tagId', type: 'number', required: true, description: 'Tag ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated tag' },
@@ -885,7 +888,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   goaltags: {
     description: 'Goal tag management',
     commands: {
-      listGoalTags: { description: 'List goal tags', params: [], returns: 'Array of goal tags' },
+      listGoalTags: { description: 'List goal tags', params: [{ name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of goal tags' },
       getGoalTag: { description: 'Get goal tag details', params: [{ name: 'tagId', type: 'number', required: true, description: 'Tag ID' }], returns: 'Goal tag details' },
       createGoalTag: { description: 'Create a goal tag', params: [{ name: 'data', type: 'object', required: true, description: 'Tag data' }], returns: 'Created goal tag' },
       updateGoalTag: { description: 'Update a goal tag', params: [{ name: 'tagId', type: 'number', required: true, description: 'Tag ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated goal tag' },
@@ -896,7 +899,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   metrictags: {
     description: 'Metric tag management',
     commands: {
-      listMetricTags: { description: 'List metric tags', params: [], returns: 'Array of metric tags' },
+      listMetricTags: { description: 'List metric tags', params: [{ name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of metric tags' },
       getMetricTag: { description: 'Get metric tag details', params: [{ name: 'tagId', type: 'number', required: true, description: 'Tag ID' }], returns: 'Metric tag details' },
       createMetricTag: { description: 'Create a metric tag', params: [{ name: 'data', type: 'object', required: true, description: 'Tag data' }], returns: 'Created metric tag' },
       updateMetricTag: { description: 'Update a metric tag', params: [{ name: 'tagId', type: 'number', required: true, description: 'Tag ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated metric tag' },
@@ -907,7 +910,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   metriccategories: {
     description: 'Metric category management',
     commands: {
-      listMetricCategories: { description: 'List metric categories', params: [], returns: 'Array of metric categories' },
+      listMetricCategories: { description: 'List metric categories', params: [{ name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of metric categories' },
       getMetricCategory: { description: 'Get metric category details', params: [{ name: 'categoryId', type: 'number', required: true, description: 'Category ID' }], returns: 'Category details' },
       createMetricCategory: { description: 'Create a metric category', params: [{ name: 'data', type: 'object', required: true, description: 'Category data' }], returns: 'Created category' },
       updateMetricCategory: { description: 'Update a metric category', params: [{ name: 'categoryId', type: 'number', required: true, description: 'Category ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated category' },
@@ -931,7 +934,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   apikeys: {
     description: 'Platform API key management (admin)',
     commands: {
-      listApiKeys: { description: 'List all API keys', params: [], returns: 'Array of API keys' },
+      listApiKeys: { description: 'List all API keys', params: [{ name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of API keys' },
       getApiKey: { description: 'Get API key details', params: [{ name: 'keyId', type: 'number', required: true, description: 'API key ID' }], returns: 'API key details' },
       createApiKey: { description: 'Create an API key', params: [{ name: 'data', type: 'object', required: true, description: 'Key data' }], returns: 'Created API key' },
       updateApiKey: { description: 'Update an API key', params: [{ name: 'keyId', type: 'number', required: true, description: 'API key ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated API key' },
@@ -942,7 +945,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   webhooks: {
     description: 'Webhook management',
     commands: {
-      listWebhooks: { description: 'List webhooks', params: [], returns: 'Array of webhooks' },
+      listWebhooks: { description: 'List webhooks', params: [{ name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of webhooks' },
       getWebhook: { description: 'Get webhook details', params: [{ name: 'webhookId', type: 'number', required: true, description: 'Webhook ID' }], returns: 'Webhook details' },
       createWebhook: { description: 'Create a webhook', params: [{ name: 'data', type: 'object', required: true, description: 'Webhook data: { url, events, ... }' }], returns: 'Created webhook' },
       updateWebhook: { description: 'Update a webhook', params: [{ name: 'webhookId', type: 'number', required: true, description: 'Webhook ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated webhook' },
@@ -954,7 +957,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   roles: {
     description: 'Role management',
     commands: {
-      listRoles: { description: 'List roles', params: [], returns: 'Array of roles' },
+      listRoles: { description: 'List roles', params: [{ name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of roles' },
       getRole: { description: 'Get role details', params: [{ name: 'roleId', type: 'number', required: true, description: 'Role ID' }], returns: 'Role details' },
       createRole: { description: 'Create a role', params: [{ name: 'data', type: 'object', required: true, description: 'Role data' }], returns: 'Created role' },
       updateRole: { description: 'Update a role', params: [{ name: 'roleId', type: 'number', required: true, description: 'Role ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated role' },

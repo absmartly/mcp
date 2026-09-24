@@ -55,6 +55,26 @@ function formatCommandList(entries: CommandEntry[]): string {
   return rendered + `\n\n---\n\n(${remaining} more matching commands not shown: ${names}. Narrow your \`group\`/\`search\`, or use get_command_docs for a specific command's full details.)`;
 }
 
+// Applies default items/page pagination to commandParams, but only when the
+// command's catalog entry actually declares an `items`/`page` param. Commands
+// with no declared pagination params (empty params: []) or a single catch-all
+// `params` object (e.g. listEvents, listActivity) would otherwise get an
+// unsupported/inert key silently attached to commandParams.
+export function applyDefaultPagination(
+  entry: CommandEntry,
+  commandParams: Record<string, unknown>,
+  limit: number | undefined,
+): void {
+  const itemsLimit = limit ?? DEFAULT_LIST_ITEMS;
+  const declaredParamNames = new Set(entry.params.map((p) => p.name));
+  if (declaredParamNames.has('items') && commandParams.items === undefined) {
+    commandParams.items = itemsLimit;
+  }
+  if (declaredParamNames.has('page') && commandParams.page === undefined) {
+    commandParams.page = 1;
+  }
+}
+
 export function autoPopulateCustomFields(
   data: Record<string, unknown>,
   customFields: CustomSectionField[],
@@ -151,11 +171,10 @@ export function truncateResponseText(text: string, group: string, command: strin
   if (text.length <= MAX_RESPONSE_CHARS) {
     return text;
   }
-  const budget = MAX_RESPONSE_CHARS;
-  const kept = text.slice(0, budget - 250);
   const notice =
-    `\n\n[Response truncated — ${text.length.toLocaleString()} characters exceeds the ${budget.toLocaleString()}-character limit for ${group}.${command}. ` +
+    `\n\n[Response truncated — ${text.length.toLocaleString()} characters exceeds the ${MAX_RESPONSE_CHARS.toLocaleString()}-character limit for ${group}.${command}. ` +
     `Narrow the result with a smaller \`limit\`, a \`page\`/\`items\` filter, \`show\`/\`exclude\` fields, or pass \`raw: false\` if you set \`raw: true\`.]`;
+  const kept = text.slice(0, MAX_RESPONSE_CHARS - notice.length);
   return kept + notice;
 }
 
@@ -406,20 +425,9 @@ To create experiments, use group "experiments", command "createExperimentFromTem
           );
         }
 
-        // Apply default items limit for list operations — but only when the
-        // command actually declares an `items`/`page` param. Commands with no
-        // declared pagination params (empty params: []) or a single catch-all
-        // `params` object (e.g. listEvents, listActivity) would otherwise get an
-        // unsupported/inert key silently attached to commandParams.
+        // Apply default items limit for list operations.
         if (params.command.startsWith('list') || params.command.startsWith('search')) {
-          const itemsLimit = params.limit ?? DEFAULT_LIST_ITEMS;
-          const declaredParamNames = new Set(entry.params.map((p) => p.name));
-          if (declaredParamNames.has('items') && commandParams.items === undefined) {
-            commandParams.items = itemsLimit;
-          }
-          if (declaredParamNames.has('page') && commandParams.page === undefined) {
-            commandParams.page = 1;
-          }
+          applyDefaultPagination(entry, commandParams, params.limit);
         }
 
         // Fill in apiEndpoint for commands that need it (clone, generateTemplate, etc.)
