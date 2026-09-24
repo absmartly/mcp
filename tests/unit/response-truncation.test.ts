@@ -52,6 +52,23 @@ export default async function runTests() {
     assert(/raw:\s*false|narrow|show|exclude|limit/i.test(result), 'notice suggests a concrete way to shrink the response', result.slice(-400));
   }
 
+  // A footer (e.g. pagination/warnings) is preserved even when the body must be truncated.
+  {
+    const over = 'x'.repeat(MAX_RESPONSE_CHARS + 1);
+    const footer = '\n\n(Page 1, 20 items per page. More results available — increase page number.)';
+    const result = truncateResponseText(over, 'metrics', 'listMetrics', footer);
+    assert(result.endsWith(footer), 'footer survives truncation and stays at the end', result.slice(-200));
+    assert(result.length <= MAX_RESPONSE_CHARS, 'output with footer still never exceeds the cap', `got length ${result.length}`);
+  }
+
+  // Short text plus a footer that still fits under the cap is returned unchanged (text + footer).
+  {
+    const short = 'hello world';
+    const footer = '\n\n(Page 1, 20 items per page.)';
+    const result = truncateResponseText(short, 'apps', 'listApps', footer);
+    assert(result === short + footer, 'short text with footer is untouched and concatenated', result);
+  }
+
   // Integration test: execute_command truncates a huge response
   {
     const { setupTools } = await import('../../src/tools');
@@ -95,6 +112,120 @@ export default async function runTests() {
     const text = res.content[0].text as string;
     assert(text.length <= MAX_RESPONSE_CHARS, 'execute_command truncates a huge listApps response', `got length ${text.length}`);
     assert(text.includes('truncated'), 'execute_command response includes the truncation notice for a huge result');
+  }
+
+  // Integration test: the createExperimentFromTemplate preview path is also capped.
+  {
+    const { setupTools } = await import('../../src/tools');
+
+    class CapturedHandlers {
+      tools = new Map<string, { handler: Function }>();
+    }
+    function makeMockServer(captured: CapturedHandlers) {
+      return {
+        tool: (name: string, _description: string, _schema: any, _annotations: any, handler: Function) => {
+          captured.tools.set(name, { handler });
+        },
+      } as any;
+    }
+
+    // A variant config large enough that the resolved-payload preview exceeds the cap.
+    const hugeConfig = JSON.stringify({ payload: 'x'.repeat(MAX_RESPONSE_CHARS + 5000) });
+    const template = `---
+name: huge_preview_exp
+type: test
+application: www
+unit_type: user_id
+percentages: "50/50"
+---
+
+## Variants
+
+### variant_0
+name: control
+config: ${hugeConfig}
+
+---
+
+### variant_1
+name: treatment
+config: {}
+`;
+
+    const client = {
+      listApplications: async () => [{ id: 1, name: 'www', archived: false }],
+      listUnitTypes: async () => [{ id: 1, name: 'user_id', archived: false }],
+      listCustomSectionFields: async () => [],
+      listMetrics: async () => [],
+      listUsers: async () => [],
+      listTeams: async () => [],
+      listExperimentTags: async () => [],
+    } as any;
+
+    const captured = new CapturedHandlers();
+    const ctx = {
+      apiClient: client,
+      endpoint: 'https://demo.absmartly.com',
+      authType: 'api-key',
+      entityWarnings: [],
+      customFields: [],
+      currentUserId: null,
+    };
+    setupTools(makeMockServer(captured), ctx);
+    const handler = captured.tools.get('execute_command')!.handler;
+
+    const res = await handler({
+      group: 'experiments',
+      command: 'createExperimentFromTemplate',
+      params: { templateContent: template },
+    });
+    const text = res.content[0].text as string;
+    assert(text.length <= MAX_RESPONSE_CHARS, 'createExperimentFromTemplate preview is capped', `got length ${text.length}`);
+    assert(text.includes('truncated'), 'capped preview includes the truncation notice');
+    assert(text.includes('confirmed: true'), 'capped preview still preserves the confirm instruction footer', text.slice(-300));
+  }
+
+  // Integration test: the error path (catch block) is also capped.
+  {
+    const { setupTools } = await import('../../src/tools');
+
+    class CapturedHandlers {
+      tools = new Map<string, { handler: Function }>();
+    }
+    function makeMockServer(captured: CapturedHandlers) {
+      return {
+        tool: (name: string, _description: string, _schema: any, _annotations: any, handler: Function) => {
+          captured.tools.set(name, { handler });
+        },
+      } as any;
+    }
+
+    const hugeErrorResponse = JSON.stringify({ error: 'x'.repeat(MAX_RESPONSE_CHARS + 5000) });
+    const client = {
+      listApplications: async () => {
+        const err: any = new Error('API request failed');
+        err.statusCode = 500;
+        err.response = hugeErrorResponse;
+        throw err;
+      },
+    } as any;
+
+    const captured = new CapturedHandlers();
+    const ctx = {
+      apiClient: client,
+      endpoint: 'https://demo.absmartly.com',
+      authType: 'api-key',
+      entityWarnings: [],
+      customFields: [],
+      currentUserId: null,
+    };
+    setupTools(makeMockServer(captured), ctx);
+    const handler = captured.tools.get('execute_command')!.handler;
+
+    const res = await handler({ group: 'apps', command: 'listApps', params: {} });
+    const text = res.content[0].text as string;
+    assert(text.length <= MAX_RESPONSE_CHARS, 'error-path response with a huge API error body is capped', `got length ${text.length}`);
+    assert(text.includes('truncated'), 'capped error response includes the truncation notice');
   }
 
   return {

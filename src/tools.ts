@@ -18,6 +18,7 @@ import {
 import type { CommandEntry } from "./cli-catalog.js";
 
 const DEFAULT_LIST_ITEMS = 20;
+const DEFAULT_LIST_PAGE = 1;
 const USER_FIELD_TYPE = 'user';
 export const MAX_RESPONSE_CHARS = 25_000;
 const MAX_COMMANDS_PER_LISTING = 30;
@@ -71,7 +72,7 @@ export function applyDefaultPagination(
     commandParams.items = itemsLimit;
   }
   if (declaredParamNames.has('page') && commandParams.page === undefined) {
-    commandParams.page = 1;
+    commandParams.page = DEFAULT_LIST_PAGE;
   }
 }
 
@@ -167,15 +168,16 @@ function buildCommandDoc(entry: CommandEntry, customFields: readonly any[]): str
   return doc;
 }
 
-export function truncateResponseText(text: string, group: string, command: string): string {
-  if (text.length <= MAX_RESPONSE_CHARS) {
-    return text;
+export function truncateResponseText(text: string, group: string, command: string, footer: string = ''): string {
+  if (text.length + footer.length <= MAX_RESPONSE_CHARS) {
+    return text + footer;
   }
   const notice =
     `\n\n[Response truncated — ${text.length.toLocaleString()} characters exceeds the ${MAX_RESPONSE_CHARS.toLocaleString()}-character limit for ${group}.${command}. ` +
     `Narrow the result with a smaller \`limit\`, a \`page\`/\`items\` filter, \`show\`/\`exclude\` fields, or pass \`raw: false\` if you set \`raw: true\`.]`;
-  const kept = text.slice(0, MAX_RESPONSE_CHARS - notice.length);
-  return kept + notice;
+  const budget = Math.max(0, MAX_RESPONSE_CHARS - notice.length - footer.length);
+  const kept = text.slice(0, budget);
+  return kept + notice + footer;
 }
 
 export function setupTools(server: McpServer, ctx: ToolContext): void {
@@ -402,9 +404,8 @@ To create experiments, use group "experiments", command "createExperimentFromTem
               lines.push('**Warnings:**');
               for (const w of warnings) lines.push(`- ${w}`);
             }
-            lines.push('');
-            lines.push('Show this preview to the user. If they confirm, call `execute_command` again with the same `group`, `command`, and `params`, plus `confirmed: true`, to actually create the experiment.');
-            return { content: [{ type: "text" as const, text: lines.join('\n') }] };
+            const instructionFooter = '\n\nShow this preview to the user. If they confirm, call `execute_command` again with the same `group`, `command`, and `params`, plus `confirmed: true`, to actually create the experiment.';
+            return { content: [{ type: "text" as const, text: truncateResponseText(lines.join('\n'), params.group, params.command, instructionFooter) }] };
           } catch (previewError: any) {
             const msg = previewError?.message || String(previewError);
             return {
@@ -452,22 +453,24 @@ To create experiments, use group "experiments", command "createExperimentFromTem
           output = cmdResult.rows ?? cmdResult.detail ?? cmdResult.data ?? cmdResult;
         }
 
-        let text = JSON.stringify(output, null, 2);
+        const text = JSON.stringify(output, null, 2);
 
-        // Append warnings if any
+        // Warnings and pagination guidance are appended as a preserved
+        // footer — kept even when the body must be truncated, since these
+        // are exactly what a model needs to see when a response is capped
+        // (e.g. "more results available").
+        let footer = '';
         if (cmdResult.warnings && Array.isArray(cmdResult.warnings) && cmdResult.warnings.length > 0) {
-          text += `\n\nWarnings:\n${(cmdResult.warnings as string[]).map(w => `- ${w}`).join('\n')}`;
+          footer += `\n\nWarnings:\n${(cmdResult.warnings as string[]).map(w => `- ${w}`).join('\n')}`;
         }
-
-        // Append pagination info
         if (cmdResult.pagination) {
           const pg = cmdResult.pagination as { page: number; items: number; hasMore: boolean };
           if (pg.hasMore) {
-            text += `\n\n(Page ${pg.page}, ${pg.items} items per page. More results available — increase page number.)`;
+            footer += `\n\n(Page ${pg.page}, ${pg.items} items per page. More results available — increase page number.)`;
           }
         }
 
-        return { content: [{ type: "text" as const, text: truncateResponseText(text, params.group, params.command) }] };
+        return { content: [{ type: "text" as const, text: truncateResponseText(text, params.group, params.command, footer) }] };
       } catch (error: any) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         const parts: string[] = [`Error executing ${params.group}.${params.command}: ${errorMsg}`];
@@ -492,12 +495,13 @@ To create experiments, use group "experiments", command "createExperimentFromTem
         }
 
         // For template errors, hint at the docs resource
+        let errorFooter = '';
         if (params.command === 'createExperimentFromTemplate') {
-          parts.push('\nTip: Read the absmartly://docs/templates resource for valid template examples.');
+          errorFooter = '\nTip: Read the absmartly://docs/templates resource for valid template examples.';
         }
 
         ctx.log?.('error', parts[0]);
-        return { content: [{ type: "text" as const, text: parts.join('') }] };
+        return { content: [{ type: "text" as const, text: truncateResponseText(parts.join(''), params.group, params.command, errorFooter) }] };
       }
     }
   );
