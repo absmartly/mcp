@@ -20,6 +20,7 @@ import type { CommandEntry } from "./cli-catalog.js";
 const DEFAULT_LIST_ITEMS = 20;
 const USER_FIELD_TYPE = 'user';
 export const MAX_RESPONSE_CHARS = 25_000;
+const MAX_COMMANDS_PER_LISTING = 30;
 
 export interface ToolContext {
   apiClient: APIClient | null;
@@ -38,12 +39,20 @@ export interface ToolContext {
 }
 
 function formatCommandList(entries: CommandEntry[]): string {
-  return entries.map(m => {
+  const shown = entries.slice(0, MAX_COMMANDS_PER_LISTING);
+  const rendered = shown.map(m => {
     const paramList = m.params.length > 0
       ? m.params.map(p => `  - \`${p.name}\` (${p.type}${p.required ? ', required' : ''}): ${p.description}`).join('\n')
       : '  (no parameters)';
     return `### ${m.group}.${m.command}\n${m.description}\n${m.dangerous ? '**WARNING: Destructive operation**\n' : ''}**Params:**\n${paramList}\n**Returns:** ${m.returns}`;
   }).join('\n\n---\n\n');
+
+  if (entries.length <= MAX_COMMANDS_PER_LISTING) {
+    return rendered;
+  }
+  const remaining = entries.length - MAX_COMMANDS_PER_LISTING;
+  const names = entries.slice(MAX_COMMANDS_PER_LISTING).map(e => `${e.group}.${e.command}`).join(', ');
+  return rendered + `\n\n---\n\n(${remaining} more matching commands not shown: ${names}. Narrow your \`group\`/\`search\`, or use get_command_docs for a specific command's full details.)`;
 }
 
 export function autoPopulateCustomFields(
