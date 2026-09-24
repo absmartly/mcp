@@ -30,7 +30,8 @@ import {
     normalizeBaseUrl,
     extractEndpointFromPath,
     rejectDisallowedRedirectUris,
-    REQUIRED_CODE_CHALLENGE_METHOD,
+    handleOAuthDiscovery,
+    API_KEY_SESSION_KV_PREFIX,
     detectApiKey,
     safeKvPut,
     safeKvGet,
@@ -38,7 +39,6 @@ import {
 
 const ENTITY_LIST_PAGE_SIZE = 100;
 const ENTITY_LIST_FIRST_PAGE = 1;
-const SUPPORTED_PKCE_METHODS = [REQUIRED_CODE_CHALLENGE_METHOD];
 
 const MCP_CORS_OPTIONS = {
     origin: "*",
@@ -774,36 +774,16 @@ export default {
         const clientFingerprint = `${request.headers.get('CF-Connecting-IP') || 'unknown'}-${request.headers.get('User-Agent') || 'unknown'}`;
 
         if (apiKey) {
-            await safeKvPut(env.OAUTH_KV, `api_key_session:${clientFingerprint}`, 'active', {
+            await safeKvPut(env.OAUTH_KV, `${API_KEY_SESSION_KV_PREFIX}${clientFingerprint}`, 'active', {
                 expirationTtl: API_KEY_SESSION_TTL_SECONDS,
             });
         }
 
-        const isOAuthDiscoveryEndpoint = url.pathname === '/.well-known/oauth-authorization-server' ||
-                                        url.pathname === '/.well-known/oauth-protected-resource' ||
-                                        url.pathname.startsWith('/.well-known/oauth-authorization-server/') ||
-                                        url.pathname.startsWith('/.well-known/oauth-protected-resource/');
-
-        if (isOAuthDiscoveryEndpoint) {
-            const apiKeySession = await safeKvGet(env.OAUTH_KV, `api_key_session:${clientFingerprint}`);
-            if (apiKeySession) {
-                return new Response(JSON.stringify({
-                    error: "oauth_not_available",
-                    error_description: "OAuth not available when using API key authentication"
-                }), { status: 404 });
-            }
-        }
-
-        if (url.pathname === '/.well-known/oauth-authorization-server' && request.method === 'GET') {
-            const response = await oauthProvider.fetch(request, env, ctx);
-            if (!response.ok) return response;
-            const metadata = await response.json() as Record<string, unknown>;
-            metadata.code_challenge_methods_supported = SUPPORTED_PKCE_METHODS;
-            return new Response(JSON.stringify(metadata), {
-                status: response.status,
-                headers: response.headers,
-            });
-        }
+        const discoveryResponse = await handleOAuthDiscovery(
+            request, env.OAUTH_KV, clientFingerprint, !!apiKey,
+            () => oauthProvider.fetch(request, env, ctx)
+        );
+        if (discoveryResponse) return discoveryResponse;
 
         if (isTransportPath(url.pathname, SSE_PATH)) {
             return await handleMcpTransportRequest(

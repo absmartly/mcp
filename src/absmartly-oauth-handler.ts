@@ -413,7 +413,7 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
     absmartlyOAuthUrl.searchParams.set('response_type', 'code');
     absmartlyOAuthUrl.searchParams.set('state', stateToken);
     absmartlyOAuthUrl.searchParams.set('code_challenge', codeChallenge);
-    absmartlyOAuthUrl.searchParams.set('code_challenge_method', 'S256');
+    absmartlyOAuthUrl.searchParams.set('code_challenge_method', REQUIRED_CODE_CHALLENGE_METHOD);
 
     // Set only after consent was given, so /oauth/callback can require that the browser
     // finishing the login is the one that approved it (MCP security best practices).
@@ -468,7 +468,6 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
         { expirationTtl: APPROVAL_COOKIE_MAX_AGE_SECONDS }
       );
     } catch (e) {
-      // Not remembering the approval only means the user sees the consent page again.
       console.warn('Failed to store client approval:', e);
       return;
     }
