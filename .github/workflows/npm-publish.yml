@@ -51,8 +51,13 @@ jobs:
           if [ "$PUBLISHED_VERSION" = "none" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
-            GREATER_VERSION=$(printf '%s\n%s\n' "$LOCAL_VERSION" "$PUBLISHED_VERSION" | sort -V | tail -n1)
-            if [ "$LOCAL_VERSION" != "$PUBLISHED_VERSION" ] && [ "$GREATER_VERSION" = "$LOCAL_VERSION" ]; then
+            # `sort -V` orders prereleases after their stable release (e.g.
+            # treats 1.1.0-rc.1 as "greater than" 1.1.0), which is the
+            # opposite of SemVer precedence and would publish a prerelease
+            # under the `latest` dist-tag. Use node-semver's range matching
+            # instead: LOCAL_VERSION only satisfies ">PUBLISHED_VERSION" when
+            # it is a real SemVer-precedence increase.
+            if npx --yes semver -r ">$PUBLISHED_VERSION" "$LOCAL_VERSION" > /dev/null 2>&1; then
               echo "changed=true" >> "$GITHUB_OUTPUT"
             else
               echo "changed=false" >> "$GITHUB_OUTPUT"
