@@ -175,9 +175,19 @@ export function truncateResponseText(text: string, group: string, command: strin
   const notice =
     `\n\n[Response truncated — ${text.length.toLocaleString()} characters exceeds the ${MAX_RESPONSE_CHARS.toLocaleString()}-character limit for ${group}.${command}. ` +
     `Narrow the result with a smaller \`limit\`, a \`page\`/\`items\` filter, \`show\`/\`exclude\` fields, or pass \`raw: false\` if you set \`raw: true\`.]`;
-  const budget = Math.max(0, MAX_RESPONSE_CHARS - notice.length - footer.length);
+  // The footer itself must be bounded too — an oversized footer (e.g. a huge
+  // warnings array) must not be allowed to push the total past the cap on
+  // its own, since it's appended after the notice with no further check.
+  const remaining = Math.max(0, MAX_RESPONSE_CHARS - notice.length);
+  let boundedFooter = footer;
+  if (footer.length > remaining) {
+    const marker = '\n\n[additional details truncated]';
+    const keepLen = Math.max(0, remaining - marker.length);
+    boundedFooter = footer.slice(0, keepLen) + marker.slice(0, remaining - keepLen);
+  }
+  const budget = Math.max(0, remaining - boundedFooter.length);
   const kept = text.slice(0, budget);
-  return kept + notice + footer;
+  return kept + notice + boundedFooter;
 }
 
 export function setupTools(server: McpServer, ctx: ToolContext): void {
@@ -404,8 +414,17 @@ To create experiments, use group "experiments", command "createExperimentFromTem
               lines.push('**Warnings:**');
               for (const w of warnings) lines.push(`- ${w}`);
             }
-            const instructionFooter = '\n\nShow this preview to the user. If they confirm, call `execute_command` again with the same `group`, `command`, and `params`, plus `confirmed: true`, to actually create the experiment.';
-            return { content: [{ type: "text" as const, text: truncateResponseText(lines.join('\n'), params.group, params.command, instructionFooter) }] };
+            const body = lines.join('\n');
+            const confirmInstruction = '\n\nShow this preview to the user. If they confirm, call `execute_command` again with the same `group`, `command`, and `params`, plus `confirmed: true`, to actually create the experiment.';
+            // If the full preview (body + confirm instruction) would be
+            // truncated, withhold the confirm instruction entirely — a
+            // model must not be told it's safe to confirm creation from a
+            // payload it was never shown in full.
+            const wouldTruncate = body.length + confirmInstruction.length > MAX_RESPONSE_CHARS;
+            const footer = wouldTruncate
+              ? '\n\n**This preview is too large to display in full and had to be truncated below — the resolved payload is NOT completely shown.** Do NOT call execute_command with confirmed: true based on this preview. Reduce the template size (e.g. shorten variant configs) and try again so the full payload can be reviewed first.'
+              : confirmInstruction;
+            return { content: [{ type: "text" as const, text: truncateResponseText(body, params.group, params.command, footer) }] };
           } catch (previewError: any) {
             const msg = previewError?.message || String(previewError);
             return {

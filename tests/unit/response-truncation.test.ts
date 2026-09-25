@@ -69,6 +69,14 @@ export default async function runTests() {
     assert(result === short + footer, 'short text with footer is untouched and concatenated', result);
   }
 
+  // An oversized footer (e.g. a huge warnings array) must not push the total past the cap on its own.
+  {
+    const over = 'x'.repeat(MAX_RESPONSE_CHARS + 1);
+    const hugeFooter = '\n\nWarnings:\n' + Array.from({ length: 2000 }, (_, i) => `- warning number ${i} with some extra detail text`).join('\n');
+    const result = truncateResponseText(over, 'metrics', 'listMetrics', hugeFooter);
+    assert(result.length <= MAX_RESPONSE_CHARS, 'output stays within the cap even when the footer alone would overflow it', `got length ${result.length}, footer alone was ${hugeFooter.length}`);
+  }
+
   // Integration test: execute_command truncates a huge response
   {
     const { setupTools } = await import('../../src/tools');
@@ -182,7 +190,8 @@ config: {}
     const text = res.content[0].text as string;
     assert(text.length <= MAX_RESPONSE_CHARS, 'createExperimentFromTemplate preview is capped', `got length ${text.length}`);
     assert(text.includes('truncated'), 'capped preview includes the truncation notice');
-    assert(text.includes('confirmed: true'), 'capped preview still preserves the confirm instruction footer', text.slice(-300));
+    assert(!text.includes('to actually create the experiment'), 'capped preview withholds the confirm-and-create instruction — it must not invite confirming from an incomplete preview', text.slice(-400));
+    assert(/do not|not completely shown|too large/i.test(text), 'capped preview explicitly warns the payload is incomplete', text.slice(-400));
   }
 
   // Integration test: the error path (catch block) is also capped.
