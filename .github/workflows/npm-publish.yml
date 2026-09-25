@@ -20,17 +20,43 @@ jobs:
           node-version: 22
           registry-url: 'https://registry.npmjs.org'
 
+      # npm Trusted Publishing (OIDC) requires npm >= 11.5.1; Node 22's
+      # bundled npm can be older, so upgrade before any npm command runs.
+      - name: Update npm for trusted publishing support
+        run: npm install -g npm@latest
+
       - name: Check if version changed
         id: version-check
         run: |
           LOCAL_VERSION=$(node -p "require('./package.json').version")
-          PUBLISHED_VERSION=$(npm view @absmartly/mcp version 2>/dev/null || echo "none")
+
+          set +e
+          VIEW_OUTPUT=$(npm view @absmartly/mcp version 2>&1)
+          VIEW_EXIT=$?
+          set -e
+
+          if [ $VIEW_EXIT -eq 0 ]; then
+            PUBLISHED_VERSION="$VIEW_OUTPUT"
+          elif echo "$VIEW_OUTPUT" | grep -q "E404"; then
+            PUBLISHED_VERSION="none"
+          else
+            echo "npm view @absmartly/mcp failed for a reason other than 'not found':"
+            echo "$VIEW_OUTPUT"
+            exit 1
+          fi
+
           echo "local=$LOCAL_VERSION" >> "$GITHUB_OUTPUT"
           echo "published=$PUBLISHED_VERSION" >> "$GITHUB_OUTPUT"
-          if [ "$LOCAL_VERSION" != "$PUBLISHED_VERSION" ]; then
+
+          if [ "$PUBLISHED_VERSION" = "none" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
+            GREATER_VERSION=$(printf '%s\n%s\n' "$LOCAL_VERSION" "$PUBLISHED_VERSION" | sort -V | tail -n1)
+            if [ "$LOCAL_VERSION" != "$PUBLISHED_VERSION" ] && [ "$GREATER_VERSION" = "$LOCAL_VERSION" ]; then
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       - run: npm ci
