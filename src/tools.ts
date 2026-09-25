@@ -18,7 +18,10 @@ import {
 import type { CommandEntry } from "./cli-catalog.js";
 
 const DEFAULT_LIST_ITEMS = 20;
+const DEFAULT_LIST_PAGE = 1;
 const USER_FIELD_TYPE = 'user';
+export const MAX_RESPONSE_CHARS = 25_000;
+const MAX_COMMANDS_PER_LISTING = 30;
 
 export interface ToolContext {
   apiClient: APIClient | null;
@@ -37,12 +40,40 @@ export interface ToolContext {
 }
 
 function formatCommandList(entries: CommandEntry[]): string {
-  return entries.map(m => {
+  const shown = entries.slice(0, MAX_COMMANDS_PER_LISTING);
+  const rendered = shown.map(m => {
     const paramList = m.params.length > 0
       ? m.params.map(p => `  - \`${p.name}\` (${p.type}${p.required ? ', required' : ''}): ${p.description}`).join('\n')
       : '  (no parameters)';
     return `### ${m.group}.${m.command}\n${m.description}\n${m.dangerous ? '**WARNING: Destructive operation**\n' : ''}**Params:**\n${paramList}\n**Returns:** ${m.returns}`;
   }).join('\n\n---\n\n');
+
+  if (entries.length <= MAX_COMMANDS_PER_LISTING) {
+    return rendered;
+  }
+  const remaining = entries.length - MAX_COMMANDS_PER_LISTING;
+  const names = entries.slice(MAX_COMMANDS_PER_LISTING).map(e => `${e.group}.${e.command}`).join(', ');
+  return rendered + `\n\n---\n\n(${remaining} more matching commands not shown: ${names}. Narrow your \`group\`/\`search\`, or use get_command_docs for a specific command's full details.)`;
+}
+
+// Applies default items/page pagination to commandParams, but only when the
+// command's catalog entry actually declares an `items`/`page` param. Commands
+// with no declared pagination params (empty params: []) or a single catch-all
+// `params` object (e.g. listEvents, listActivity) would otherwise get an
+// unsupported/inert key silently attached to commandParams.
+export function applyDefaultPagination(
+  entry: CommandEntry,
+  commandParams: Record<string, unknown>,
+  limit: number | undefined,
+): void {
+  const itemsLimit = limit ?? DEFAULT_LIST_ITEMS;
+  const declaredParamNames = new Set(entry.params.map((p) => p.name));
+  if (declaredParamNames.has('items') && commandParams.items === undefined) {
+    commandParams.items = itemsLimit;
+  }
+  if (declaredParamNames.has('page') && commandParams.page === undefined) {
+    commandParams.page = DEFAULT_LIST_PAGE;
+  }
 }
 
 export function autoPopulateCustomFields(
@@ -86,6 +117,16 @@ export function autoPopulateCustomFields(
   data.custom_section_field_values = fieldValues;
 }
 
+function formatParamSummary(entry: CommandEntry): string {
+  if (entry.params.length === 0) {
+    return `${entry.group}.${entry.command} takes no parameters.`;
+  }
+  const paramList = entry.params
+    .map((p) => `${p.name} (${p.type}${p.required ? ', required' : ''})`)
+    .join(', ');
+  return `${entry.group}.${entry.command} params: ${paramList}.`;
+}
+
 function buildCommandDoc(entry: CommandEntry, customFields: readonly any[]): string {
   let doc = `# ${entry.group}.${entry.command}\n\n**Group:** ${entry.group}\n**Description:** ${entry.description}\n`;
   if (entry.dangerous) {
@@ -125,6 +166,28 @@ function buildCommandDoc(entry: CommandEntry, customFields: readonly any[]): str
   }
 
   return doc;
+}
+
+export function truncateResponseText(text: string, group: string, command: string, footer: string = ''): string {
+  if (text.length + footer.length <= MAX_RESPONSE_CHARS) {
+    return text + footer;
+  }
+  const notice =
+    `\n\n[Response truncated — ${text.length.toLocaleString()} characters exceeds the ${MAX_RESPONSE_CHARS.toLocaleString()}-character limit for ${group}.${command}. ` +
+    `Narrow the result with a smaller \`limit\`, a \`page\`/\`items\` filter, \`show\`/\`exclude\` fields, or pass \`raw: false\` if you set \`raw: true\`.]`;
+  // The footer itself must be bounded too — an oversized footer (e.g. a huge
+  // warnings array) must not be allowed to push the total past the cap on
+  // its own, since it's appended after the notice with no further check.
+  const remaining = Math.max(0, MAX_RESPONSE_CHARS - notice.length);
+  let boundedFooter = footer;
+  if (footer.length > remaining) {
+    const marker = '\n\n[additional details truncated]';
+    const keepLen = Math.max(0, remaining - marker.length);
+    boundedFooter = footer.slice(0, keepLen) + marker.slice(0, remaining - keepLen);
+  }
+  const budget = Math.max(0, remaining - boundedFooter.length);
+  const kept = text.slice(0, budget);
+  return kept + notice + boundedFooter;
 }
 
 export function setupTools(server: McpServer, ctx: ToolContext): void {
@@ -262,13 +325,12 @@ To create experiments, use group "experiments", command "createExperimentFromTem
       // — without this guard, the call returns success but does nothing).
       const validationErrors = validateCommandParams(entry, params.params || {});
       if (validationErrors.length > 0) {
-        const docs = buildCommandDoc(entry, ctx.customFields);
         return {
           content: [{
             type: "text" as const,
             text: `Param validation failed for ${params.group}.${params.command}:\n` +
               validationErrors.map((e) => `  - ${e}`).join('\n') +
-              `\n\n---\n\n${docs}`,
+              `\n\n${formatParamSummary(entry)} Use get_command_docs for full details.`,
           }],
         };
       }
@@ -352,9 +414,17 @@ To create experiments, use group "experiments", command "createExperimentFromTem
               lines.push('**Warnings:**');
               for (const w of warnings) lines.push(`- ${w}`);
             }
-            lines.push('');
-            lines.push('Show this preview to the user. If they confirm, call `execute_command` again with the same `group`, `command`, and `params`, plus `confirmed: true`, to actually create the experiment.');
-            return { content: [{ type: "text" as const, text: lines.join('\n') }] };
+            const body = lines.join('\n');
+            const confirmInstruction = '\n\nShow this preview to the user. If they confirm, call `execute_command` again with the same `group`, `command`, and `params`, plus `confirmed: true`, to actually create the experiment.';
+            // If the full preview (body + confirm instruction) would be
+            // truncated, withhold the confirm instruction entirely — a
+            // model must not be told it's safe to confirm creation from a
+            // payload it was never shown in full.
+            const wouldTruncate = body.length + confirmInstruction.length > MAX_RESPONSE_CHARS;
+            const footer = wouldTruncate
+              ? '\n\n**This preview is too large to display in full and had to be truncated below — the resolved payload is NOT completely shown.** Do NOT call execute_command with confirmed: true based on this preview. Reduce the template size (e.g. shorten variant configs) and try again so the full payload can be reviewed first.'
+              : confirmInstruction;
+            return { content: [{ type: "text" as const, text: truncateResponseText(body, params.group, params.command, footer) }] };
           } catch (previewError: any) {
             const msg = previewError?.message || String(previewError);
             return {
@@ -375,15 +445,9 @@ To create experiments, use group "experiments", command "createExperimentFromTem
           );
         }
 
-        // Apply default items limit for list operations
-        const itemsLimit = params.limit ?? DEFAULT_LIST_ITEMS;
+        // Apply default items limit for list operations.
         if (params.command.startsWith('list') || params.command.startsWith('search')) {
-          if (commandParams.items === undefined) {
-            commandParams.items = itemsLimit;
-          }
-          if (commandParams.page === undefined) {
-            commandParams.page = 1;
-          }
+          applyDefaultPagination(entry, commandParams, params.limit);
         }
 
         // Fill in apiEndpoint for commands that need it (clone, generateTemplate, etc.)
@@ -408,22 +472,24 @@ To create experiments, use group "experiments", command "createExperimentFromTem
           output = cmdResult.rows ?? cmdResult.detail ?? cmdResult.data ?? cmdResult;
         }
 
-        let text = JSON.stringify(output, null, 2);
+        const text = JSON.stringify(output, null, 2);
 
-        // Append warnings if any
+        // Warnings and pagination guidance are appended as a preserved
+        // footer — kept even when the body must be truncated, since these
+        // are exactly what a model needs to see when a response is capped
+        // (e.g. "more results available").
+        let footer = '';
         if (cmdResult.warnings && Array.isArray(cmdResult.warnings) && cmdResult.warnings.length > 0) {
-          text += `\n\nWarnings:\n${(cmdResult.warnings as string[]).map(w => `- ${w}`).join('\n')}`;
+          footer += `\n\nWarnings:\n${(cmdResult.warnings as string[]).map(w => `- ${w}`).join('\n')}`;
         }
-
-        // Append pagination info
         if (cmdResult.pagination) {
           const pg = cmdResult.pagination as { page: number; items: number; hasMore: boolean };
           if (pg.hasMore) {
-            text += `\n\n(Page ${pg.page}, ${pg.items} items per page. More results available — increase page number.)`;
+            footer += `\n\n(Page ${pg.page}, ${pg.items} items per page. More results available — increase page number.)`;
           }
         }
 
-        return { content: [{ type: "text" as const, text }] };
+        return { content: [{ type: "text" as const, text: truncateResponseText(text, params.group, params.command, footer) }] };
       } catch (error: any) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         const parts: string[] = [`Error executing ${params.group}.${params.command}: ${errorMsg}`];
@@ -448,12 +514,13 @@ To create experiments, use group "experiments", command "createExperimentFromTem
         }
 
         // For template errors, hint at the docs resource
+        let errorFooter = '';
         if (params.command === 'createExperimentFromTemplate') {
-          parts.push('\nTip: Read the absmartly://docs/templates resource for valid template examples.');
+          errorFooter = '\nTip: Read the absmartly://docs/templates resource for valid template examples.';
         }
 
         ctx.log?.('error', parts[0]);
-        return { content: [{ type: "text" as const, text: parts.join('') }] };
+        return { content: [{ type: "text" as const, text: truncateResponseText(parts.join(''), params.group, params.command, errorFooter) }] };
       }
     }
   );
