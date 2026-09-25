@@ -1,0 +1,53 @@
+name: Publish to npm
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Check if version changed
+        id: version-check
+        run: |
+          LOCAL_VERSION=$(node -p "require('./package.json').version")
+          PUBLISHED_VERSION=$(npm view @absmartly/mcp version 2>/dev/null || echo "none")
+          echo "local=$LOCAL_VERSION" >> "$GITHUB_OUTPUT"
+          echo "published=$PUBLISHED_VERSION" >> "$GITHUB_OUTPUT"
+          if [ "$LOCAL_VERSION" != "$PUBLISHED_VERSION" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - run: npm ci
+        if: steps.version-check.outputs.changed == 'true'
+
+      - name: Ensure DXT bundle stub for typecheck
+        if: steps.version-check.outputs.changed == 'true'
+        run: ./scripts/ensure-dxt-bundle.sh
+
+      - name: Typecheck
+        if: steps.version-check.outputs.changed == 'true'
+        run: npm run typecheck
+
+      - name: Unit tests
+        if: steps.version-check.outputs.changed == 'true'
+        run: npm run test:unit
+
+      - name: Publish to npm
+        if: steps.version-check.outputs.changed == 'true'
+        run: npm publish --access public
