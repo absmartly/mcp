@@ -4,27 +4,18 @@ export const DEFAULT_API_KEY_USER_EMAIL = "api-key-user";
 export const DEFAULT_API_KEY_USER_NAME = "API Key User";
 export const DEFAULT_ABSMARTLY_DOMAIN = "absmartly.com";
 export const CLAUDE_AUTH_CALLBACK_URI = "https://claude.ai/api/mcp/auth_callback";
-export const REQUIRED_CODE_CHALLENGE_METHOD = "S256";
+export {
+  REQUIRED_CODE_CHALLENGE_METHOD,
+  OAUTH_ERROR_INVALID_REDIRECT_URI as INVALID_REDIRECT_URI_ERROR,
+  MESSAGE_INVALID_REDIRECT_URI as INVALID_REDIRECT_URI_MESSAGE,
+  isAllowedRedirectUri,
+  generatePkcePair,
+  escapeHtml,
+  HTML_ESCAPE_MAP,
+} from "./oauth/index.js";
+import { OAUTH_ERROR_INVALID_REDIRECT_URI, REQUIRED_CODE_CHALLENGE_METHOD, readRegistrationBody, validateClientRegistration } from "./oauth/index.js";
 
-const ALLOWED_REDIRECT_HTTPS_CALLBACKS = [
-  "https://claude.ai/api/mcp/auth_callback",
-  "https://chatgpt.com/connector_platform_oauth_redirect",
-  "https://chatgpt.com/connector/oauth/",
-  "https://playground.ai.cloudflare.com/oauth/callback",
-  "https://vscode.dev/redirect",
-  "https://insiders.vscode.dev/redirect",
-  "https://www.cursor.com/agents/mcp/oauth/callback",
-  "https://integrations.productboard.com/oauth2/callback",
-];
-const ALLOWED_REDIRECT_LOOPBACK_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
-const ALLOWED_REDIRECT_CUSTOM_SCHEMES = ["cursor:", "claude:"];
-const MAX_REGISTRATION_BODY_BYTES = 1024 * 1024;
-const MAX_LOGGED_REDIRECT_URI_LENGTH = 200;
-export const INVALID_REDIRECT_URI_ERROR = "invalid_redirect_uri";
-export const INVALID_REDIRECT_URI_MESSAGE = "Invalid redirect URI";
-const REDIRECT_URI_NOT_ALLOWED_DESCRIPTION = "One or more redirect_uris are not allowed";
-const REGISTRATION_TOO_LARGE_ERROR = "invalid_request";
-const REGISTRATION_TOO_LARGE_DESCRIPTION = "Request payload too large, must be under 1 MiB";
+const HTTP_STATUS_PAYLOAD_TOO_LARGE = 413;
 
 export const API_KEY_SESSION_TTL_SECONDS = 300;
 export const SESSION_TTL_SECONDS = 86400;
@@ -78,24 +69,6 @@ export function extractEndpointFromPath(pathname: string, prefix: string | reado
   return null;
 }
 
-export function isAllowedRedirectUri(redirectUri: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(redirectUri);
-  } catch {
-    return false;
-  }
-  if (parsed.hash || parsed.username || parsed.password) return false;
-  if (parsed.protocol === "https:") {
-    const callback = `${parsed.origin}${parsed.pathname}`;
-    return ALLOWED_REDIRECT_HTTPS_CALLBACKS.some((allowed) =>
-      allowed.endsWith("/") ? callback.startsWith(allowed) && callback.length > allowed.length : callback === allowed
-    );
-  }
-  if (parsed.protocol === "http:") return ALLOWED_REDIRECT_LOOPBACK_HOSTS.includes(parsed.hostname);
-  return ALLOWED_REDIRECT_CUSTOM_SCHEMES.includes(parsed.protocol);
-}
-
 function registrationErrorResponse(error: string, description: string, status: number): Response {
   return new Response(JSON.stringify({ error, error_description: description }), {
     status,
@@ -103,48 +76,20 @@ function registrationErrorResponse(error: string, description: string, status: n
   });
 }
 
-async function readBodyWithinLimit(request: Request, maxBytes: number): Promise<string | null> {
-  if (!request.body) return "";
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let totalBytes = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    totalBytes += value.byteLength;
-    if (totalBytes > maxBytes) {
-      reader.cancel().catch(() => {});
-      return null;
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(totalBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(bytes);
-}
-
+// Rejects oversized bodies and disallowed redirect URIs before the OAuth provider sees
+// the registration. Other malformed metadata is left for the provider to report.
 export async function rejectDisallowedRedirectUris(request: Request): Promise<Response | null> {
-  const tooLarge = registrationErrorResponse(REGISTRATION_TOO_LARGE_ERROR, REGISTRATION_TOO_LARGE_DESCRIPTION, 413);
-  if (Number(request.headers.get("Content-Length") || 0) > MAX_REGISTRATION_BODY_BYTES) return tooLarge;
-  const text = await readBodyWithinLimit(request.clone(), MAX_REGISTRATION_BODY_BYTES);
-  if (text === null) return tooLarge;
-
-  let body: { redirect_uris?: unknown };
-  try {
-    body = JSON.parse(text);
-  } catch {
-    return null;
+  const read = await readRegistrationBody(request.clone());
+  if (!read.ok) {
+    return read.error.status === HTTP_STATUS_PAYLOAD_TOO_LARGE
+      ? registrationErrorResponse(read.error.error, read.error.description, read.error.status)
+      : null;
   }
-  const redirectUris = body?.redirect_uris;
-  if (!Array.isArray(redirectUris)) return null;
-  const disallowed = redirectUris.find((uri) => typeof uri !== "string" || !isAllowedRedirectUri(uri));
-  if (disallowed === undefined) return null;
-  console.warn("Rejected client registration redirect URI:", String(disallowed).slice(0, MAX_LOGGED_REDIRECT_URI_LENGTH));
-  return registrationErrorResponse(INVALID_REDIRECT_URI_ERROR, REDIRECT_URI_NOT_ALLOWED_DESCRIPTION, 400);
+  const body = read.body as { redirect_uris?: unknown };
+  if (!Array.isArray(body?.redirect_uris)) return null;
+  const result = validateClientRegistration(body);
+  if (result.ok || result.error.error !== OAUTH_ERROR_INVALID_REDIRECT_URI) return null;
+  return registrationErrorResponse(result.error.error, result.error.description, result.error.status);
 }
 
 const OAUTH_AUTHORIZATION_SERVER_METADATA_PATH = "/.well-known/oauth-authorization-server";
@@ -203,33 +148,6 @@ export function buildQueryString(params: Record<string, unknown>): string {
   }
   const qs = searchParams.toString();
   return qs ? `?${qs}` : '';
-}
-
-function base64UrlEncode(bytes: Uint8Array): string {
-  let binary = '';
-  for (const b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-export async function generatePkcePair(): Promise<{ codeVerifier: string; codeChallenge: string }> {
-  const verifierBytes = new Uint8Array(32);
-  crypto.getRandomValues(verifierBytes);
-  const codeVerifier = base64UrlEncode(verifierBytes);
-  const challengeBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(codeVerifier));
-  const codeChallenge = base64UrlEncode(new Uint8Array(challengeBuffer));
-  return { codeVerifier, codeChallenge };
-}
-
-export const HTML_ESCAPE_MAP: Record<string, string> = {
-  "&": "&amp;",
-  "<": "&lt;",
-  ">": "&gt;",
-  '"': "&quot;",
-  "'": "&#39;",
-};
-
-export function escapeHtml(str: string): string {
-  return str.replace(/[&<>"']/g, (char) => HTML_ESCAPE_MAP[char]);
 }
 
 export function detectApiKey(

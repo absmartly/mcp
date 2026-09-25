@@ -5,7 +5,10 @@
 	"compatibility_date": "2025-03-10",
 	"account_id": "8ec66ff1f67c2bf53e7970533604ebe9",
 	"compatibility_flags": [
-		"nodejs_compat"
+		"nodejs_compat",
+		// Required by @cloudflare/workers-oauth-provider CIMD support: outbound fetches
+		// go to the public internet only, never to this zone's own origin.
+		"global_fetch_strictly_public"
 	],
 	"durable_objects": {
 		"bindings": [
