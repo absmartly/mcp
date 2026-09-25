@@ -5,7 +5,7 @@
   "main": "src/index.ts",
   "type": "module",
   "bin": {
-    "absmartly-mcp": "./bin/absmartly-mcp.mjs"
+    "absmartly-mcp": "bin/absmartly-mcp.mjs"
   },
   "files": [
     "bin/",
@@ -51,6 +51,10 @@
     "cloudflare-workers",
     "experimentation"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/absmartly/mcp.git"
+  },
   "author": "ABsmartly",
   "license": "MIT",
   "dependencies": {
