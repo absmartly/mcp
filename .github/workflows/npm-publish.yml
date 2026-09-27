@@ -38,7 +38,7 @@ jobs:
           set -e
 
           if [ "$VIEW_EXIT" -eq 0 ]; then
-            PUBLISHED_VERSION=$(printf '%s' "$VIEW_OUTPUT" | node -e 'let input = ""; process.stdin.on("data", chunk => input += chunk); process.stdin.on("end", () => console.log(JSON.parse(input)))')
+            PUBLISHED_VERSION=$(printf '%s' "$VIEW_OUTPUT" | node -e 'let input = ""; process.stdin.on("data", chunk => input += chunk); process.stdin.on("end", () => { const value = JSON.parse(input); const versions = Array.isArray(value) ? value : [value]; if (versions.length !== 1 || typeof versions[0] !== "string") process.exit(1); console.log(versions[0]); })')
           elif grep -q "E404" "$VIEW_STDERR"; then
             PUBLISHED_VERSION="none"
           else
