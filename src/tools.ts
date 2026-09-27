@@ -19,6 +19,10 @@ import type { CommandEntry } from "./cli-catalog.js";
 
 const DEFAULT_LIST_ITEMS = 20;
 const USER_FIELD_TYPE = 'user';
+// The only command whose documentation and auto-population use entity data
+// (custom fields, current user). Every other command's docs and validation
+// errors must not trigger the lazy entity load on the stateless HTTP transport.
+const ENTITY_DEPENDENT_COMMAND = 'createExperiment';
 
 export interface ToolContext {
   apiClient: APIClient | null;
@@ -34,6 +38,12 @@ export interface ToolContext {
   log?: (level: string, message: string) => void;
   /** Optional: request user confirmation for destructive actions via MCP elicitation. */
   elicitConfirmation?: (message: string) => Promise<boolean>;
+  /**
+   * Optional: populate entityWarnings/customFields/currentUserId on demand.
+   * Set when entity data is fetched lazily (Node HTTP transport); handlers
+   * that read those fields await this first.
+   */
+  ensureEntities?: () => Promise<void>;
 }
 
 function formatCommandList(entries: CommandEntry[]): string {
@@ -113,7 +123,7 @@ function buildCommandDoc(entry: CommandEntry, customFields: readonly any[]): str
   )}\n}\n\`\`\``;
 
   // Show custom fields for createExperiment
-  if (entry.command === 'createExperiment' && customFields.length > 0) {
+  if (entry.command === ENTITY_DEPENDENT_COMMAND && customFields.length > 0) {
     doc += '\n\n## Available Custom Fields\n\n';
     doc += 'Pass `custom_fields` (by name) in params.data to override defaults:\n\n';
     doc += '| Title | Type | Default Value | Section Type |\n|-------|------|---------------|-------------|\n';
@@ -135,6 +145,7 @@ export function setupTools(server: McpServer, ctx: ToolContext): void {
     {},
     { readOnlyHint: true },
     async () => {
+      await ctx.ensureEntities?.();
       const hasApi = !!ctx.apiClient;
       let text = hasApi
         ? `Authenticated with ${ctx.authType}\n\nEndpoint: ${ctx.endpoint}`
@@ -216,6 +227,9 @@ To create experiments, use execute_command with group "experiments" and command 
         return { content: [{ type: "text" as const, text: `Command "${params.group}.${params.command}" not found.${sugText}` }] };
       }
 
+      if (entry.command === ENTITY_DEPENDENT_COMMAND) {
+        await ctx.ensureEntities?.();
+      }
       const doc = buildCommandDoc(entry, ctx.customFields);
 
       return { content: [{ type: "text" as const, text: doc }] };
@@ -262,6 +276,9 @@ To create experiments, use group "experiments", command "createExperimentFromTem
       // — without this guard, the call returns success but does nothing).
       const validationErrors = validateCommandParams(entry, params.params || {});
       if (validationErrors.length > 0) {
+        if (entry.command === ENTITY_DEPENDENT_COMMAND) {
+          await ctx.ensureEntities?.();
+        }
         const docs = buildCommandDoc(entry, ctx.customFields);
         return {
           content: [{
@@ -367,7 +384,8 @@ To create experiments, use group "experiments", command "createExperimentFromTem
         }
 
         // Auto-populate custom fields for createExperiment
-        if (params.command === 'createExperiment' && commandParams.data) {
+        if (params.command === ENTITY_DEPENDENT_COMMAND && commandParams.data) {
+          await ctx.ensureEntities?.();
           autoPopulateCustomFields(
             commandParams.data as Record<string, unknown>,
             ctx.customFields,

@@ -156,6 +156,8 @@ export default async function run() {
       assert.strictEqual(captured.auth.props.email, 'alice@example.com');
       assert.strictEqual(captured.auth.props.name, 'Alice Smith');
       assert.strictEqual(captured.auth.props.user_id, '42');
+      assert.strictEqual(captured.auth.revokeExistingGrants, false,
+        'a new login must not revoke this user\'s other grants for the same client (e.g. a different ABsmartly endpoint, or a second device)');
     } finally {
       mock.restore();
     }
