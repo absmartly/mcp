@@ -30,18 +30,20 @@ jobs:
         run: |
           LOCAL_VERSION=$(node -p "require('./package.json').version")
 
+          VIEW_STDERR=$(mktemp)
+          trap 'rm -f "$VIEW_STDERR"' EXIT
           set +e
-          VIEW_OUTPUT=$(npm view @absmartly/mcp version 2>&1)
+          VIEW_OUTPUT=$(npm view @absmartly/mcp version --json 2>"$VIEW_STDERR")
           VIEW_EXIT=$?
           set -e
 
-          if [ $VIEW_EXIT -eq 0 ]; then
-            PUBLISHED_VERSION="$VIEW_OUTPUT"
-          elif echo "$VIEW_OUTPUT" | grep -q "E404"; then
+          if [ "$VIEW_EXIT" -eq 0 ]; then
+            PUBLISHED_VERSION=$(printf '%s' "$VIEW_OUTPUT" | node -e 'let input = ""; process.stdin.on("data", chunk => input += chunk); process.stdin.on("end", () => { const value = JSON.parse(input); const versions = Array.isArray(value) ? value : [value]; if (versions.length !== 1 || typeof versions[0] !== "string") process.exit(1); console.log(versions[0]); })')
+          elif grep -q "E404" "$VIEW_STDERR"; then
             PUBLISHED_VERSION="none"
           else
             echo "npm view @absmartly/mcp failed for a reason other than 'not found':"
-            echo "$VIEW_OUTPUT"
+            cat "$VIEW_STDERR"
             exit 1
           fi
 
