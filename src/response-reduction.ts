@@ -10,6 +10,8 @@ const MAX_SKELETON_KEY_NAMES = 50;
 const SKELETON_KEY_NAME_MAX_CHARS = 100;
 const HARD_CAP_MARKER = '\n\n[output cut at hard size limit]';
 const FINAL_FALLBACK_VALUE = { [OMITTED_FIELD_KEY]: 'value too large to display in any reduced form' };
+const MINIMAL_FALLBACK = '{}';
+const MINIMAL_ARRAY_FALLBACK = '[]';
 
 export interface ReductionProfile {
   maxArrayItems: number;
@@ -175,10 +177,16 @@ export function reduceToBudget(value: unknown, options: ReductionOptions): Reduc
   }
   const stats = emptyStats();
   const skeletonText = JSON.stringify(skeletonOf(value, stats), null, indent);
-  const text = skeletonText.length <= options.budgetChars
-    ? skeletonText
-    : JSON.stringify(FINAL_FALLBACK_VALUE, null, indent);
-  return { text, report: { ...stats, reduced: true, skeleton: true, originalChars, finalChars: text.length } };
+  if (skeletonText.length <= options.budgetChars) {
+    return { text: skeletonText, report: { ...stats, reduced: true, skeleton: true, originalChars, finalChars: skeletonText.length } };
+  }
+  const fallbackText = JSON.stringify(FINAL_FALLBACK_VALUE, null, indent);
+  if (fallbackText.length <= options.budgetChars) {
+    return { text: fallbackText, report: { ...stats, reduced: true, skeleton: true, originalChars, finalChars: fallbackText.length } };
+  }
+  // For arbitrarily small budgets, use a minimal valid JSON fallback that always fits for budgetChars >= 2.
+  const minimalText = Array.isArray(value) ? MINIMAL_ARRAY_FALLBACK : MINIMAL_FALLBACK;
+  return { text: minimalText, report: { ...stats, reduced: true, skeleton: true, originalChars, finalChars: minimalText.length } };
 }
 
 export function clampText(text: string, maxChars: number): string {

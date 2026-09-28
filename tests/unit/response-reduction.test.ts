@@ -164,6 +164,31 @@ export default async function runTests() {
     assert(/line \d+\n\n\[output cut/.test(capped), 'enforceHardCap cuts at a line boundary', capped.slice(-80));
   }
 
+  // Extremely small budget (10 chars): still produces valid JSON within budget.
+  {
+    const value = Array.from({ length: 10000 }, (_, i) => ({ id: i, data: 'x'.repeat(1000) }));
+    const { text, report } = reduceToBudget(value, { budgetChars: 10, ladder: SUMMARY_LADDER });
+    assert(parses(text), 'tiny budget array produces valid JSON');
+    assert(text.length <= 10, 'tiny budget array respects budget', `got ${text.length}`);
+    assert(report.reduced && report.skeleton, 'tiny budget array falls back to skeleton');
+  }
+
+  // Extremely small budget (2 chars) on object: minimal fallback.
+  {
+    const value = { id: 'experiment-1', name: 'huge-object', data: 'x'.repeat(100000) };
+    const { text } = reduceToBudget(value, { budgetChars: 2, ladder: RAW_LADDER });
+    assert(text === '{}', 'tiny budget object returns minimal fallback {}', `got ${text}`);
+    assert(parses(text), 'minimal object fallback is valid JSON');
+  }
+
+  // Extremely small budget (2 chars) on array: minimal array fallback.
+  {
+    const value = Array.from({ length: 5000 }, (_, i) => ({ id: i, data: 'x'.repeat(1000) }));
+    const { text } = reduceToBudget(value, { budgetChars: 2, ladder: SUMMARY_LADDER });
+    assert(text === '[]', 'tiny budget array returns minimal fallback []', `got ${text}`);
+    assert(parses(text), 'minimal array fallback is valid JSON');
+  }
+
   return {
     success: failed === 0,
     message: `${passed} passed, ${failed} failed`,
