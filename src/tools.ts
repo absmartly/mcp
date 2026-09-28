@@ -16,12 +16,37 @@ import {
   validateCommandParams,
 } from "./cli-catalog.js";
 import type { CommandEntry } from "./cli-catalog.js";
+import {
+  reduceToBudget,
+  clampText,
+  enforceHardCap,
+  SUMMARY_LADDER,
+  RAW_LADDER,
+  DEFAULT_JSON_INDENT,
+  OMITTED_FIELD_KEY,
+} from "./response-reduction.js";
+import type { ReductionProfile, ReductionReport } from "./response-reduction.js";
 
 const DEFAULT_LIST_ITEMS = 20;
 const DEFAULT_LIST_PAGE = 1;
 const USER_FIELD_TYPE = 'user';
 export const MAX_RESPONSE_CHARS = 25_000;
 const MAX_COMMANDS_PER_LISTING = 30;
+export const MAX_WARNINGS_SHOWN = 20;
+export const MAX_WARNING_CHARS = 300;
+export const REDUCTION_NOTICE_RESERVE_CHARS = 1_000;
+export const REDUCTION_NOTICE_PREFIX = '\n\n[Response reduced';
+const DERIVED_VIEW_KEYS = ['rows', 'detail'] as const;
+const DERIVED_VIEW_PLACEHOLDER = '[omitted: summarized view derived from `data` — call without `raw: true` to get it]';
+const GENERIC_REDUCTION_HINT = 'To get the omitted parts, narrow the request: a smaller `limit`, a `page`/`items` filter, `show`/`exclude` fields, or drop `raw: true`.';
+const INSIGHTS_REDUCTION_HINT = 'Narrow the `from`/`to` date range or use a coarser `aggregation`.';
+const COMMAND_REDUCTION_HINTS: Record<string, string> = {
+  'statistics.getPowerMatrix': 'Pass fewer `config.sample_sizes`, `config.minimum_detectable_effects`, `config.powers`, or `config.alphas` values to shrink the matrix.',
+  'insights.getVelocityInsights': INSIGHTS_REDUCTION_HINT,
+  'insights.getDecisionInsights': INSIGHTS_REDUCTION_HINT,
+  'insights.getVelocityInsightsDetail': INSIGHTS_REDUCTION_HINT,
+  'insights.getDecisionInsightsHistory': INSIGHTS_REDUCTION_HINT,
+};
 
 export interface ToolContext {
   apiClient: APIClient | null;
@@ -188,6 +213,72 @@ export function truncateResponseText(text: string, group: string, command: strin
   const budget = Math.max(0, remaining - boundedFooter.length);
   const kept = text.slice(0, budget);
   return kept + notice + boundedFooter;
+}
+
+export function capWarningLines(warnings: unknown[]): string[] {
+  const lines = warnings.slice(0, MAX_WARNINGS_SHOWN).map((w) => `- ${clampText(String(w), MAX_WARNING_CHARS)}`);
+  if (warnings.length > MAX_WARNINGS_SHOWN) {
+    lines.push(`- (${warnings.length - MAX_WARNINGS_SHOWN} more warnings omitted)`);
+  }
+  return lines;
+}
+
+export function formatResultMeta(cmdResult: Record<string, unknown>): string {
+  let meta = '';
+  if (Array.isArray(cmdResult.warnings) && cmdResult.warnings.length > 0) {
+    meta += `\n\nWarnings:\n${capWarningLines(cmdResult.warnings).join('\n')}`;
+  }
+  if (cmdResult.pagination) {
+    const pg = cmdResult.pagination as { page: number; items: number; hasMore: boolean };
+    if (pg.hasMore) {
+      meta += `\n\n(Page ${pg.page}, ${pg.items} items per page. More results available — increase page number.)`;
+    }
+  }
+  return meta;
+}
+
+function describeReduction(report: ReductionReport): string {
+  if (report.skeleton) return 'only the top-level shape could be shown';
+  const parts: string[] = [];
+  if (report.arraysCapped > 0) parts.push(`${report.arraysCapped} array(s) capped (${report.itemsOmitted} items omitted)`);
+  if (report.stringsClipped > 0) parts.push(`${report.stringsClipped} long string(s) clipped`);
+  if (report.subtreesStubbed > 0) parts.push(`${report.subtreesStubbed} nested value(s) summarized`);
+  if (report.keysOmitted > 0) parts.push(`${report.keysOmitted} field(s) omitted`);
+  return parts.join(', ');
+}
+
+export function formatReductionNotice(report: ReductionReport, group: string, command: string): string {
+  const hint = COMMAND_REDUCTION_HINTS[`${group}.${command}`] ?? GENERIC_REDUCTION_HINT;
+  return `${REDUCTION_NOTICE_PREFIX} — ${report.originalChars} characters exceeds the ${MAX_RESPONSE_CHARS}-character limit for ${group}.${command}. ` +
+    `The JSON above is valid but structurally reduced: ${describeReduction(report)}. ` +
+    `Omissions are marked in place (\`${OMITTED_FIELD_KEY}\` fields and "omitted"/"clipped" markers); ids and names are kept. ${hint}]`;
+}
+
+function withoutDerivedViews(cmdResult: Record<string, unknown>): Record<string, unknown> {
+  if (cmdResult.data === undefined) return cmdResult;
+  const copy: Record<string, unknown> = { ...cmdResult };
+  for (const key of DERIVED_VIEW_KEYS) {
+    if (copy[key] !== undefined) copy[key] = DERIVED_VIEW_PLACEHOLDER;
+  }
+  return copy;
+}
+
+function renderCommandResult(
+  output: unknown,
+  reducible: unknown,
+  cmdResult: Record<string, unknown>,
+  ladder: readonly ReductionProfile[],
+  group: string,
+  command: string,
+): string {
+  const meta = formatResultMeta(cmdResult);
+  const full = JSON.stringify(output, null, DEFAULT_JSON_INDENT);
+  if (full.length + meta.length <= MAX_RESPONSE_CHARS) {
+    return full + meta;
+  }
+  const budgetChars = MAX_RESPONSE_CHARS - meta.length - REDUCTION_NOTICE_RESERVE_CHARS;
+  const { text, report } = reduceToBudget(reducible, { budgetChars, ladder });
+  return enforceHardCap(text + formatReductionNotice(report, group, command) + meta, MAX_RESPONSE_CHARS);
 }
 
 export function setupTools(server: McpServer, ctx: ToolContext): void {
@@ -472,24 +563,10 @@ To create experiments, use group "experiments", command "createExperimentFromTem
           output = cmdResult.rows ?? cmdResult.detail ?? cmdResult.data ?? cmdResult;
         }
 
-        const text = JSON.stringify(output, null, 2);
-
-        // Warnings and pagination guidance are appended as a preserved
-        // footer — kept even when the body must be truncated, since these
-        // are exactly what a model needs to see when a response is capped
-        // (e.g. "more results available").
-        let footer = '';
-        if (cmdResult.warnings && Array.isArray(cmdResult.warnings) && cmdResult.warnings.length > 0) {
-          footer += `\n\nWarnings:\n${(cmdResult.warnings as string[]).map(w => `- ${w}`).join('\n')}`;
-        }
-        if (cmdResult.pagination) {
-          const pg = cmdResult.pagination as { page: number; items: number; hasMore: boolean };
-          if (pg.hasMore) {
-            footer += `\n\n(Page ${pg.page}, ${pg.items} items per page. More results available — increase page number.)`;
-          }
-        }
-
-        return { content: [{ type: "text" as const, text: truncateResponseText(text, params.group, params.command, footer) }] };
+        const text = params.raw
+          ? renderCommandResult(output, withoutDerivedViews(cmdResult), cmdResult, RAW_LADDER, params.group, params.command)
+          : renderCommandResult(output, output, cmdResult, SUMMARY_LADDER, params.group, params.command);
+        return { content: [{ type: "text" as const, text }] };
       } catch (error: any) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         const parts: string[] = [`Error executing ${params.group}.${params.command}: ${errorMsg}`];
