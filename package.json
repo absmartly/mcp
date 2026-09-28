@@ -1,6 +1,6 @@
 {
   "name": "@absmartly/mcp",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "MCP server for ABsmartly — experimentation platform API access for AI assistants",
   "main": "./dist/node-http-server.js",
   "types": "./dist/node-http-server.d.ts",
