@@ -501,16 +501,31 @@ To create experiments, use group "experiments", command "createExperimentFromTem
               template,
               (commandParams.defaultType as string) || 'test',
             );
-            const warningLines = warnings && warnings.length > 0
+
+            // Phase 1: Try the fully uncapped candidate (all warnings, unreduced payload, confirm instruction).
+            // If it fits, return it byte-identical to the original code's output.
+            const uncappedWarningLines = warnings && warnings.length > 0
+              ? ['', '**Warnings:**', ...warnings.map((w) => `- ${String(w)}`)]
+              : [];
+            const uncappedPayloadText = JSON.stringify(payload, null, DEFAULT_JSON_INDENT);
+            const uncappedBody = [...PREVIEW_HEADER_LINES, uncappedPayloadText, PREVIEW_CLOSE_FENCE, ...uncappedWarningLines].join('\n');
+            const uncappedFull = uncappedBody + PREVIEW_CONFIRM_INSTRUCTION;
+
+            if (uncappedFull.length <= MAX_RESPONSE_CHARS) {
+              return { content: [{ type: "text" as const, text: uncappedFull }] };
+            }
+
+            // Phase 2: Uncapped didn't fit — apply capping and structural reduction.
+            const cappedWarningLines = warnings && warnings.length > 0
               ? ['', '**Warnings:**', ...capWarningLines(warnings)]
               : [];
-            const fixedChars = [...PREVIEW_HEADER_LINES, PREVIEW_CLOSE_FENCE, ...warningLines].join('\n').length + 1;
+            const fixedChars = [...PREVIEW_HEADER_LINES, PREVIEW_CLOSE_FENCE, ...cappedWarningLines].join('\n').length + 1;
             const tailReserve = Math.max(PREVIEW_CONFIRM_INSTRUCTION.length, PREVIEW_INCOMPLETE_PREFIX.length + REDUCTION_NOTICE_RESERVE_CHARS + PREVIEW_INCOMPLETE_SUFFIX.length);
             const { text: payloadText, report } = reduceToBudget(payload, {
               budgetChars: MAX_RESPONSE_CHARS - fixedChars - tailReserve,
               ladder: RAW_LADDER,
             });
-            const body = [...PREVIEW_HEADER_LINES, payloadText, PREVIEW_CLOSE_FENCE, ...warningLines].join('\n');
+            const body = [...PREVIEW_HEADER_LINES, payloadText, PREVIEW_CLOSE_FENCE, ...cappedWarningLines].join('\n');
             const tail = report.reduced
               ? `${PREVIEW_INCOMPLETE_PREFIX} (${describeReduction(report)})${PREVIEW_INCOMPLETE_SUFFIX}`
               : PREVIEW_CONFIRM_INSTRUCTION;

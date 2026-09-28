@@ -240,6 +240,45 @@ unit_type: user_id
     assert(!text.includes('omitted'), 'small preview is not reduced');
   }
 
+  // Verify the huge-payload test still withholds confirm instruction (reduction path still works).
+  {
+    const hugeConfig = JSON.stringify({ payload: 'x'.repeat(MAX_RESPONSE_CHARS + 5000) });
+    const template = `---
+name: huge_preview_reduction_check
+type: test
+application: www
+unit_type: user_id
+percentages: "50/50"
+---
+
+## Variants
+
+### variant_0
+name: control
+config: ${hugeConfig}
+
+---
+
+### variant_1
+name: treatment_tail_check
+config: {}
+`;
+    const client = {
+      listApplications: async () => [{ id: 1, name: 'www', archived: false }],
+      listUnitTypes: async () => [{ id: 1, name: 'user_id', archived: false }],
+      listCustomSectionFields: async () => [],
+      listMetrics: async () => [],
+      listUsers: async () => [],
+      listTeams: async () => [],
+      listExperimentTags: async () => [],
+    } as any;
+    const handler = getExecuteHandler(client);
+    const res = await handler({ group: 'experiments', command: 'createExperimentFromTemplate', params: { templateContent: template } });
+    const text = res.content[0].text as string;
+    assert(!text.includes('to actually create the experiment'), 'huge-payload preview still withholds confirm (phase-2 reduction works)');
+    assert(/do not/i.test(text) && /omitted|clipped/i.test(text), 'huge-payload preview still shows incomplete notice');
+  }
+
   return {
     success: failed === 0,
     message: `${passed} passed, ${failed} failed`,
