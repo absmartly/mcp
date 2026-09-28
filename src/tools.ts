@@ -47,6 +47,11 @@ const COMMAND_REDUCTION_HINTS: Record<string, string> = {
   'insights.getVelocityInsightsDetail': INSIGHTS_REDUCTION_HINT,
   'insights.getDecisionInsightsHistory': INSIGHTS_REDUCTION_HINT,
 };
+const PREVIEW_CONFIRM_INSTRUCTION = '\n\nShow this preview to the user. If they confirm, call `execute_command` again with the same `group`, `command`, and `params`, plus `confirmed: true`, to actually create the experiment.';
+const PREVIEW_INCOMPLETE_PREFIX = '\n\n**This preview was too large to display in full — parts of the resolved payload above are omitted';
+const PREVIEW_INCOMPLETE_SUFFIX = '.** Do NOT call execute_command with confirmed: true based on this preview. Reduce the template size (e.g. shorten variant configs) and try again so the full payload can be reviewed first.';
+const PREVIEW_HEADER_LINES = ['**Preview — experiment NOT YET created.**', '', 'Resolved payload that would be sent to the API:', '', '```json'];
+const PREVIEW_CLOSE_FENCE = '```';
 
 export interface ToolContext {
   apiClient: APIClient | null;
@@ -496,30 +501,20 @@ To create experiments, use group "experiments", command "createExperimentFromTem
               template,
               (commandParams.defaultType as string) || 'test',
             );
-            const lines: string[] = [];
-            lines.push('**Preview — experiment NOT YET created.**');
-            lines.push('');
-            lines.push('Resolved payload that would be sent to the API:');
-            lines.push('');
-            lines.push('```json');
-            lines.push(JSON.stringify(payload, null, 2));
-            lines.push('```');
-            if (warnings && warnings.length > 0) {
-              lines.push('');
-              lines.push('**Warnings:**');
-              for (const w of warnings) lines.push(`- ${w}`);
-            }
-            const body = lines.join('\n');
-            const confirmInstruction = '\n\nShow this preview to the user. If they confirm, call `execute_command` again with the same `group`, `command`, and `params`, plus `confirmed: true`, to actually create the experiment.';
-            // If the full preview (body + confirm instruction) would be
-            // truncated, withhold the confirm instruction entirely — a
-            // model must not be told it's safe to confirm creation from a
-            // payload it was never shown in full.
-            const wouldTruncate = body.length + confirmInstruction.length > MAX_RESPONSE_CHARS;
-            const footer = wouldTruncate
-              ? '\n\n**This preview is too large to display in full and had to be truncated below — the resolved payload is NOT completely shown.** Do NOT call execute_command with confirmed: true based on this preview. Reduce the template size (e.g. shorten variant configs) and try again so the full payload can be reviewed first.'
-              : confirmInstruction;
-            return { content: [{ type: "text" as const, text: truncateResponseText(body, params.group, params.command, footer) }] };
+            const warningLines = warnings && warnings.length > 0
+              ? ['', '**Warnings:**', ...capWarningLines(warnings)]
+              : [];
+            const fixedChars = [...PREVIEW_HEADER_LINES, PREVIEW_CLOSE_FENCE, ...warningLines].join('\n').length + 1;
+            const tailReserve = Math.max(PREVIEW_CONFIRM_INSTRUCTION.length, PREVIEW_INCOMPLETE_PREFIX.length + REDUCTION_NOTICE_RESERVE_CHARS + PREVIEW_INCOMPLETE_SUFFIX.length);
+            const { text: payloadText, report } = reduceToBudget(payload, {
+              budgetChars: MAX_RESPONSE_CHARS - fixedChars - tailReserve,
+              ladder: RAW_LADDER,
+            });
+            const body = [...PREVIEW_HEADER_LINES, payloadText, PREVIEW_CLOSE_FENCE, ...warningLines].join('\n');
+            const tail = report.reduced
+              ? `${PREVIEW_INCOMPLETE_PREFIX} (${describeReduction(report)})${PREVIEW_INCOMPLETE_SUFFIX}`
+              : PREVIEW_CONFIRM_INSTRUCTION;
+            return { content: [{ type: "text" as const, text: enforceHardCap(body + tail, MAX_RESPONSE_CHARS) }] };
           } catch (previewError: any) {
             const msg = previewError?.message || String(previewError);
             return {

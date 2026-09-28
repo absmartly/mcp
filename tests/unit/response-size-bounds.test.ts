@@ -170,6 +170,76 @@ export default async function runTests() {
     assert(meta.includes('clipped from'), 'capped meta includes clipping indicator');
   }
 
+  // Preview with a huge variant config: within cap, JSON valid, later variant still visible, no confirm instruction.
+  {
+    const hugeConfig = JSON.stringify({ payload: 'x'.repeat(MAX_RESPONSE_CHARS + 5000) });
+    const template = `---
+name: huge_preview_exp
+type: test
+application: www
+unit_type: user_id
+percentages: "50/50"
+---
+
+## Variants
+
+### variant_0
+name: control
+config: ${hugeConfig}
+
+---
+
+### variant_1
+name: treatment_tail_marker
+config: {}
+`;
+    const client = {
+      listApplications: async () => [{ id: 1, name: 'www', archived: false }],
+      listUnitTypes: async () => [{ id: 1, name: 'user_id', archived: false }],
+      listCustomSectionFields: async () => [],
+      listMetrics: async () => [],
+      listUsers: async () => [],
+      listTeams: async () => [],
+      listExperimentTags: async () => [],
+    } as any;
+    const handler = getExecuteHandler(client);
+    const res = await handler({ group: 'experiments', command: 'createExperimentFromTemplate', params: { templateContent: template } });
+    const text = res.content[0].text as string;
+    const fence = text.match(/```json\n([\s\S]*?)\n```/);
+    let payload: any;
+    try { payload = fence ? JSON.parse(fence[1]) : undefined; } catch { payload = undefined; }
+    assert(text.length <= MAX_RESPONSE_CHARS, 'huge preview within cap', `got ${text.length}`);
+    assert(payload !== undefined, 'preview payload block is valid JSON');
+    assert(text.includes('treatment_tail_marker'), 'variant AFTER the huge one is still shown (tail-slicing would lose it)');
+    assert(!text.includes('to actually create the experiment'), 'reduced preview withholds the confirm instruction');
+    assert(/do not/i.test(text) && /omitted|clipped/i.test(text), 'reduced preview says it is incomplete and what was reduced', text.slice(-500));
+  }
+
+  // Preview that fits: unchanged, confirm instruction present.
+  {
+    const template = `---
+name: small_preview_exp
+type: test
+application: www
+unit_type: user_id
+---
+`;
+    const client = {
+      listApplications: async () => [{ id: 1, name: 'www', archived: false }],
+      listUnitTypes: async () => [{ id: 1, name: 'user_id', archived: false }],
+      listCustomSectionFields: async () => [],
+      listMetrics: async () => [],
+      listUsers: async () => [],
+      listTeams: async () => [],
+      listExperimentTags: async () => [],
+    } as any;
+    const handler = getExecuteHandler(client);
+    const res = await handler({ group: 'experiments', command: 'createExperimentFromTemplate', params: { templateContent: template } });
+    const text = res.content[0].text as string;
+    assert(text.includes('to actually create the experiment'), 'small preview keeps the confirm instruction');
+    assert(!text.includes('omitted'), 'small preview is not reduced');
+  }
+
   return {
     success: failed === 0,
     message: `${passed} passed, ${failed} failed`,
