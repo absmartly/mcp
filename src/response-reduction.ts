@@ -87,7 +87,7 @@ function essentialStringLimit(profile: ReductionProfile): number {
 
 function stubObject(obj: Record<string, unknown>, stats: ReductionStats): Record<string, unknown> {
   stats.subtreesStubbed++;
-  const stub: Record<string, unknown> = {};
+  const stub: Record<string, unknown> = Object.create(null);
   for (const [k, v] of Object.entries(obj)) {
     if (ESSENTIAL_KEY_PATTERN.test(k) && isScalar(v)) {
       stub[k] = typeof v === 'string' ? clipString(v, ESSENTIAL_STRING_MIN_CHARS, stats) : v;
@@ -120,7 +120,7 @@ function reduceNode(v: unknown, profile: ReductionProfile, depth: number, stats:
     const essentialCount = entries.filter(([k]) => ESSENTIAL_KEY_PATTERN.test(k)).length;
     let nonEssentialBudget = Math.max(0, profile.maxObjectKeys - essentialCount);
     let omittedKeys = 0;
-    const out: Record<string, unknown> = {};
+    const out: Record<string, unknown> = Object.create(null);
     for (const [k, val] of entries) {
       const essential = ESSENTIAL_KEY_PATTERN.test(k);
       if (!essential) {

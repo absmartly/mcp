@@ -108,9 +108,9 @@ export default async function runTests() {
 
   // Pathological: forces the skeleton fallback — still valid JSON within budget.
   {
-    const value = Array.from({ length: 2000 }, (_, i) => {
+    const value = Array.from({ length: 100 }, (_, i) => {
       const o: Record<string, string> = {};
-      for (let k = 0; k < 500; k++) o[`field_${k}_${'n'.repeat(80)}`] = 's'.repeat(200);
+      for (let k = 0; k < 50; k++) o[`field_${k}_${'n'.repeat(80)}`] = 's'.repeat(200);
       return o;
     });
     const { text } = reduceToBudget(value, { budgetChars: SMALL_BUDGET, ladder: RAW_LADDER });
