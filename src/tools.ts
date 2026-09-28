@@ -244,11 +244,40 @@ function describeReduction(report: ReductionReport): string {
   return parts.join(', ');
 }
 
-export function formatReductionNotice(report: ReductionReport, group: string, command: string): string {
+interface ReductionCauses {
+  derivedViewsDropped?: boolean;
+  metaCapped?: boolean;
+}
+
+const DERIVED_VIEWS_DROPPED_DESCRIPTION = 'the summarized `rows`/`detail` view was omitted since it duplicates `data`';
+const META_CAPPED_DESCRIPTION = 'warnings were capped/truncated';
+const FALLBACK_REDUCTION_DESCRIPTION = 'the response was restructured to fit within the limit';
+
+function describeCauses(report: ReductionReport, causes: ReductionCauses): string {
+  const parts: string[] = [];
+  if (causes.derivedViewsDropped) parts.push(DERIVED_VIEWS_DROPPED_DESCRIPTION);
+  if (causes.metaCapped) parts.push(META_CAPPED_DESCRIPTION);
+  const reductionDesc = describeReduction(report);
+  if (reductionDesc) parts.push(reductionDesc);
+  if (parts.length === 0) parts.push(FALLBACK_REDUCTION_DESCRIPTION);
+  return parts.join(', ');
+}
+
+export function formatReductionNotice(
+  report: ReductionReport,
+  group: string,
+  command: string,
+  causes: ReductionCauses = {},
+): string {
   const hint = COMMAND_REDUCTION_HINTS[`${group}.${command}`] ?? GENERIC_REDUCTION_HINT;
   return `${REDUCTION_NOTICE_PREFIX} — ${report.originalChars} characters exceeds the ${MAX_RESPONSE_CHARS}-character limit for ${group}.${command}. ` +
-    `The JSON above is valid but structurally reduced: ${describeReduction(report)}. ` +
+    `The JSON above is valid but structurally reduced: ${describeCauses(report, causes)}. ` +
     `Omissions are marked in place (\`${OMITTED_FIELD_KEY}\` fields and "omitted"/"clipped" markers); ids and names are kept. ${hint}]`;
+}
+
+function hasDerivedViews(cmdResult: Record<string, unknown>): boolean {
+  if (cmdResult.data === undefined) return false;
+  return DERIVED_VIEW_KEYS.some((key) => cmdResult[key] !== undefined);
 }
 
 function withoutDerivedViews(cmdResult: Record<string, unknown>): Record<string, unknown> {
@@ -267,6 +296,7 @@ function renderCommandResult(
   ladder: readonly ReductionProfile[],
   group: string,
   command: string,
+  derivedViewsDropped: boolean = false,
 ): string {
   const fullMeta = formatResultMeta(cmdResult, false);
   const full = JSON.stringify(output, null, DEFAULT_JSON_INDENT);
@@ -274,9 +304,12 @@ function renderCommandResult(
     return full + fullMeta;
   }
   const meta = formatResultMeta(cmdResult, true);
+  const metaCapped = meta.length !== fullMeta.length;
   const budgetChars = MAX_RESPONSE_CHARS - meta.length - REDUCTION_NOTICE_RESERVE_CHARS;
   const { text, report } = reduceToBudget(reducible, { budgetChars, ladder });
-  return enforceHardCap(text + formatReductionNotice(report, group, command) + meta, MAX_RESPONSE_CHARS);
+  const originalChars = full.length + fullMeta.length;
+  const notice = formatReductionNotice({ ...report, originalChars }, group, command, { derivedViewsDropped, metaCapped });
+  return enforceHardCap(text + notice + meta, MAX_RESPONSE_CHARS);
 }
 
 export function setupTools(server: McpServer, ctx: ToolContext): void {
@@ -567,12 +600,11 @@ To create experiments, use group "experiments", command "createExperimentFromTem
         }
 
         const text = params.raw
-          ? renderCommandResult(output, withoutDerivedViews(cmdResult), cmdResult, RAW_LADDER, params.group, params.command)
+          ? renderCommandResult(output, withoutDerivedViews(cmdResult), cmdResult, RAW_LADDER, params.group, params.command, hasDerivedViews(cmdResult))
           : renderCommandResult(output, output, cmdResult, SUMMARY_LADDER, params.group, params.command);
         return { content: [{ type: "text" as const, text }] };
       } catch (error: any) {
         const errorMsg = error instanceof Error ? error.message : String(error);
-        const parts: string[] = [`Error executing ${params.group}.${params.command}: ${errorMsg}`];
 
         // Phase 1: Build fully uncapped output (all errors, no clipping, no structural reduction).
         const uncappedParts: string[] = [`Error executing ${params.group}.${params.command}: ${errorMsg}`];

@@ -101,6 +101,8 @@ export default async function runTests() {
     try { parsed = JSON.parse(jsonBody(text)); } catch { parsed = undefined; }
     assert(Array.isArray(parsed) && parsed[0].id === 0, 'reduced body parses as JSON and keeps the first record', jsonBody(text).slice(-200));
     assert(/apps\.listApps/.test(text), 'notice names group.command');
+    assert(/array\(s\) capped/.test(text), 'notice for real ladder reduction still describes actual array capping', text.slice(-400));
+    assert(!text.includes('reduced: .'), 'notice for real ladder reduction has no empty-description artifact');
   }
 
   // raw: true on a huge result: body parses as a CommandResult with `data`.
@@ -134,6 +136,66 @@ export default async function runTests() {
     assert(parsed && parsed.data[19].id === 19, 'all 20 experiment ids kept once duplication is removed');
     assert(/More results available/.test(text), 'pagination guidance survives reduction');
     assert(parsed && parsed.pagination && parsed.pagination.hasMore === true, 'pagination object preserved inside the raw body');
+  }
+
+  // raw: true overflow driven purely by rows/data duplication: dropping the derived view alone
+  // brings it under budget, so no ladder reduction of the remaining data is needed. The notice
+  // must not report reducible's own (already small) size, nor emit an empty "reduced: ." description.
+  {
+    const experiments = Array.from({ length: 20 }, (_, i) => ({
+      id: i,
+      name: `exp_${i}`,
+      state: 'running',
+      description: 'd'.repeat(1000),
+    }));
+    const handler = getExecuteHandler({ listExperiments: async () => experiments });
+    const res = await handler({ group: 'experiments', command: 'listExperiments', params: {}, raw: true });
+    const text = res.content[0].text as string;
+    let parsed: any;
+    try { parsed = JSON.parse(jsonBody(text)); } catch { parsed = undefined; }
+    assert(text.length <= MAX_RESPONSE_CHARS, 'rows-duplication-only overflow within cap', `got ${text.length}`);
+    assert(text.includes(REDUCTION_NOTICE_PREFIX), 'rows-duplication-only overflow still carries a reduction notice');
+    assert(!text.includes('reduced: .'), 'notice has no empty-reduction-description artifact', text.slice(-400));
+    assert(parsed && typeof parsed.rows === 'string' && /derived from `data`/.test(parsed.rows), 'derived rows view was dropped', String(parsed?.rows).slice(0, 200));
+    assert(text.includes('the summarized `rows`/`detail` view was omitted since it duplicates `data`'), 'notice explains the derived-view drop', text.slice(-500));
+    const noticeMatch = text.match(/reduced — (\d+) characters/);
+    const reportedChars = noticeMatch ? Number(noticeMatch[1]) : 0;
+    assert(reportedChars > text.length, 'notice reports the actual pre-drop total, which exceeds the final (reduced) output length', `reported ${reportedChars}, final ${text.length}`);
+    assert(reportedChars > MAX_RESPONSE_CHARS, 'notice reports a total that genuinely exceeded the cap, not reducible\'s own small post-drop size', `reported ${reportedChars}`);
+    assert(parsed && parsed.data.length === 20 && parsed.data[19].id === 19, 'all 20 records kept once the duplicate view is dropped');
+  }
+
+  // Warnings-driven overflow with a small actual JSON body: capping/truncating warnings alone
+  // brings the response under budget, so the payload itself never needed reduction.
+  {
+    const client = {
+      listApplications: async () => [{ id: 1, name: 'www', archived: false }],
+      listUnitTypes: async () => [{ id: 1, name: 'user_id', archived: false }],
+      listCustomSectionFields: async () => [],
+      listMetrics: async () => [],
+      listUsers: async () => [],
+      listTeams: async () => [],
+      listExperimentTags: async () => [],
+      createExperiment: async () => ({ id: 1, name: 'warn_test', type: 'test' }),
+    } as any;
+    const fieldCount = 400;
+    const fields = Array.from({ length: fieldCount }, (_, i) => `custom_unknown_field_${i}: value_${i}`).join('\n');
+    const template = `---
+name: warn_test
+type: test
+application: www
+unit_type: user_id
+${fields}
+---
+`;
+    const handler = getExecuteHandler(client);
+    const res = await handler({ group: 'experiments', command: 'createExperimentFromTemplate', params: { templateContent: template }, confirmed: true });
+    const text = res.content[0].text as string;
+    assert(text.length <= MAX_RESPONSE_CHARS, 'warnings-driven overflow within cap', `got ${text.length}`);
+    assert(text.includes(REDUCTION_NOTICE_PREFIX), 'warnings-driven overflow carries a reduction notice');
+    assert(!text.includes('reduced: .'), 'notice has no empty-reduction-description artifact', text.slice(-400));
+    assert(/warnings were capped/.test(text), 'notice mentions warnings were affected', text.slice(-500));
+    assert(/more warnings omitted/.test(text), 'capped warnings metadata is present in the body');
   }
 
   // Unit test: formatResultMeta with uncapped flag preserves all 25 warnings.
