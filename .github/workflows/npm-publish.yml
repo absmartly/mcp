@@ -101,8 +101,8 @@ jobs:
         run: npm run build
 
       # Guard against this recurring for any future entry point: verify every
-      # file package.json's `main`/`exports` map declares actually exists in
-      # dist/ before we hand the tarball to npm.
+      # file package.json's `main`/`bin`/`exports` map declares actually
+      # exists in dist/ before we hand the tarball to npm.
       - name: Verify build output matches package.json entry points
         if: steps.version-check.outputs.changed == 'true'
         run: |
@@ -116,6 +116,7 @@ jobs:
               if (typeof val === "string") { paths.add(val); return; }
               if (val && typeof val === "object") { for (const v of Object.values(val)) collect(v); }
             };
+            collect(pkg.bin);
             collect(pkg.exports);
             const missing = [...paths].filter((p) => !fs.existsSync(p));
             if (missing.length > 0) {
