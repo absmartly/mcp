@@ -90,6 +90,42 @@ jobs:
         if: steps.version-check.outputs.changed == 'true'
         run: npm run test:unit
 
+      # dist/ is gitignored and only produced by `tsc` — package.json's `main`,
+      # `exports`, and `files` all point into it. Without this step the job
+      # never compiles anything, so `npm publish` packs whatever `files` lists
+      # from the checkout (bin/, src/, public/docs/) with an empty/missing
+      # dist/, silently shipping a tarball that cannot be imported. (This is
+      # exactly what happened with 1.2.0 — see fix/npm-publish-missing-dist.)
+      - name: Build
+        if: steps.version-check.outputs.changed == 'true'
+        run: npm run build
+
+      # Guard against this recurring for any future entry point: verify every
+      # file package.json's `main`/`exports` map declares actually exists in
+      # dist/ before we hand the tarball to npm.
+      - name: Verify build output matches package.json entry points
+        if: steps.version-check.outputs.changed == 'true'
+        run: |
+          node -e '
+            const fs = require("fs");
+            const pkg = require("./package.json");
+            const paths = new Set();
+            if (typeof pkg.main === "string") paths.add(pkg.main);
+            if (typeof pkg.types === "string") paths.add(pkg.types);
+            const collect = (val) => {
+              if (typeof val === "string") { paths.add(val); return; }
+              if (val && typeof val === "object") { for (const v of Object.values(val)) collect(v); }
+            };
+            collect(pkg.exports);
+            const missing = [...paths].filter((p) => !fs.existsSync(p));
+            if (missing.length > 0) {
+              console.error("Missing build output declared in package.json:");
+              for (const m of missing) console.error(`  - ${m}`);
+              process.exit(1);
+            }
+            console.log(`Verified ${paths.size} entry point(s) exist in the build output.`);
+          '
+
       - name: Publish to npm
         if: steps.version-check.outputs.changed == 'true'
         run: npm publish --access public
