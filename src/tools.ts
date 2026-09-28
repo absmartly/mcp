@@ -250,12 +250,12 @@ Common commands:
 - apps: listApps
 - segments: listSegments
 
-To create experiments, use group "experiments", command "createExperimentFromTemplate", and pass a markdown template as params.templateContent. By default this returns a PREVIEW (resolved payload + warnings) without creating anything — show the preview to the user, then call again with confirmed: true to actually create. Read absmartly://docs/templates for template format.`,
+To create experiments, use group "experiments", command "createExperimentFromTemplate", and pass a markdown template as params.templateContent. By default this returns a PREVIEW (resolved payload + warnings) without creating anything — show the preview to the user, and only after they have explicitly confirmed should you call again with confirmed: true to actually create. Read absmartly://docs/templates for template format.`,
     {
       group: z.string().describe("Command group (e.g. 'experiments', 'metrics'). Use discover_commands to find available groups."),
       command: z.string().describe("Command name within the group (e.g. 'listExperiments', 'cloneExperiment')"),
       params: z.record(z.unknown()).optional().describe("Command parameters as a JSON object. Keys match the parameter names from command docs."),
-      confirmed: z.boolean().optional().describe("Only set to true after the user has explicitly confirmed this specific action (start, stop, archive, delete) — or, for createExperimentFromTemplate, after the user has reviewed the resolved-payload preview. Do not set this on your own initiative. Without confirmed=true, destructive commands return a confirmation prompt and createExperimentFromTemplate returns a preview instead of creating anything."),
+      confirmed: z.boolean().optional().describe("Only set to true after the user has explicitly confirmed this specific action (start, stop, archive, delete) — or, for createExperimentFromTemplate, after the user has reviewed the resolved-payload preview AND explicitly confirmed creation. Reviewing the preview alone is not confirmation. Do not set this on your own initiative. Without confirmed=true, destructive commands return a confirmation prompt and createExperimentFromTemplate returns a preview instead of creating anything."),
       raw: z.boolean().optional().describe("Return the raw CommandResult instead of just .data (includes .rows, .detail, .warnings, .pagination)"),
       limit: z.number().optional().describe("Max items for list operations (default: 20). Sets 'items' in params if not already set."),
     },
@@ -302,8 +302,13 @@ To create experiments, use group "experiments", command "createExperimentFromTem
         // Try MCP elicitation first (works in interactive clients like Claude Desktop)
         if (ctx.elicitConfirmation) {
           try {
+            const targetParams = Object.entries(params.params || {})
+              .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
+              .join(', ');
             const confirmed = await ctx.elicitConfirmation(
-              `Are you sure you want to ${entry.description.toLowerCase()}?`
+              `Are you sure you want to ${entry.description.toLowerCase()}? ` +
+              `Command: ${params.group}.${params.command}` +
+              (targetParams ? ` (${targetParams})` : '')
             );
             if (!confirmed) {
               ctx.log?.('info', `Destructive action cancelled: ${params.group}.${params.command}`);
