@@ -136,6 +136,40 @@ export default async function runTests() {
     assert(parsed && parsed.pagination && parsed.pagination.hasMore === true, 'pagination object preserved inside the raw body');
   }
 
+  // Unit test: formatResultMeta with uncapped flag preserves all 25 warnings.
+  {
+    const warnings = Array.from({ length: 25 }, (_, i) => `warning_${i}`);
+    const meta = formatResultMeta({ warnings }, false);
+    assert(!meta.includes('omitted'), 'uncapped meta for 25 warnings has no omitted marker');
+    for (let i = 0; i < 25; i++) {
+      assert(meta.includes(`warning_${i}`), `uncapped meta includes warning_${i}`);
+    }
+  }
+
+  // Unit test: formatResultMeta uncapped preserves long warning (>300 chars).
+  {
+    const longWarning = 'w'.repeat(500);
+    const meta = formatResultMeta({ warnings: [longWarning] }, false);
+    assert(meta.includes(longWarning), 'uncapped meta preserves full 500-char warning without clipping');
+  }
+
+  // Unit test: formatResultMeta with capped flag limits warnings to MAX_WARNINGS_SHOWN.
+  {
+    const warnings = Array.from({ length: 25 }, (_, i) => `warning_${i}`);
+    const meta = formatResultMeta({ warnings }, true);
+    assert(meta.includes('omitted'), 'capped meta for 25 warnings includes omitted marker');
+    assert(meta.includes('5 more warnings omitted'), 'capped meta reports correct count of omitted warnings');
+    assert(!meta.includes('warning_20'), 'capped meta does not include warning_20 (beyond cap)');
+  }
+
+  // Unit test: formatResultMeta with capped flag clips long warning to MAX_WARNING_CHARS.
+  {
+    const longWarning = 'w'.repeat(500);
+    const meta = formatResultMeta({ warnings: [longWarning] }, true);
+    assert(!meta.includes(longWarning), 'capped meta does not include full 500-char warning');
+    assert(meta.includes('clipped from'), 'capped meta includes clipping indicator');
+  }
+
   return {
     success: failed === 0,
     message: `${passed} passed, ${failed} failed`,

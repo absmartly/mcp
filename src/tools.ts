@@ -223,10 +223,13 @@ export function capWarningLines(warnings: unknown[]): string[] {
   return lines;
 }
 
-export function formatResultMeta(cmdResult: Record<string, unknown>): string {
+export function formatResultMeta(cmdResult: Record<string, unknown>, cap: boolean = true): string {
   let meta = '';
   if (Array.isArray(cmdResult.warnings) && cmdResult.warnings.length > 0) {
-    meta += `\n\nWarnings:\n${capWarningLines(cmdResult.warnings).join('\n')}`;
+    const warningLines = cap
+      ? capWarningLines(cmdResult.warnings)
+      : cmdResult.warnings.map((w) => `- ${String(w)}`);
+    meta += `\n\nWarnings:\n${warningLines.join('\n')}`;
   }
   if (cmdResult.pagination) {
     const pg = cmdResult.pagination as { page: number; items: number; hasMore: boolean };
@@ -271,11 +274,12 @@ function renderCommandResult(
   group: string,
   command: string,
 ): string {
-  const meta = formatResultMeta(cmdResult);
+  const fullMeta = formatResultMeta(cmdResult, false);
   const full = JSON.stringify(output, null, DEFAULT_JSON_INDENT);
-  if (full.length + meta.length <= MAX_RESPONSE_CHARS) {
-    return full + meta;
+  if (full.length + fullMeta.length <= MAX_RESPONSE_CHARS) {
+    return full + fullMeta;
   }
+  const meta = formatResultMeta(cmdResult, true);
   const budgetChars = MAX_RESPONSE_CHARS - meta.length - REDUCTION_NOTICE_RESERVE_CHARS;
   const { text, report } = reduceToBudget(reducible, { budgetChars, ladder });
   return enforceHardCap(text + formatReductionNotice(report, group, command) + meta, MAX_RESPONSE_CHARS);
