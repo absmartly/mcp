@@ -279,6 +279,77 @@ config: {}
     assert(/do not/i.test(text) && /omitted|clipped/i.test(text), 'huge-payload preview still shows incomplete notice');
   }
 
+  // Error with a huge JSON error body: within cap, HTTP status and error head still shown.
+  {
+    const client = {
+      listApplications: async () => {
+        const err: any = new Error('API request failed');
+        err.statusCode = 500;
+        err.response = JSON.stringify({ error: 'x'.repeat(MAX_RESPONSE_CHARS + 5000) });
+        throw err;
+      },
+    } as any;
+    const handler = getExecuteHandler(client);
+    const res = await handler({ group: 'apps', command: 'listApps', params: {} });
+    const text = res.content[0].text as string;
+    assert(text.length <= MAX_RESPONSE_CHARS, 'huge error body within cap', `got ${text.length}`);
+    assert(text.includes('HTTP Status: 500'), 'status line preserved');
+    assert(/clipped from \d+ chars/.test(text), 'oversized error string is marked as clipped');
+  }
+
+  // Error with thousands of validation errors: first N shown, rest counted.
+  {
+    const client = {
+      listApplications: async () => {
+        const err: any = new Error('Validation failed');
+        err.statusCode = 422;
+        err.response = { errors: Array.from({ length: 5000 }, (_, i) => ({ field: `f${i}`, message: 'm'.repeat(100) })) };
+        throw err;
+      },
+    } as any;
+    const handler = getExecuteHandler(client);
+    const res = await handler({ group: 'apps', command: 'listApps', params: {} });
+    const text = res.content[0].text as string;
+    assert(text.length <= MAX_RESPONSE_CHARS, 'many validation errors within cap', `got ${text.length}`);
+    assert(text.includes('"field":"f0"'), 'first validation error shown in compact JSON as before');
+    assert(/more validation errors omitted/.test(text), 'omitted validation error count reported');
+  }
+
+  // Small error with 30 validation errors: all 30 shown (fast path not triggered capping).
+  {
+    const client = {
+      listApplications: async () => {
+        const err: any = new Error('Bad');
+        err.statusCode = 400;
+        err.response = { errors: Array.from({ length: 30 }, (_, i) => `field_${i} is required`) };
+        throw err;
+      },
+    } as any;
+    const handler = getExecuteHandler(client);
+    const res = await handler({ group: 'apps', command: 'listApps', params: {} });
+    const text = res.content[0].text as string;
+    assert(text.length <= MAX_RESPONSE_CHARS, 'small error with 30 items within cap', `got ${text.length}`);
+    for (let i = 0; i < 30; i++) {
+      assert(text.includes(`field_${i} is required`), `all 30 errors shown (fast path): error_${i} present`);
+    }
+    assert(!text.includes('more validation errors omitted'), 'fast path: no omit marker when all fit');
+  }
+
+  // Small error: byte-identical format.
+  {
+    const client = {
+      listApplications: async () => {
+        const err: any = new Error('Bad');
+        err.statusCode = 400;
+        err.response = { errors: ['name is required'] };
+        throw err;
+      },
+    } as any;
+    const handler = getExecuteHandler(client);
+    const res = await handler({ group: 'apps', command: 'listApps', params: {} });
+    assert(res.content[0].text === 'Error executing apps.listApps: Bad\nHTTP Status: 400\nValidation errors:\n  - name is required', 'small error output unchanged', res.content[0].text);
+  }
+
   return {
     success: failed === 0,
     message: `${passed} passed, ${failed} failed`,

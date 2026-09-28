@@ -36,6 +36,11 @@ export const MAX_WARNINGS_SHOWN = 20;
 export const MAX_WARNING_CHARS = 300;
 export const REDUCTION_NOTICE_RESERVE_CHARS = 1_000;
 export const REDUCTION_NOTICE_PREFIX = '\n\n[Response reduced';
+const MAX_ERROR_MESSAGE_CHARS = 2_000;
+const MAX_API_ERRORS_SHOWN = 20;
+const MAX_API_ERROR_ITEM_CHARS = 500;
+const MAX_API_ERROR_RESPONSE_CHARS = 10_000;
+const COMPACT_JSON_INDENT = 0;
 const DERIVED_VIEW_KEYS = ['rows', 'detail'] as const;
 const DERIVED_VIEW_PLACEHOLDER = '[omitted: summarized view derived from `data` — call without `raw: true` to get it]';
 const GENERIC_REDUCTION_HINT = 'To get the omitted parts, narrow the request: a smaller `limit`, a `page`/`items` filter, `show`/`exclude` fields, or drop `raw: true`.';
@@ -226,6 +231,12 @@ export function capWarningLines(warnings: unknown[]): string[] {
     lines.push(`- (${warnings.length - MAX_WARNINGS_SHOWN} more warnings omitted)`);
   }
   return lines;
+}
+
+function formatApiErrorValue(value: unknown, maxChars: number): string {
+  return typeof value === 'string'
+    ? clampText(value, maxChars)
+    : reduceToBudget(value, { budgetChars: maxChars, ladder: RAW_LADDER, indent: COMPACT_JSON_INDENT }).text;
 }
 
 export function formatResultMeta(cmdResult: Record<string, unknown>, cap: boolean = true): string {
@@ -585,22 +596,23 @@ To create experiments, use group "experiments", command "createExperimentFromTem
         const errorMsg = error instanceof Error ? error.message : String(error);
         const parts: string[] = [`Error executing ${params.group}.${params.command}: ${errorMsg}`];
 
-        // Surface API response details (validation errors, field-level errors, etc.)
+        // Phase 1: Build fully uncapped output (all errors, no clipping, no structural reduction).
+        const uncappedParts: string[] = [`Error executing ${params.group}.${params.command}: ${errorMsg}`];
         if (error.statusCode) {
-          parts.push(`\nHTTP Status: ${error.statusCode}`);
+          uncappedParts.push(`\nHTTP Status: ${error.statusCode}`);
         }
         if (error.response) {
           try {
             const resp = typeof error.response === 'string' ? JSON.parse(error.response) : error.response;
             if (resp.errors && Array.isArray(resp.errors)) {
-              parts.push(`\nValidation errors:\n${resp.errors.map((e: any) => `  - ${typeof e === 'string' ? e : JSON.stringify(e)}`).join('\n')}`);
+              uncappedParts.push(`\nValidation errors:\n${resp.errors.map((e: unknown) => `  - ${typeof e === 'string' ? e : JSON.stringify(e)}`).join('\n')}`);
             } else if (resp.error) {
-              parts.push(`\nAPI error: ${typeof resp.error === 'string' ? resp.error : JSON.stringify(resp.error)}`);
+              uncappedParts.push(`\nAPI error: ${typeof resp.error === 'string' ? resp.error : JSON.stringify(resp.error)}`);
             } else {
-              parts.push(`\nAPI response: ${JSON.stringify(resp, null, 2)}`);
+              uncappedParts.push(`\nAPI response: ${JSON.stringify(resp, null, 2)}`);
             }
           } catch {
-            parts.push(`\nAPI response: ${String(error.response)}`);
+            uncappedParts.push(`\nAPI response: ${String(error.response)}`);
           }
         }
 
@@ -610,8 +622,41 @@ To create experiments, use group "experiments", command "createExperimentFromTem
           errorFooter = '\nTip: Read the absmartly://docs/templates resource for valid template examples.';
         }
 
-        ctx.log?.('error', parts[0]);
-        return { content: [{ type: "text" as const, text: truncateResponseText(parts.join(''), params.group, params.command, errorFooter) }] };
+        const uncappedBody = uncappedParts.join('') + errorFooter;
+
+        // Phase 1: Try the fully uncapped output. If it fits, return it byte-identical.
+        if (uncappedBody.length <= MAX_RESPONSE_CHARS) {
+          ctx.log?.('error', uncappedParts[0]);
+          return { content: [{ type: "text" as const, text: uncappedBody }] };
+        }
+
+        // Phase 2: Uncapped didn't fit — rebuild with capping and structural reduction.
+        const cappedParts: string[] = [`Error executing ${params.group}.${params.command}: ${clampText(errorMsg, MAX_ERROR_MESSAGE_CHARS)}`];
+        if (error.statusCode) {
+          cappedParts.push(`\nHTTP Status: ${error.statusCode}`);
+        }
+        if (error.response) {
+          try {
+            const resp = typeof error.response === 'string' ? JSON.parse(error.response) : error.response;
+            if (resp.errors && Array.isArray(resp.errors)) {
+              const shown = resp.errors.slice(0, MAX_API_ERRORS_SHOWN).map((e: unknown) => `  - ${formatApiErrorValue(e, MAX_API_ERROR_ITEM_CHARS)}`);
+              if (resp.errors.length > MAX_API_ERRORS_SHOWN) {
+                shown.push(`  - (${resp.errors.length - MAX_API_ERRORS_SHOWN} more validation errors omitted)`);
+              }
+              cappedParts.push(`\nValidation errors:\n${shown.join('\n')}`);
+            } else if (resp.error) {
+              cappedParts.push(`\nAPI error: ${formatApiErrorValue(resp.error, MAX_ERROR_MESSAGE_CHARS)}`);
+            } else {
+              cappedParts.push(`\nAPI response: ${reduceToBudget(resp, { budgetChars: MAX_API_ERROR_RESPONSE_CHARS, ladder: RAW_LADDER }).text}`);
+            }
+          } catch {
+            cappedParts.push(`\nAPI response: ${clampText(String(error.response), MAX_API_ERROR_RESPONSE_CHARS)}`);
+          }
+        }
+        const cappedBody = cappedParts.join('') + errorFooter;
+
+        ctx.log?.('error', uncappedParts[0]);
+        return { content: [{ type: "text" as const, text: enforceHardCap(cappedBody, MAX_RESPONSE_CHARS) }] };
       }
     }
   );
