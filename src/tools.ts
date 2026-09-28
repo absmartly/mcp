@@ -203,28 +203,6 @@ function buildCommandDoc(entry: CommandEntry, customFields: readonly any[]): str
   return doc;
 }
 
-export function truncateResponseText(text: string, group: string, command: string, footer: string = ''): string {
-  if (text.length + footer.length <= MAX_RESPONSE_CHARS) {
-    return text + footer;
-  }
-  const notice =
-    `\n\n[Response truncated — ${text.length.toLocaleString()} characters exceeds the ${MAX_RESPONSE_CHARS.toLocaleString()}-character limit for ${group}.${command}. ` +
-    `Narrow the result with a smaller \`limit\`, a \`page\`/\`items\` filter, \`show\`/\`exclude\` fields, or pass \`raw: false\` if you set \`raw: true\`.]`;
-  // The footer itself must be bounded too — an oversized footer (e.g. a huge
-  // warnings array) must not be allowed to push the total past the cap on
-  // its own, since it's appended after the notice with no further check.
-  const remaining = Math.max(0, MAX_RESPONSE_CHARS - notice.length);
-  let boundedFooter = footer;
-  if (footer.length > remaining) {
-    const marker = '\n\n[additional details truncated]';
-    const keepLen = Math.max(0, remaining - marker.length);
-    boundedFooter = footer.slice(0, keepLen) + marker.slice(0, remaining - keepLen);
-  }
-  const budget = Math.max(0, remaining - boundedFooter.length);
-  const kept = text.slice(0, budget);
-  return kept + notice + boundedFooter;
-}
-
 export function capWarningLines(warnings: unknown[]): string[] {
   const lines = warnings.slice(0, MAX_WARNINGS_SHOWN).map((w) => `- ${clampText(String(w), MAX_WARNING_CHARS)}`);
   if (warnings.length > MAX_WARNINGS_SHOWN) {
