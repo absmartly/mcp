@@ -67,6 +67,27 @@ export default async function runTests() {
     assert(renderedFullEntries <= 30, 'broad search result is bounded to a reasonable number of full entries', `rendered ${renderedFullEntries} full entries`);
   }
 
+  // Guard: no group listing or broad single-letter search exceeds the shared response cap.
+  {
+    const { MAX_RESPONSE_CHARS } = await import('../../src/tools');
+    const { CLI_GROUPS } = await import('../../src/cli-catalog');
+    const handler = getDiscoverHandler();
+    let worst = 0;
+    let worstQuery = '';
+    const queries: Array<Record<string, string>> = [
+      ...CLI_GROUPS.map((g) => ({ group: g })),
+      ...'abcdefghijklmnopqrstuvwxyz'.split('').map((s) => ({ search: s })),
+    ];
+    for (const q of queries) {
+      const text = (await handler(q)).content[0].text as string;
+      if (text.length > worst) {
+        worst = text.length;
+        worstQuery = JSON.stringify(q);
+      }
+    }
+    assert(worst <= MAX_RESPONSE_CHARS, 'worst-case discover_commands listing stays under MAX_RESPONSE_CHARS', `${worstQuery} produced ${worst} chars`);
+  }
+
   return {
     success: failed === 0,
     message: `${passed} passed, ${failed} failed`,
