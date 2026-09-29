@@ -166,10 +166,13 @@ export default async function run() {
 
   await asyncTest('stdio registration routes destructive confirmation through the server elicitInput (accept -> executes)', async () => {
     const { handler, elicitCalls } = getLocalExecuteHandler(makeApiClient(), { action: 'accept', content: { confirm: 'yes' } });
-    const res = await handler(STOP_PARAMS);
+    const targetExperimentId = 4242;
+    const res = await handler({ ...STOP_PARAMS, params: { experimentId: targetExperimentId, reason: 'testing' } });
     assert.strictEqual(elicitCalls.length, 1, 'elicitInput must be called once for a destructive command');
-    assert.ok(elicitCalls[0].message.includes('experiments.stopExperiment'), `elicitation message must name the command, got: ${elicitCalls[0].message}`);
-    assert.ok(elicitCalls[0].message.includes('experimentId'), `elicitation message must show the target params, got: ${elicitCalls[0].message}`);
+    const message = elicitCalls[0].message;
+    assert.ok(message.includes('experiments.stopExperiment'), `elicitation message must name the command, got: ${message}`);
+    assert.ok(message.includes(`experimentId: ${targetExperimentId}`), `elicitation message must show which experiment is targeted, got: ${message}`);
+    assert.ok(message.includes('reason: "testing"'), `elicitation message must show the param values, got: ${message}`);
     void res;
   });
 

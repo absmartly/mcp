@@ -325,7 +325,6 @@ To create experiments, use group "experiments", command "createExperimentFromTem
             };
           }
         } else {
-          // Fail closed: never execute a dangerous command without a confirmation path.
           return { content: [{ type: "text" as const, text: ASK_USER_FALLBACK_MESSAGE }] };
         }
       }
