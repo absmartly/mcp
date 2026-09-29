@@ -79,7 +79,7 @@ export default async function run() {
   });
 
   await asyncTest('trusted CIMD and ordinary registered client_ids pass the gate', async () => {
-    for (const clientId of [TRUSTED_CIMD, 'tp9FX2O10Lljv68C']) {
+    for (const clientId of [TRUSTED_CIMD, 'https://claude.ai/oauth/mcp-oauth-client-metadata', 'tp9FX2O10Lljv68C']) {
       const url = new URL(`${ORIGIN}/authorize?client_id=${encodeURIComponent(clientId)}`);
       assert.strictEqual(await rejectUntrustedCimdClient(new Request(url), url), null);
     }

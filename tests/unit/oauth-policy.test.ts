@@ -13,10 +13,13 @@ import {
   validateClientRegistration,
   verifyPkceS256,
   generatePkcePair,
+  isAllowedRedirectUri,
   TRUSTED_CIMD_CLIENT_IDS,
 } from '../../src/oauth/index.js';
 
 const CLAUDE_CODE_CIMD = 'https://claude.ai/oauth/claude-code-client-metadata';
+const CLAUDE_CIMD = 'https://claude.ai/oauth/mcp-oauth-client-metadata';
+const CLAUDE_CALLBACK = 'https://claude.ai/api/mcp/auth_callback';
 const UNTRUSTED_CIMD = 'https://attacker.example/client.json';
 const CLAUDE_CODE_DOCUMENT = {
   client_id: CLAUDE_CODE_CIMD,
@@ -52,9 +55,21 @@ export default async function run() {
   }
 
   // --- CIMD ---
-  await asyncTest('trusted CIMD list contains the real Claude Code and VS Code documents', () => {
-    assert.ok(TRUSTED_CIMD_CLIENT_IDS.includes(CLAUDE_CODE_CIMD));
-    assert.ok(TRUSTED_CIMD_CLIENT_IDS.includes('https://vscode.dev/oauth/client-metadata.json'));
+  await asyncTest('trusted CIMD list is exactly the Claude, Claude Code and VS Code documents', () => {
+    assert.deepStrictEqual([...TRUSTED_CIMD_CLIENT_IDS].sort(), [
+      CLAUDE_CODE_CIMD,
+      CLAUDE_CIMD,
+      'https://insiders.vscode.dev/oauth/client-metadata.json',
+      'https://vscode.dev/oauth/client-metadata.json',
+    ].sort());
+  });
+
+  await asyncTest('resolves the Claude Desktop and claude.ai document to its allowlisted callback', async () => {
+    const document = { client_id: CLAUDE_CIMD, client_name: 'Claude', redirect_uris: [CLAUDE_CALLBACK], token_endpoint_auth_method: 'none' };
+    const mock = mockFetch(() => new Response(JSON.stringify(document), { headers: { 'Content-Type': 'application/json' } }));
+    const client = await resolveCimdClient(CLAUDE_CIMD, { fetch: mock.fetch });
+    assert.deepStrictEqual(client.redirectUris, [CLAUDE_CALLBACK]);
+    assert.ok(isAllowedRedirectUri(CLAUDE_CALLBACK));
   });
 
   await asyncTest('isCimdClientId requires https with a non-root path', () => {
