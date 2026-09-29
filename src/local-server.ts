@@ -9,7 +9,7 @@ import { APIClient } from "@absmartly/cli/api-client";
 import { FetchHttpClient } from "./fetch-adapter.js";
 import { MCP_VERSION } from "./version.js";
 import { buildServerContext } from "./server-context.js";
-import { registerServer } from "./register-server.js";
+import { registerLocalServer } from "./local-registration.js";
 
 const CONFIG_FILE_PATH = '.config/absmartly/config.yaml';
 const DEFAULT_PROFILE_NAME = 'default';
@@ -146,7 +146,7 @@ async function main() {
 
     // ── Register tools, resources, and prompts (shared with Node HTTP transport) ──
     const docsDir = join(new URL('.', import.meta.url).pathname, '..', 'public', 'docs', 'api');
-    registerServer(mcpServer, ctx, { docsDir, profileName });
+    registerLocalServer(mcpServer, ctx, { docsDir, profileName });
 
     const transport = new StdioServerTransport();
     await mcpServer.connect(transport);
