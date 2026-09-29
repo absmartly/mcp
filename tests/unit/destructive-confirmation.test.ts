@@ -135,13 +135,16 @@ export default async function run() {
     assert.strictEqual(client._stopCalls, 0, 'stopExperiment must NOT have been called when no elicitConfirmation hook is wired up');
   });
 
-  await asyncTest('local-server.ts wires elicitConfirmation into ToolContext using mcpServer.server.elicitInput', async () => {
+  await asyncTest('local-server.ts passes an elicitInput-backed elicitConfirmation to registerServer, which forwards it into ToolContext', async () => {
     const fs = await import('node:fs/promises');
     const source = await fs.readFile(new URL('../../src/local-server.ts', import.meta.url), 'utf-8');
-    assert.ok(/elicitConfirmation\s*:\s*async/.test(source),
-      'local-server.ts must define elicitConfirmation on the ToolContext it builds');
     assert.ok(/mcpServer\.server\.elicitInput\(/.test(source),
       'local-server.ts must call mcpServer.server.elicitInput(...) the same way index.ts does');
+    assert.ok(/registerServer\(\s*mcpServer\s*,\s*ctx\s*,\s*\{[^}]*\belicitConfirmation\b[^}]*\}\s*\)/.test(source),
+      'local-server.ts must pass elicitConfirmation in the options it hands to registerServer');
+    const registerSource = await fs.readFile(new URL('../../src/register-server.ts', import.meta.url), 'utf-8');
+    assert.ok(/elicitConfirmation\s*:\s*opts\.elicitConfirmation/.test(registerSource),
+      'register-server.ts must forward opts.elicitConfirmation into the ToolContext it builds');
   });
 
   return {
