@@ -70,6 +70,29 @@ export default async function runTests() {
     assert(text.includes('takes no parameters'), 'error for a zero-param command uses formatParamSummary\'s exact phrase', text.slice(0, 500));
   }
 
+  // The compact validation error never embeds the command doc, so it must not trigger the lazy
+  // entity load either — even for createExperiment, whose full doc is what needed custom fields.
+  {
+    let ensureEntitiesCalls = 0;
+    const captured = new CapturedHandlers();
+    const ctx: ToolContext = {
+      apiClient: {} as any,
+      endpoint: 'https://demo.absmartly.com',
+      authType: 'api-key',
+      entityWarnings: [],
+      customFields: [],
+      currentUserId: null,
+      ensureEntities: async () => { ensureEntitiesCalls++; },
+    };
+    setupTools(makeMockServer(captured), ctx);
+    const handler = captured.tools.get('execute_command')!.handler;
+    const res = await handler({ group: 'experiments', command: 'createExperiment', params: { bogus: true } });
+    const text = res.content[0].text as string;
+    assert(text.includes('Param validation failed'), 'createExperiment with a bad param returns a validation error', text.slice(0, 300));
+    assert(ensureEntitiesCalls === 0, 'validation error for createExperiment does not trigger the lazy entity load', `ensureEntities called ${ensureEntitiesCalls} time(s)`);
+    assert(!text.includes('Available Custom Fields'), 'validation error does not embed the custom-fields doc section', text.slice(0, 500));
+  }
+
   return {
     success: failed === 0,
     message: `${passed} passed, ${failed} failed`,

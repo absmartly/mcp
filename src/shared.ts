@@ -4,6 +4,18 @@ export const DEFAULT_API_KEY_USER_EMAIL = "api-key-user";
 export const DEFAULT_API_KEY_USER_NAME = "API Key User";
 export const DEFAULT_ABSMARTLY_DOMAIN = "absmartly.com";
 export const CLAUDE_AUTH_CALLBACK_URI = "https://claude.ai/api/mcp/auth_callback";
+export {
+  REQUIRED_CODE_CHALLENGE_METHOD,
+  OAUTH_ERROR_INVALID_REDIRECT_URI as INVALID_REDIRECT_URI_ERROR,
+  MESSAGE_INVALID_REDIRECT_URI as INVALID_REDIRECT_URI_MESSAGE,
+  isAllowedRedirectUri,
+  generatePkcePair,
+  escapeHtml,
+  HTML_ESCAPE_MAP,
+} from "./oauth/index.js";
+import { OAUTH_ERROR_INVALID_REDIRECT_URI, REQUIRED_CODE_CHALLENGE_METHOD, readRegistrationBody, validateClientRegistration } from "./oauth/index.js";
+
+const HTTP_STATUS_PAYLOAD_TOO_LARGE = 413;
 
 export const API_KEY_SESSION_TTL_SECONDS = 300;
 export const SESSION_TTL_SECONDS = 86400;
@@ -57,6 +69,68 @@ export function extractEndpointFromPath(pathname: string, prefix: string | reado
   return null;
 }
 
+function registrationErrorResponse(error: string, description: string, status: number): Response {
+  return new Response(JSON.stringify({ error, error_description: description }), {
+    status,
+    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+  });
+}
+
+// Rejects oversized bodies and disallowed redirect URIs before the OAuth provider sees
+// the registration. Other malformed metadata is left for the provider to report.
+export async function rejectDisallowedRedirectUris(request: Request): Promise<Response | null> {
+  const read = await readRegistrationBody(request.clone());
+  if (!read.ok) {
+    return read.error.status === HTTP_STATUS_PAYLOAD_TOO_LARGE
+      ? registrationErrorResponse(read.error.error, read.error.description, read.error.status)
+      : null;
+  }
+  const body = read.body as { redirect_uris?: unknown };
+  if (!Array.isArray(body?.redirect_uris)) return null;
+  const result = validateClientRegistration(body);
+  if (result.ok || result.error.error !== OAUTH_ERROR_INVALID_REDIRECT_URI) return null;
+  return registrationErrorResponse(result.error.error, result.error.description, result.error.status);
+}
+
+const OAUTH_AUTHORIZATION_SERVER_METADATA_PATH = "/.well-known/oauth-authorization-server";
+const OAUTH_PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource";
+export const API_KEY_SESSION_KV_PREFIX = "api_key_session:";
+const OAUTH_NOT_AVAILABLE_ERROR = "oauth_not_available";
+const OAUTH_NOT_AVAILABLE_DESCRIPTION = "OAuth not available when using API key authentication";
+
+function isOAuthDiscoveryPath(pathname: string): boolean {
+  return [OAUTH_AUTHORIZATION_SERVER_METADATA_PATH, OAUTH_PROTECTED_RESOURCE_METADATA_PATH]
+    .some((path) => pathname === path || pathname.startsWith(`${path}/`));
+}
+
+export async function handleOAuthDiscovery(
+  request: Request,
+  kv: KVNamespace | undefined,
+  clientFingerprint: string,
+  requestHasApiKey: boolean,
+  fetchProviderResponse: () => Promise<Response>
+): Promise<Response | null> {
+  const url = new URL(request.url);
+  if (!isOAuthDiscoveryPath(url.pathname)) return null;
+
+  if (requestHasApiKey || await safeKvGet(kv, `${API_KEY_SESSION_KV_PREFIX}${clientFingerprint}`)) {
+    return new Response(JSON.stringify({
+      error: OAUTH_NOT_AVAILABLE_ERROR,
+      error_description: OAUTH_NOT_AVAILABLE_DESCRIPTION,
+    }), { status: 404 });
+  }
+
+  if (url.pathname !== OAUTH_AUTHORIZATION_SERVER_METADATA_PATH || request.method !== "GET") return null;
+  const response = await fetchProviderResponse();
+  if (!response.ok) return response;
+  const metadata = await response.json() as Record<string, unknown>;
+  metadata.code_challenge_methods_supported = [REQUIRED_CODE_CHALLENGE_METHOD];
+  return new Response(JSON.stringify(metadata), {
+    status: response.status,
+    headers: response.headers,
+  });
+}
+
 export function pickDefined(source: Record<string, unknown>, keys: string[]): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const key of keys) {
@@ -74,33 +148,6 @@ export function buildQueryString(params: Record<string, unknown>): string {
   }
   const qs = searchParams.toString();
   return qs ? `?${qs}` : '';
-}
-
-function base64UrlEncode(bytes: Uint8Array): string {
-  let binary = '';
-  for (const b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-export async function generatePkcePair(): Promise<{ codeVerifier: string; codeChallenge: string }> {
-  const verifierBytes = new Uint8Array(32);
-  crypto.getRandomValues(verifierBytes);
-  const codeVerifier = base64UrlEncode(verifierBytes);
-  const challengeBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(codeVerifier));
-  const codeChallenge = base64UrlEncode(new Uint8Array(challengeBuffer));
-  return { codeVerifier, codeChallenge };
-}
-
-export const HTML_ESCAPE_MAP: Record<string, string> = {
-  "&": "&amp;",
-  "<": "&lt;",
-  ">": "&gt;",
-  '"': "&quot;",
-  "'": "&#39;",
-};
-
-export function escapeHtml(str: string): string {
-  return str.replace(/[&<>"']/g, (char) => HTML_ESCAPE_MAP[char]);
 }
 
 export function detectApiKey(

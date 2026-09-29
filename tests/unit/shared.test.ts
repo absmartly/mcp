@@ -5,6 +5,8 @@ import {
   buildQueryString,
   buildAuthHeader,
   extractEndpointFromPath,
+  isAllowedRedirectUri,
+  rejectDisallowedRedirectUris,
   escapeHtml,
   detectApiKey,
   safeKvPut,
@@ -270,6 +272,105 @@ export default async function run() {
     const mockKv = { get: async () => { throw new Error('KV read failed'); } } as unknown as KVNamespace;
     const result = await safeKvGet(mockKv, 'key');
     assert.strictEqual(result, null);
+  });
+
+  for (const uri of [
+    'https://claude.ai/api/mcp/auth_callback',
+    'https://chatgpt.com/connector_platform_oauth_redirect',
+    'https://chatgpt.com/connector/oauth/abc123',
+    'https://playground.ai.cloudflare.com/oauth/callback',
+    'http://localhost:33418/callback',
+    'http://127.0.0.1:5000/cb',
+    'http://[::1]:8080/cb',
+    'cursor://anysphere.cursor-mcp/oauth/callback',
+    'https://www.cursor.com/agents/mcp/oauth/callback',
+    'https://vscode.dev/redirect',
+    'https://insiders.vscode.dev/redirect',
+    'http://127.0.0.1:33418/',
+    'claude://claude.ai/mcp-auth-callback/sdk',
+    'https://integrations.productboard.com/oauth2/callback',
+  ]) {
+    test(`isAllowedRedirectUri allows ${uri}`, () => {
+      assert.strictEqual(isAllowedRedirectUri(uri), true);
+    });
+  }
+
+  for (const uri of [
+    'https://attacker.com/cb',
+    'https://claude.ai/not-a-callback',
+    'https://claude.ai/api/mcp/auth_callback/extra',
+    'https://chatgpt.com/connector/oauth/',
+    'https://chatgpt.com/share/abc',
+    'https://integrations.productboard.com/other',
+    'https://vscode.dev/',
+    'https://claude.ai.attacker.com/cb',
+    'https://attacker.com/claude.ai',
+    'http://claude.ai/api/mcp/auth_callback',
+    'https://localhost/cb',
+    'http://localhost.attacker.com/cb',
+    'vscode://vscode.github-authentication/did-authenticate',
+    'windsurf://oauth/callback',
+    'https://cursor.com.attacker.com/cb',
+    'javascript:alert(1)',
+    'data:text/html,hi',
+    'not a url',
+  ]) {
+    test(`isAllowedRedirectUri rejects ${uri}`, () => {
+      assert.strictEqual(isAllowedRedirectUri(uri), false);
+    });
+  }
+
+  function registrationRequest(body: unknown): Request {
+    return new Request('https://mcp.absmartly.com/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  await asyncTest('rejectDisallowedRedirectUris rejects registration with attacker redirect', async () => {
+    const response = await rejectDisallowedRedirectUris(registrationRequest({
+      redirect_uris: ['http://localhost:3000/cb', 'https://attacker.com/cb'],
+    }));
+    assert.ok(response);
+    assert.strictEqual(response!.status, 400);
+    const body = await response!.json() as { error: string };
+    assert.strictEqual(body.error, 'invalid_redirect_uri');
+  });
+
+  await asyncTest('rejectDisallowedRedirectUris rejects non-string redirect entries', async () => {
+    const response = await rejectDisallowedRedirectUris(registrationRequest({ redirect_uris: [42] }));
+    assert.strictEqual(response?.status, 400);
+  });
+
+  await asyncTest('rejectDisallowedRedirectUris returns 413 for oversized bodies without reflecting them', async () => {
+    const oversizedUri = `https://attacker.com/${'a'.repeat(1024 * 1024)}`;
+    const response = await rejectDisallowedRedirectUris(registrationRequest({ redirect_uris: [oversizedUri] }));
+    assert.strictEqual(response?.status, 413);
+    assert.ok((await response!.text()).length < 200);
+  });
+
+  await asyncTest('rejectDisallowedRedirectUris does not reflect the rejected URI', async () => {
+    const response = await rejectDisallowedRedirectUris(registrationRequest({ redirect_uris: ['https://attacker.com/cb'] }));
+    assert.ok(!(await response!.text()).includes('attacker.com'));
+  });
+
+  await asyncTest('rejectDisallowedRedirectUris accepts the full VS Code DCR redirect set', async () => {
+    const response = await rejectDisallowedRedirectUris(registrationRequest({
+      redirect_uris: [
+        'http://127.0.0.1', 'http://127.0.0.1/', 'http://127.0.0.1:33418', 'http://127.0.0.1:33418/',
+        'http://localhost', 'http://localhost/', 'http://localhost:33418', 'http://localhost:33418/',
+        'https://insiders.vscode.dev/redirect', 'https://vscode.dev/redirect',
+      ],
+    }));
+    assert.strictEqual(response, null);
+  });
+
+  await asyncTest('rejectDisallowedRedirectUris passes allowed redirects and leaves body readable', async () => {
+    const request = registrationRequest({ redirect_uris: ['https://claude.ai/api/mcp/auth_callback'] });
+    assert.strictEqual(await rejectDisallowedRedirectUris(request), null);
+    const body = await request.json() as { redirect_uris: string[] };
+    assert.deepStrictEqual(body.redirect_uris, ['https://claude.ai/api/mcp/auth_callback']);
   });
 
   return {

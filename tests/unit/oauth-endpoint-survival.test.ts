@@ -25,9 +25,16 @@ interface AuthRequest {
   codeChallengeMethod?: string;
 }
 
+const TEST_CODE_CHALLENGE = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
+const TEST_CODE_CHALLENGE_METHOD = 'S256';
+
 function makeOAuthProvider(authRequest: AuthRequest) {
   return {
-    parseAuthRequest: async (_req: Request) => authRequest,
+    parseAuthRequest: async (_req: Request) => ({
+      codeChallenge: TEST_CODE_CHALLENGE,
+      codeChallengeMethod: TEST_CODE_CHALLENGE_METHOD,
+      ...authRequest,
+    }),
     lookupClient: async (clientId: string) => ({
       clientId,
       clientName: 'Test Client',
@@ -71,15 +78,17 @@ export default async function run() {
       OAUTH_KV: kv,
       OAUTH_PROVIDER: makeOAuthProvider({
         clientId,
-        redirectUri: 'https://client.example/callback',
+        redirectUri: 'https://claude.ai/api/mcp/auth_callback',
         state: 'xyz',
         scope: ['api:read'],
         responseType: 'code',
+        codeChallenge: 'test-challenge',
+        codeChallengeMethod: TEST_CODE_CHALLENGE_METHOD,
       }),
     };
 
     // /authorize call WITHOUT the absmartly-endpoint query param (typical OAuth redirect).
-    const res = await callAuthorize(handler, 'https://mcp.absmartly.com/authorize?client_id=' + clientId + '&redirect_uri=https://client.example/callback&state=xyz&response_type=code&scope=api:read', env);
+    const res = await callAuthorize(handler, 'https://mcp.absmartly.com/authorize?client_id=' + clientId + '&redirect_uri=https://claude.ai/api/mcp/auth_callback&state=xyz&response_type=code&scope=api:read', env);
 
     // If endpoint is found, handler renders approval page (200 HTML). If form, it's also 200 HTML but with the endpoint input.
     const body = await res.text();
@@ -100,10 +109,12 @@ export default async function run() {
       OAUTH_KV: kv,
       OAUTH_PROVIDER: makeOAuthProvider({
         clientId,
-        redirectUri: 'https://client.example/callback',
+        redirectUri: 'https://claude.ai/api/mcp/auth_callback',
         state: 'xyz',
         scope: ['api:read'],
         responseType: 'code',
+        codeChallenge: 'test-challenge',
+        codeChallengeMethod: TEST_CODE_CHALLENGE_METHOD,
         resource: sseUrl,
       }),
     };
@@ -124,10 +135,12 @@ export default async function run() {
       OAUTH_KV: kv,
       OAUTH_PROVIDER: makeOAuthProvider({
         clientId,
-        redirectUri: 'https://client.example/callback',
+        redirectUri: 'https://claude.ai/api/mcp/auth_callback',
         state: 'xyz',
         scope: ['api:read'],
         responseType: 'code',
+        codeChallenge: 'test-challenge',
+        codeChallengeMethod: TEST_CODE_CHALLENGE_METHOD,
       }),
     };
 
@@ -154,10 +167,12 @@ export default async function run() {
       OAUTH_KV: kv,
       OAUTH_PROVIDER: makeOAuthProvider({
         clientId,
-        redirectUri: 'https://client.example/callback',
+        redirectUri: 'https://claude.ai/api/mcp/auth_callback',
         state: 'xyz',
         scope: ['api:read'],
         responseType: 'code',
+        codeChallenge: 'test-challenge',
+        codeChallengeMethod: TEST_CODE_CHALLENGE_METHOD,
         // No resource param either — client doesn't include it.
       }),
     };
