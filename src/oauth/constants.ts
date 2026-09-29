@@ -37,8 +37,10 @@ export const ALLOWED_REDIRECT_CUSTOM_SCHEMES = ["cursor:", "claude:"];
 // Client ID Metadata Documents (CIMD) we fetch and trust. Only these URLs are ever
 // fetched, which also rules out server-side request forgery through client_id.
 export const TRUSTED_CIMD_CLIENT_IDS = [
+  "https://claude.ai/oauth/mcp-oauth-client-metadata",
   "https://claude.ai/oauth/claude-code-client-metadata",
   "https://vscode.dev/oauth/client-metadata.json",
+  "https://insiders.vscode.dev/oauth/client-metadata.json",
 ];
 export const CIMD_MAX_DOCUMENT_BYTES = 5 * 1024;
 export const CIMD_FETCH_TIMEOUT_MS = 5000;
