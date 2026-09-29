@@ -292,11 +292,6 @@ To create experiments, use group "experiments", command "createExperimentFromTem
 
       // Confirm destructive actions
       if (entry.dangerous && !params.confirmed) {
-        // Shared fallback: tells the AI to get real user confirmation before
-        // retrying with confirmed: true. Used both when elicitation is
-        // unsupported by the client AND when no elicitConfirmation hook is
-        // wired up at all — in both cases we must NOT fall through and
-        // execute the dangerous command unconfirmed.
         const ASK_USER_FALLBACK_MESSAGE = `This is a destructive action: ${entry.description}. Ask the user to confirm before proceeding. Only if the user explicitly confirms, call execute_command again with the exact same group, command, and params, plus confirmed: true.`;
 
         // Try MCP elicitation first (works in interactive clients like Claude Desktop)
@@ -330,9 +325,7 @@ To create experiments, use group "experiments", command "createExperimentFromTem
             };
           }
         } else {
-          // No elicitation hook wired up (e.g. an HTTP transport, a future
-          // entry point, or a test harness that forgot to set it). Fail
-          // closed instead of falling through and executing unconfirmed.
+          // Fail closed: never execute a dangerous command without a confirmation path.
           return { content: [{ type: "text" as const, text: ASK_USER_FALLBACK_MESSAGE }] };
         }
       }

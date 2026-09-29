@@ -1,5 +1,6 @@
 import assert from 'node:assert';
 import { setupTools, type ToolContext } from '../../src/tools';
+import { registerLocalServer } from '../../src/local-registration';
 
 class CapturedHandlers {
   tools = new Map<string, { handler: Function; schema: any; description: string }>();
@@ -44,6 +45,34 @@ function getExecuteHandler(client: any, elicitConfirmation?: ToolContext['elicit
   const entry = captured.tools.get('execute_command');
   if (!entry) throw new Error('execute_command not registered');
   return { handler: entry.handler };
+}
+
+function getLocalExecuteHandler(client: any, elicitResponse: any): { handler: Function; elicitCalls: Array<{ message: string }> } {
+  const captured = new CapturedHandlers();
+  const elicitCalls: Array<{ message: string }> = [];
+  const fakeServer = {
+    tool: (name: string, description: string, schema: any, _annotations: any, handler: Function) => {
+      captured.tools.set(name, { handler, schema, description });
+    },
+    resource: () => {},
+    prompt: () => {},
+    server: {
+      elicitInput: async (request: { message: string }) => { elicitCalls.push({ message: request.message }); return elicitResponse; },
+    },
+  } as any;
+  const serverContext: any = {
+    apiClient: client,
+    endpoint: 'https://demo.absmartly.com',
+    authType: 'API Key',
+    currentUserId: null,
+    entityWarnings: [],
+    customFields: [],
+    users: [], teams: [], applications: [], unitTypes: [], experimentTags: [], metrics: [], goals: [],
+  };
+  registerLocalServer(fakeServer, serverContext);
+  const entry = captured.tools.get('execute_command');
+  if (!entry) throw new Error('execute_command not registered');
+  return { handler: entry.handler, elicitCalls };
 }
 
 const STOP_PARAMS = {
@@ -135,16 +164,30 @@ export default async function run() {
     assert.strictEqual(client._stopCalls, 0, 'stopExperiment must NOT have been called when no elicitConfirmation hook is wired up');
   });
 
-  await asyncTest('local-server.ts passes an elicitInput-backed elicitConfirmation to registerServer, which forwards it into ToolContext', async () => {
-    const fs = await import('node:fs/promises');
-    const source = await fs.readFile(new URL('../../src/local-server.ts', import.meta.url), 'utf-8');
-    assert.ok(/mcpServer\.server\.elicitInput\(/.test(source),
-      'local-server.ts must call mcpServer.server.elicitInput(...) the same way index.ts does');
-    assert.ok(/registerServer\(\s*mcpServer\s*,\s*ctx\s*,\s*\{[^}]*\belicitConfirmation\b[^}]*\}\s*\)/.test(source),
-      'local-server.ts must pass elicitConfirmation in the options it hands to registerServer');
-    const registerSource = await fs.readFile(new URL('../../src/register-server.ts', import.meta.url), 'utf-8');
-    assert.ok(/elicitConfirmation\s*:\s*opts\.elicitConfirmation/.test(registerSource),
-      'register-server.ts must forward opts.elicitConfirmation into the ToolContext it builds');
+  await asyncTest('stdio registration routes destructive confirmation through the server elicitInput (accept -> executes)', async () => {
+    const { handler, elicitCalls } = getLocalExecuteHandler(makeApiClient(), { action: 'accept', content: { confirm: 'yes' } });
+    const res = await handler(STOP_PARAMS);
+    assert.strictEqual(elicitCalls.length, 1, 'elicitInput must be called once for a destructive command');
+    assert.ok(elicitCalls[0].message.includes('experiments.stopExperiment'), `elicitation message must name the command, got: ${elicitCalls[0].message}`);
+    assert.ok(elicitCalls[0].message.includes('experimentId'), `elicitation message must show the target params, got: ${elicitCalls[0].message}`);
+    void res;
+  });
+
+  await asyncTest('stdio registration executes the command only when elicitInput is accepted with "yes"', async () => {
+    const client = makeApiClient();
+    const { handler } = getLocalExecuteHandler(client, { action: 'accept', content: { confirm: 'yes' } });
+    await handler(STOP_PARAMS);
+    assert.strictEqual(client._stopCalls, 1, 'stopExperiment should run after the user confirms via elicitInput');
+  });
+
+  await asyncTest('stdio registration does not execute when elicitInput is declined or answered otherwise', async () => {
+    for (const response of [{ action: 'decline' }, { action: 'cancel' }, { action: 'accept', content: { confirm: 'no' } }]) {
+      const client = makeApiClient();
+      const { handler, elicitCalls } = getLocalExecuteHandler(client, response);
+      await handler(STOP_PARAMS);
+      assert.strictEqual(elicitCalls.length, 1, `elicitInput must be called for ${JSON.stringify(response)}`);
+      assert.strictEqual(client._stopCalls, 0, `stopExperiment must NOT run for ${JSON.stringify(response)}`);
+    }
   });
 
   return {
