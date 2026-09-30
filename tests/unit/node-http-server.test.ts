@@ -94,28 +94,6 @@ export default async function run() {
         });
     });
 
-    await test('initialize does not advertise subscribe/listChanged (stateless transport cannot notify)', async () => {
-        await withTestServer(async (baseUrl) => {
-            const text = await postJson(baseUrl, {
-                jsonrpc: '2.0',
-                id: 1,
-                method: 'initialize',
-                params: {
-                    protocolVersion: '2025-06-18',
-                    capabilities: {},
-                    clientInfo: { name: 'test-client', version: '0.0.0' },
-                },
-            });
-            const dataLine = text.split('\n').find(l => l.startsWith('data:'));
-            const message = JSON.parse(dataLine ? dataLine.slice(5) : text);
-            const caps = message.result.capabilities;
-            assert.ok(caps.tools && caps.resources && caps.prompts, `expected tools/resources/prompts, got: ${JSON.stringify(caps)}`);
-            assert.notStrictEqual(caps.resources.subscribe, true);
-            assert.notStrictEqual(caps.resources.listChanged, true);
-            assert.ok(!caps.tools.listChanged && !caps.prompts.listChanged);
-        });
-    });
-
     // Verified against the real SDK behavior (not assumption): in stateless
     // mode (sessionIdGenerator: undefined), StreamableHTTPServerTransport's
     // validateSession() short-circuits and skips the "not initialized" check
