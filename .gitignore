@@ -68,3 +68,6 @@ tests/integration/claude-tests/.git/
 # Superpowers plans (local only)
 docs/superpowers/
 .worktrees/
+
+# CommonJS build produced by tests/unit/package-entries.test.ts
+.test-dist/

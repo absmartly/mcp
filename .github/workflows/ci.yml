@@ -28,3 +28,12 @@ jobs:
 
       - name: Unit tests
         run: npm run test:unit
+
+      - name: Endpoint manifest is current
+        run: npm run manifest:check
+
+      - name: Build (ESM + CommonJS)
+        run: npm run build
+
+      - name: Require the CommonJS entries
+        run: node -e 'require("./dist/cjs/core.js"); require("./dist/cjs/oauth.js")'

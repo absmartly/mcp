@@ -1,4 +1,4 @@
-import type { ABsmartlyMCP } from './index';
+import type { ABsmartlyMCP } from './index.js';
 import type { CustomSectionField } from '@absmartly/cli/api-client';
 import {
     summarizeExperiment,
@@ -9,8 +9,8 @@ import {
     summarizeSegment,
 } from '@absmartly/cli/api-client';
 import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { debug } from './config';
-import { DEFAULT_ABSMARTLY_ENDPOINT } from './shared';
+import { debug } from './config.js';
+import { DEFAULT_ABSMARTLY_ENDPOINT } from './shared.js';
 export class ABsmartlyResources {
     private resourcesRegistered: boolean = false;
     constructor(private mcpServer: ABsmartlyMCP) {}

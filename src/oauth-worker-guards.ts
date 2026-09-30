@@ -1,6 +1,6 @@
 import type { OAuthError, TokenExchangeCallbackOptions } from "@cloudflare/workers-oauth-provider";
-import { debug } from "./config";
-import { CORS_HEADERS, type ABsmartlyProps } from "./shared";
+import { debug } from "./config.js";
+import { CORS_HEADERS, type ABsmartlyProps } from "./shared.js";
 import { isTrustedCimdClientId } from "./oauth/index.js";
 
 const REFRESH_GRANT_TYPE = 'refresh_token';
