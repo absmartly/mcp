@@ -28,6 +28,19 @@ export interface NodeMcpHandler {
   post: (req: IncomingMessage, res: ServerResponse, body: unknown) => Promise<void>;
 }
 
+/**
+ * McpServer's register*() calls re-add `listChanged: true` for tools,
+ * resources and prompts. This transport is stateless (no GET/SSE stream), so
+ * no list-changed notification can ever be delivered; remove the flags so
+ * clients aren't promised them. The SDK has no public API to unset them.
+ */
+function stripListChanged(server: McpServer): void {
+  const caps = (server.server as unknown as { _capabilities: Record<string, Record<string, unknown> | undefined> })._capabilities;
+  for (const key of ['tools', 'resources', 'prompts']) {
+    if (caps[key]) delete caps[key]!.listChanged;
+  }
+}
+
 export function createStreamableHttpHandler(
   buildContext: (req: IncomingMessage) => Promise<NodeMcpRequestContext>,
 ): NodeMcpHandler {
@@ -54,9 +67,12 @@ export function createStreamableHttpHandler(
 
         server = new McpServer(
           { name: "ABsmartly MCP Server", version: MCP_VERSION },
-          { capabilities: { tools: {}, resources: { subscribe: true, listChanged: true }, prompts: {} } },
+          // Stateless transport (no GET/SSE stream): notifications can't be
+          // delivered, so don't advertise subscribe/listChanged.
+          { capabilities: { tools: {}, resources: {}, prompts: {} } },
         );
         registerServer(server, serverCtx, { docsDir: requestCtx.docsDir ?? DEFAULT_DOCS_DIR });
+        stripListChanged(server);
 
         transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
         await server.connect(transport);
