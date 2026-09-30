@@ -1,0 +1,5097 @@
+{
+  "manifestVersion": 1,
+  "generatedFrom": {
+    "@absmartly/cli": "1.14.0"
+  },
+  "endpoints": [
+    {
+      "method": "GET",
+      "path": "/auth/current-user"
+    },
+    {
+      "method": "PUT",
+      "path": "/auth/current-user"
+    },
+    {
+      "method": "GET",
+      "path": "/auth/current-user/api_keys"
+    },
+    {
+      "method": "POST",
+      "path": "/auth/current-user/api_keys"
+    },
+    {
+      "method": "DELETE",
+      "path": "/auth/current-user/api_keys/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/auth/current-user/api_keys/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/auth/current-user/api_keys/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/access_control_policies"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/api_keys"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/api_keys"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/api_keys/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/api_keys/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/api_keys/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/applications"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/applications"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/applications/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/applications/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/applications/{id}/archive"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/asset_roles"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/asset_roles"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/asset_roles/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/asset_roles/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/asset_roles/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/configs"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/configs/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/configs/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cors"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/cors"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/cors/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cors/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/cors/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/datasources"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/datasources"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/datasources/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/datasources/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/datasources/{id}/archive"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/datasources/introspect"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/datasources/test"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/datasources/validate_query"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/environments"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/environments"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/environments/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/environments/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/environments/{id}/archive"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/events"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/events/history"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/experiment_action_dialog_fields"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/experiment_action_dialog_fields"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/experiment_action_dialog_fields/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/experiment_action_dialog_fields/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/experiment_alerts"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/experiment_alerts/{id}/dismiss"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/experiment_annotations"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/experiment_annotations"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/experiment_annotations/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/experiment_annotations/{id}/archive"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/experiment_custom_section_fields"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/experiment_custom_section_fields"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/experiment_custom_section_fields/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/experiment_custom_section_fields/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/experiment_custom_section_fields/{id}/archive"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/experiment_custom_sections"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/experiment_custom_sections"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/experiment_custom_sections/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/experiment_custom_sections/{id}/archive"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/experiment_custom_sections/order"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/experiment_recommended_actions"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/experiment_recommended_actions/{id}/dismiss"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/experiment_tags"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/experiment_tags"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/experiment_tags/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/experiment_tags/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/experiment_tags/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/experiment_update_schedules"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/experiment_update_schedules"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/experiment_update_schedules/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/experiment_update_schedules/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/experiment_update_schedules/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/experiments"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/experiments"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/experiments/{experimentId}/metrics/{metricId}"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/experiments/{experimentId}/metrics/{metricId}/confirm_impact"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/experiments/{experimentId}/metrics/{metricId}/exclude"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/experiments/{experimentId}/metrics/{metricId}/include"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/experiments/{experimentId}/metrics/{metricId}/remove_impact"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/experiments/{experimentId}/metrics/main"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/experiments/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/experiments/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/experiments/{id}/activity"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/experiments/{id}/activity"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/experiments/{id}/activity/{noteId}"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/experiments/{id}/activity/{noteId}/reply"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/experiments/{id}/archive"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/experiments/{id}/asset_role_teams"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/experiments/{id}/asset_role_teams"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/experiments/{id}/asset_role_teams/{teamId}/{assetRoleId}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/experiments/{id}/asset_role_users"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/experiments/{id}/asset_role_users"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/experiments/{id}/asset_role_users/{userId}/{assetRoleId}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/experiments/{id}/development"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/experiments/{id}/export_data"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/experiments/{id}/follow"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/experiments/{id}/follow"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/experiments/{id}/full_on"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/experiments/{id}/metrics"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/experiments/{id}/parent"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/experiments/{id}/request_update"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/experiments/{id}/restart"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/experiments/{id}/scheduled_action"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/experiments/{id}/scheduled_action/{actionId}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/experiments/{id}/start"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/experiments/{id}/stop"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/experiments/estimate/max_participants"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/export_configs"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/export_configs"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/export_configs/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/export_configs/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/export_configs/{id}/archive"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/export_configs/{id}/export_histories"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/export_configs/{id}/pause"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/favorites/experiment"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/favorites/metric"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/goal_tags"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/goal_tags"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/goal_tags/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/goal_tags/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/goal_tags/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/goals"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/goals"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/goals/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/goals/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/goals/{id}/asset_role_teams"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/goals/{id}/asset_role_teams"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/goals/{id}/asset_role_teams/{teamId}/{assetRoleId}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/goals/{id}/asset_role_users"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/goals/{id}/asset_role_users"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/goals/{id}/asset_role_users/{userId}/{assetRoleId}"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/goals/{id}/follow"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/goals/{id}/follow"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/insights/decisions/history"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/insights/decisions/widgets"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/insights/velocity/summary"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/insights/velocity/summary/detail"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/metric_categories"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/metric_categories"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/metric_categories/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/metric_categories/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/metric_categories/{id}/archive"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/metric_tags"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/metric_tags"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/metric_tags/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/metric_tags/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/metric_tags/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/metrics"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/metrics"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/metrics/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/metrics/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/metrics/{id}/activate"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/metrics/{id}/archive"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/metrics/{id}/asset_role_teams"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/metrics/{id}/asset_role_teams"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/metrics/{id}/asset_role_teams/{teamId}/{assetRoleId}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/metrics/{id}/asset_role_users"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/metrics/{id}/asset_role_users"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/metrics/{id}/asset_role_users/{userId}/{assetRoleId}"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/metrics/{id}/follow"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/metrics/{id}/follow"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/metrics/{id}/review"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/metrics/{id}/review/approve"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/metrics/{id}/review/comments"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/metrics/{id}/review/comments"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/metrics/{id}/review/comments/{commentId}/reply"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/metrics/{id}/review/request"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/notifications/has-new"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/notifications/read"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/notifications/see"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/notifications/summary"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/permission_categories"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/permissions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/roles"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/roles"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/roles/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/roles/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/roles/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/segments"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/segments"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/segments/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/segments/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/segments/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/statistics/power/plan/matrix"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/storage_configs"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/storage_configs"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/storage_configs/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/storage_configs/{id}"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/storage_configs/test"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/teams"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/teams"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/teams/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/teams/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/teams/{id}/archive"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/teams/{id}/members"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/teams/{id}/members/add"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/teams/{id}/members/edit_roles"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/teams/{id}/members/remove"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/unit_types"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/unit_types"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/unit_types/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/unit_types/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/unit_types/{id}/archive"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/users"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/users"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/users/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/users/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/users/{id}/archive"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/users/{id}/reset-password"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/users/{userId}/api_keys"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/users/{userId}/api_keys"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/users/{userId}/api_keys/{keyId}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/webhook_events"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/webhooks"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/webhooks"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/webhooks/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/webhooks/{id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/webhooks/{id}"
+    }
+  ],
+  "tools": {
+    "get_auth_status": {
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/auth/current-user"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/applications"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_section_fields"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_tags"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/goals"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/unit_types"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users/{id}"
+        }
+      ]
+    },
+    "discover_commands": {
+      "endpoints": []
+    },
+    "get_command_docs": {
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/auth/current-user"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/applications"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_section_fields"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_tags"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/goals"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/unit_types"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users/{id}"
+        }
+      ]
+    },
+    "execute_command": {
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/auth/current-user"
+        },
+        {
+          "method": "PUT",
+          "path": "/auth/current-user"
+        },
+        {
+          "method": "GET",
+          "path": "/auth/current-user/api_keys"
+        },
+        {
+          "method": "POST",
+          "path": "/auth/current-user/api_keys"
+        },
+        {
+          "method": "DELETE",
+          "path": "/auth/current-user/api_keys/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/auth/current-user/api_keys/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/auth/current-user/api_keys/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/access_control_policies"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/api_keys"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/api_keys"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/api_keys/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/api_keys/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/api_keys/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/applications"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/applications"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/applications/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/applications/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/applications/{id}/archive"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/asset_roles"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/asset_roles"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/asset_roles/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/asset_roles/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/asset_roles/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/configs"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/configs/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/configs/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/cors"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/cors"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/cors/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/cors/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/cors/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/datasources"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/datasources"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/datasources/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/datasources/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/datasources/{id}/archive"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/datasources/introspect"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/datasources/test"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/datasources/validate_query"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/environments"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/environments"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/environments/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/environments/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/environments/{id}/archive"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/events"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/events/history"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_action_dialog_fields"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiment_action_dialog_fields"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_action_dialog_fields/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_action_dialog_fields/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_alerts"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_alerts/{id}/dismiss"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_annotations"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiment_annotations"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_annotations/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_annotations/{id}/archive"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_section_fields"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiment_custom_section_fields"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_section_fields/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_custom_section_fields/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_custom_section_fields/{id}/archive"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_sections"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiment_custom_sections"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_custom_sections/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_custom_sections/{id}/archive"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_custom_sections/order"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_recommended_actions"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_recommended_actions/{id}/dismiss"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_tags"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiment_tags"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/experiment_tags/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_tags/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_tags/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_update_schedules"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiment_update_schedules"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/experiment_update_schedules/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_update_schedules/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_update_schedules/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiments"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiments"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{experimentId}/metrics/{metricId}"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{experimentId}/metrics/{metricId}/confirm_impact"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{experimentId}/metrics/{metricId}/exclude"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{experimentId}/metrics/{metricId}/include"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{experimentId}/metrics/{metricId}/remove_impact"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{experimentId}/metrics/main"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/experiments/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}/activity"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{id}/activity"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/experiments/{id}/activity/{noteId}"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{id}/activity/{noteId}/reply"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/experiments/{id}/archive"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}/asset_role_teams"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{id}/asset_role_teams"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/experiments/{id}/asset_role_teams/{teamId}/{assetRoleId}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}/asset_role_users"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{id}/asset_role_users"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/experiments/{id}/asset_role_users/{userId}/{assetRoleId}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/experiments/{id}/development"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{id}/export_data"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/experiments/{id}/follow"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{id}/follow"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/experiments/{id}/full_on"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{id}/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}/parent"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{id}/request_update"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/experiments/{id}/restart"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{id}/scheduled_action"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/experiments/{id}/scheduled_action/{actionId}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/experiments/{id}/start"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/experiments/{id}/stop"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiments/estimate/max_participants"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/export_configs"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/export_configs"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/export_configs/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/export_configs/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/export_configs/{id}/archive"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/export_configs/{id}/export_histories"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/export_configs/{id}/pause"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/favorites/experiment"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/favorites/metric"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/goal_tags"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/goal_tags"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/goal_tags/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/goal_tags/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/goal_tags/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/goals"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/goals"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/goals/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/goals/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/goals/{id}/asset_role_teams"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/goals/{id}/asset_role_teams"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/goals/{id}/asset_role_teams/{teamId}/{assetRoleId}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/goals/{id}/asset_role_users"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/goals/{id}/asset_role_users"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/goals/{id}/asset_role_users/{userId}/{assetRoleId}"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/goals/{id}/follow"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/goals/{id}/follow"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/insights/decisions/history"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/insights/decisions/widgets"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/insights/velocity/summary"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/insights/velocity/summary/detail"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metric_categories"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/metric_categories"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metric_categories/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/metric_categories/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/metric_categories/{id}/archive"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metric_tags"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/metric_tags"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/metric_tags/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metric_tags/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/metric_tags/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/metrics/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/metrics/{id}/activate"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/metrics/{id}/archive"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics/{id}/asset_role_teams"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/metrics/{id}/asset_role_teams"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/metrics/{id}/asset_role_teams/{teamId}/{assetRoleId}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics/{id}/asset_role_users"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/metrics/{id}/asset_role_users"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/metrics/{id}/asset_role_users/{userId}/{assetRoleId}"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/metrics/{id}/follow"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/metrics/{id}/follow"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics/{id}/review"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/metrics/{id}/review/approve"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics/{id}/review/comments"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/metrics/{id}/review/comments"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/metrics/{id}/review/comments/{commentId}/reply"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/metrics/{id}/review/request"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/notifications/has-new"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/notifications/read"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/notifications/see"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/notifications/summary"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/permission_categories"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/permissions"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/roles"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/roles"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/roles/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/roles/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/roles/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/segments"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/segments"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/segments/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/segments/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/segments/{id}"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/statistics/power/plan/matrix"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/storage_configs"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/storage_configs"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/storage_configs/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/storage_configs/{id}"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/storage_configs/test"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/teams"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/teams/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/teams/{id}/archive"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams/{id}/members"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/teams/{id}/members/add"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/teams/{id}/members/edit_roles"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/teams/{id}/members/remove"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/unit_types"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/unit_types"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/unit_types/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/unit_types/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/unit_types/{id}/archive"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/users"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/users/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/users/{id}/archive"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/users/{id}/reset-password"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users/{userId}/api_keys"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/users/{userId}/api_keys"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/users/{userId}/api_keys/{keyId}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/webhook_events"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/webhooks"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/webhooks"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/webhooks/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/webhooks/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/webhooks/{id}"
+        }
+      ]
+    }
+  },
+  "resources": {
+    "absmartly://entities/applications": {
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/auth/current-user"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/applications"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_section_fields"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_tags"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/goals"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/unit_types"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users/{id}"
+        }
+      ]
+    },
+    "absmartly://entities/unit-types": {
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/auth/current-user"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/applications"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_section_fields"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_tags"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/goals"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/unit_types"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users/{id}"
+        }
+      ]
+    },
+    "absmartly://entities/teams": {
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/auth/current-user"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/applications"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_section_fields"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_tags"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/goals"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/unit_types"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users/{id}"
+        }
+      ]
+    },
+    "absmartly://entities/users": {
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/auth/current-user"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/applications"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_section_fields"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_tags"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/goals"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/unit_types"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users/{id}"
+        }
+      ]
+    },
+    "absmartly://entities/metrics": {
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/auth/current-user"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/applications"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_section_fields"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_tags"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/goals"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/unit_types"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users/{id}"
+        }
+      ]
+    },
+    "absmartly://entities/goals": {
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/auth/current-user"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/applications"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_section_fields"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_tags"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/goals"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/unit_types"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users/{id}"
+        }
+      ]
+    },
+    "absmartly://entities/tags": {
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/auth/current-user"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/applications"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_section_fields"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_tags"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/goals"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/unit_types"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users/{id}"
+        }
+      ]
+    },
+    "absmartly://entities/custom-fields": {
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/auth/current-user"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/applications"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_section_fields"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_tags"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/goals"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/unit_types"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users/{id}"
+        }
+      ]
+    }
+  },
+  "commands": {
+    "experiments.listExperiments": {
+      "apiMethods": [
+        "getMetric",
+        "listExperiments",
+        "listMetrics",
+        "resolveApplications",
+        "resolveTags",
+        "resolveTeams",
+        "resolveUnitTypes",
+        "resolveUsers"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/applications"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_tags"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiments"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/unit_types"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users"
+        }
+      ]
+    },
+    "experiments.searchExperiments": {
+      "apiMethods": [
+        "searchExperiments"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiments"
+        }
+      ]
+    },
+    "experiments.getExperiment": {
+      "apiMethods": [
+        "getExperiment",
+        "listExperimentActivity"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}/activity"
+        }
+      ]
+    },
+    "experiments.createExperiment": {
+      "apiMethods": [
+        "createExperiment"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/experiments"
+        }
+      ]
+    },
+    "experiments.createExperimentFromTemplate": {
+      "apiMethods": [
+        "createExperiment",
+        "listApplications",
+        "listCustomSectionFields",
+        "listExperimentTags",
+        "listMetrics",
+        "listTeams",
+        "listUnitTypes",
+        "listUsers"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/applications"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_section_fields"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_tags"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiments"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/unit_types"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users"
+        }
+      ]
+    },
+    "experiments.updateExperiment": {
+      "apiMethods": [
+        "updateExperiment"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/experiments/{id}"
+        }
+      ]
+    },
+    "experiments.startExperiment": {
+      "apiMethods": [
+        "getExperiment",
+        "startExperiment"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/experiments/{id}/start"
+        }
+      ]
+    },
+    "experiments.stopExperiment": {
+      "apiMethods": [
+        "stopExperiment"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/experiments/{id}/stop"
+        }
+      ]
+    },
+    "experiments.archiveExperiment": {
+      "apiMethods": [
+        "archiveExperiment"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/experiments/{id}/archive"
+        }
+      ]
+    },
+    "experiments.restartExperiment": {
+      "apiMethods": [
+        "restartExperiment"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/experiments/{id}/restart"
+        }
+      ]
+    },
+    "experiments.developmentExperiment": {
+      "apiMethods": [
+        "developmentExperiment"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/experiments/{id}/development"
+        }
+      ]
+    },
+    "experiments.fullOnExperiment": {
+      "apiMethods": [
+        "fullOnExperiment"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/experiments/{id}/full_on"
+        }
+      ]
+    },
+    "experiments.cloneExperiment": {
+      "apiMethods": [
+        "createExperiment"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/experiments"
+        }
+      ]
+    },
+    "experiments.diffExperimentsCore": {
+      "apiMethods": [
+        "getExperiment",
+        "listExperiments"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiments"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}"
+        }
+      ]
+    },
+    "experiments.exportExperiment": {
+      "apiMethods": [
+        "exportExperimentData"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{id}/export_data"
+        }
+      ]
+    },
+    "experiments.generateTemplate": {
+      "apiMethods": [
+        "listApplications",
+        "listMetrics",
+        "listUnitTypes"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/applications"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/unit_types"
+        }
+      ]
+    },
+    "experiments.estimateParticipants": {
+      "apiMethods": [
+        "estimateMaxParticipants",
+        "listApplications",
+        "listUnitTypes"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/applications"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiments/estimate/max_participants"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/unit_types"
+        }
+      ]
+    },
+    "experiments.getParentExperiment": {
+      "apiMethods": [
+        "getParentExperiment"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}/parent"
+        }
+      ]
+    },
+    "experiments.requestUpdate": {
+      "apiMethods": [
+        "requestExperimentUpdate"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{id}/request_update"
+        }
+      ]
+    },
+    "experiments.followExperiment": {
+      "apiMethods": [
+        "followExperiment"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{id}/follow"
+        }
+      ]
+    },
+    "experiments.unfollowExperiment": {
+      "apiMethods": [
+        "unfollowExperiment"
+      ],
+      "endpoints": [
+        {
+          "method": "DELETE",
+          "path": "/v1/experiments/{id}/follow"
+        }
+      ]
+    },
+    "experiments.listExperimentMetrics": {
+      "apiMethods": [
+        "getExperiment"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}"
+        }
+      ]
+    },
+    "experiments.getMetricResults": {
+      "apiMethods": [
+        "getExperiment",
+        "getExperimentMetricData",
+        "getExperimentMetricsCached",
+        "getMetric",
+        "listSegments"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{experimentId}/metrics/{metricId}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{experimentId}/metrics/main"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/segments"
+        }
+      ]
+    },
+    "experiments.addExperimentMetrics": {
+      "apiMethods": [
+        "addExperimentMetrics"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{id}/metrics"
+        }
+      ]
+    },
+    "experiments.confirmMetricImpact": {
+      "apiMethods": [
+        "confirmMetricImpact"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{experimentId}/metrics/{metricId}/confirm_impact"
+        }
+      ]
+    },
+    "experiments.excludeExperimentMetric": {
+      "apiMethods": [
+        "excludeExperimentMetric"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{experimentId}/metrics/{metricId}/exclude"
+        }
+      ]
+    },
+    "experiments.includeExperimentMetric": {
+      "apiMethods": [
+        "includeExperimentMetric"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{experimentId}/metrics/{metricId}/include"
+        }
+      ]
+    },
+    "experiments.removeMetricImpact": {
+      "apiMethods": [
+        "removeMetricImpact"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{experimentId}/metrics/{metricId}/remove_impact"
+        }
+      ]
+    },
+    "experiments.listExperimentActivity": {
+      "apiMethods": [
+        "listExperimentActivity"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}/activity"
+        }
+      ]
+    },
+    "experiments.createExperimentNote": {
+      "apiMethods": [
+        "createExperimentNote"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{id}/activity"
+        }
+      ]
+    },
+    "experiments.editExperimentNote": {
+      "apiMethods": [
+        "editExperimentNote"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/experiments/{id}/activity/{noteId}"
+        }
+      ]
+    },
+    "experiments.replyToExperimentNote": {
+      "apiMethods": [
+        "replyToExperimentNote"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{id}/activity/{noteId}/reply"
+        }
+      ]
+    },
+    "experiments.listExperimentAlerts": {
+      "apiMethods": [
+        "listExperimentAlerts"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiment_alerts"
+        }
+      ]
+    },
+    "experiments.dismissAlert": {
+      "apiMethods": [
+        "dismissAlert"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_alerts/{id}/dismiss"
+        }
+      ]
+    },
+    "experiments.listRecommendedActions": {
+      "apiMethods": [
+        "listRecommendedActions"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiment_recommended_actions"
+        }
+      ]
+    },
+    "experiments.dismissRecommendedAction": {
+      "apiMethods": [
+        "dismissRecommendedAction"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_recommended_actions/{id}/dismiss"
+        }
+      ]
+    },
+    "experiments.createScheduledAction": {
+      "apiMethods": [
+        "createScheduledAction"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{id}/scheduled_action"
+        }
+      ]
+    },
+    "experiments.deleteScheduledAction": {
+      "apiMethods": [
+        "deleteScheduledAction"
+      ],
+      "endpoints": [
+        {
+          "method": "DELETE",
+          "path": "/v1/experiments/{id}/scheduled_action/{actionId}"
+        }
+      ]
+    },
+    "experiments.listExperimentAccessUsers": {
+      "apiMethods": [
+        "listExperimentAccessUsers"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}/asset_role_users"
+        }
+      ]
+    },
+    "experiments.grantExperimentAccessUser": {
+      "apiMethods": [
+        "grantExperimentAccessUser"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{id}/asset_role_users"
+        }
+      ]
+    },
+    "experiments.revokeExperimentAccessUser": {
+      "apiMethods": [
+        "revokeExperimentAccessUser"
+      ],
+      "endpoints": [
+        {
+          "method": "DELETE",
+          "path": "/v1/experiments/{id}/asset_role_users/{userId}/{assetRoleId}"
+        }
+      ]
+    },
+    "experiments.listExperimentAccessTeams": {
+      "apiMethods": [
+        "listExperimentAccessTeams"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}/asset_role_teams"
+        }
+      ]
+    },
+    "experiments.grantExperimentAccessTeam": {
+      "apiMethods": [
+        "grantExperimentAccessTeam"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{id}/asset_role_teams"
+        }
+      ]
+    },
+    "experiments.revokeExperimentAccessTeam": {
+      "apiMethods": [
+        "revokeExperimentAccessTeam"
+      ],
+      "endpoints": [
+        {
+          "method": "DELETE",
+          "path": "/v1/experiments/{id}/asset_role_teams/{teamId}/{assetRoleId}"
+        }
+      ]
+    },
+    "experiments.listAnnotations": {
+      "apiMethods": [
+        "listAnnotations"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiment_annotations"
+        }
+      ]
+    },
+    "experiments.createAnnotation": {
+      "apiMethods": [
+        "createAnnotation"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/experiment_annotations"
+        }
+      ]
+    },
+    "experiments.updateAnnotation": {
+      "apiMethods": [
+        "updateAnnotation"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_annotations/{id}"
+        }
+      ]
+    },
+    "experiments.archiveAnnotation": {
+      "apiMethods": [
+        "archiveAnnotation"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_annotations/{id}/archive"
+        }
+      ]
+    },
+    "experiments.bulkStart": {
+      "apiMethods": [
+        "startExperiment"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/experiments/{id}/start"
+        }
+      ]
+    },
+    "experiments.bulkStop": {
+      "apiMethods": [
+        "stopExperiment"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/experiments/{id}/stop"
+        }
+      ]
+    },
+    "experiments.bulkArchive": {
+      "apiMethods": [
+        "archiveExperiment"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/experiments/{id}/archive"
+        }
+      ]
+    },
+    "experiments.bulkDevelopment": {
+      "apiMethods": [
+        "developmentExperiment"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/experiments/{id}/development"
+        }
+      ]
+    },
+    "experiments.bulkFullOn": {
+      "apiMethods": [
+        "fullOnExperiment"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/experiments/{id}/full_on"
+        }
+      ]
+    },
+    "experiments.listCustomFields": {
+      "apiMethods": [
+        "listCustomSectionFields"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_section_fields"
+        }
+      ]
+    },
+    "experiments.getCustomField": {
+      "apiMethods": [
+        "getCustomSectionField"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_section_fields/{id}"
+        }
+      ]
+    },
+    "experiments.createCustomField": {
+      "apiMethods": [
+        "createCustomSectionField"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/experiment_custom_section_fields"
+        }
+      ]
+    },
+    "experiments.updateCustomField": {
+      "apiMethods": [
+        "updateCustomSectionField"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_custom_section_fields/{id}"
+        }
+      ]
+    },
+    "experiments.archiveCustomField": {
+      "apiMethods": [
+        "archiveCustomSectionField"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_custom_section_fields/{id}/archive"
+        }
+      ]
+    },
+    "experiments.refreshFields": {
+      "apiMethods": [
+        "listCustomSectionFields",
+        "listExperimentActionDialogFields"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiment_action_dialog_fields"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_section_fields"
+        }
+      ]
+    },
+    "metrics.listMetrics": {
+      "apiMethods": [
+        "listMetrics",
+        "resolveTeams",
+        "resolveUsers"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users"
+        }
+      ]
+    },
+    "metrics.getMetric": {
+      "apiMethods": [
+        "getMetric"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/metrics/{id}"
+        }
+      ]
+    },
+    "metrics.createMetric": {
+      "apiMethods": [
+        "createMetric"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/metrics"
+        }
+      ]
+    },
+    "metrics.updateMetric": {
+      "apiMethods": [
+        "updateMetric"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/metrics/{id}"
+        }
+      ]
+    },
+    "metrics.archiveMetric": {
+      "apiMethods": [
+        "archiveMetric"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/metrics/{id}/archive"
+        }
+      ]
+    },
+    "metrics.activateMetric": {
+      "apiMethods": [
+        "activateMetric"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/metrics/{id}/activate"
+        }
+      ]
+    },
+    "metrics.requestMetricReview": {
+      "apiMethods": [
+        "requestMetricReview"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/metrics/{id}/review/request"
+        }
+      ]
+    },
+    "metrics.getMetricReview": {
+      "apiMethods": [
+        "getMetricReview"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/metrics/{id}/review"
+        }
+      ]
+    },
+    "metrics.approveMetricReview": {
+      "apiMethods": [
+        "approveMetricReview"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/metrics/{id}/review/approve"
+        }
+      ]
+    },
+    "metrics.listMetricReviewComments": {
+      "apiMethods": [
+        "listMetricReviewComments"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/metrics/{id}/review/comments"
+        }
+      ]
+    },
+    "metrics.addMetricReviewComment": {
+      "apiMethods": [
+        "addMetricReviewComment"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/metrics/{id}/review/comments"
+        }
+      ]
+    },
+    "metrics.replyToMetricReviewComment": {
+      "apiMethods": [
+        "replyToMetricReviewComment"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/metrics/{id}/review/comments/{commentId}/reply"
+        }
+      ]
+    },
+    "metrics.followMetric": {
+      "apiMethods": [
+        "followMetric"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/metrics/{id}/follow"
+        }
+      ]
+    },
+    "metrics.unfollowMetric": {
+      "apiMethods": [
+        "unfollowMetric"
+      ],
+      "endpoints": [
+        {
+          "method": "DELETE",
+          "path": "/v1/metrics/{id}/follow"
+        }
+      ]
+    },
+    "metrics.listMetricAccessUsers": {
+      "apiMethods": [
+        "listMetricAccessUsers"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/metrics/{id}/asset_role_users"
+        }
+      ]
+    },
+    "metrics.grantMetricAccessUser": {
+      "apiMethods": [
+        "grantMetricAccessUser"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/metrics/{id}/asset_role_users"
+        }
+      ]
+    },
+    "metrics.revokeMetricAccessUser": {
+      "apiMethods": [
+        "revokeMetricAccessUser"
+      ],
+      "endpoints": [
+        {
+          "method": "DELETE",
+          "path": "/v1/metrics/{id}/asset_role_users/{userId}/{assetRoleId}"
+        }
+      ]
+    },
+    "metrics.listMetricAccessTeams": {
+      "apiMethods": [
+        "listMetricAccessTeams"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/metrics/{id}/asset_role_teams"
+        }
+      ]
+    },
+    "metrics.grantMetricAccessTeam": {
+      "apiMethods": [
+        "grantMetricAccessTeam"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/metrics/{id}/asset_role_teams"
+        }
+      ]
+    },
+    "metrics.revokeMetricAccessTeam": {
+      "apiMethods": [
+        "revokeMetricAccessTeam"
+      ],
+      "endpoints": [
+        {
+          "method": "DELETE",
+          "path": "/v1/metrics/{id}/asset_role_teams/{teamId}/{assetRoleId}"
+        }
+      ]
+    },
+    "goals.listGoals": {
+      "apiMethods": [
+        "listGoals"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/goals"
+        }
+      ]
+    },
+    "goals.getGoal": {
+      "apiMethods": [
+        "getGoal"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/goals/{id}"
+        }
+      ]
+    },
+    "goals.createGoal": {
+      "apiMethods": [
+        "createGoal"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/goals"
+        }
+      ]
+    },
+    "goals.updateGoal": {
+      "apiMethods": [
+        "updateGoal"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/goals/{id}"
+        }
+      ]
+    },
+    "goals.followGoal": {
+      "apiMethods": [
+        "followGoal"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/goals/{id}/follow"
+        }
+      ]
+    },
+    "goals.unfollowGoal": {
+      "apiMethods": [
+        "unfollowGoal"
+      ],
+      "endpoints": [
+        {
+          "method": "DELETE",
+          "path": "/v1/goals/{id}/follow"
+        }
+      ]
+    },
+    "goals.listGoalAccessUsers": {
+      "apiMethods": [
+        "listGoalAccessUsers"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/goals/{id}/asset_role_users"
+        }
+      ]
+    },
+    "goals.grantGoalAccessUser": {
+      "apiMethods": [
+        "grantGoalAccessUser"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/goals/{id}/asset_role_users"
+        }
+      ]
+    },
+    "goals.revokeGoalAccessUser": {
+      "apiMethods": [
+        "revokeGoalAccessUser"
+      ],
+      "endpoints": [
+        {
+          "method": "DELETE",
+          "path": "/v1/goals/{id}/asset_role_users/{userId}/{assetRoleId}"
+        }
+      ]
+    },
+    "goals.listGoalAccessTeams": {
+      "apiMethods": [
+        "listGoalAccessTeams"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/goals/{id}/asset_role_teams"
+        }
+      ]
+    },
+    "goals.grantGoalAccessTeam": {
+      "apiMethods": [
+        "grantGoalAccessTeam"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/goals/{id}/asset_role_teams"
+        }
+      ]
+    },
+    "goals.revokeGoalAccessTeam": {
+      "apiMethods": [
+        "revokeGoalAccessTeam"
+      ],
+      "endpoints": [
+        {
+          "method": "DELETE",
+          "path": "/v1/goals/{id}/asset_role_teams/{teamId}/{assetRoleId}"
+        }
+      ]
+    },
+    "segments.listSegments": {
+      "apiMethods": [
+        "listSegments"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/segments"
+        }
+      ]
+    },
+    "segments.getSegment": {
+      "apiMethods": [
+        "getSegment"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/segments/{id}"
+        }
+      ]
+    },
+    "segments.createSegment": {
+      "apiMethods": [
+        "createSegment"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/segments"
+        }
+      ]
+    },
+    "segments.updateSegment": {
+      "apiMethods": [
+        "updateSegment"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/segments/{id}"
+        }
+      ]
+    },
+    "segments.deleteSegment": {
+      "apiMethods": [
+        "deleteSegment"
+      ],
+      "endpoints": [
+        {
+          "method": "DELETE",
+          "path": "/v1/segments/{id}"
+        }
+      ]
+    },
+    "teams.listTeams": {
+      "apiMethods": [
+        "listTeams"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        }
+      ]
+    },
+    "teams.getTeam": {
+      "apiMethods": [
+        "getTeam"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/teams/{id}"
+        }
+      ]
+    },
+    "teams.createTeam": {
+      "apiMethods": [
+        "createTeam"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/teams"
+        }
+      ]
+    },
+    "teams.updateTeam": {
+      "apiMethods": [
+        "updateTeam"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/teams/{id}"
+        }
+      ]
+    },
+    "teams.archiveTeam": {
+      "apiMethods": [
+        "archiveTeam"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/teams/{id}/archive"
+        }
+      ]
+    },
+    "teams.listTeamMembers": {
+      "apiMethods": [
+        "listTeamMembers"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/teams/{id}/members"
+        }
+      ]
+    },
+    "teams.addTeamMembers": {
+      "apiMethods": [
+        "addTeamMembers"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/teams/{id}/members/add"
+        }
+      ]
+    },
+    "teams.removeTeamMembers": {
+      "apiMethods": [
+        "removeTeamMembers"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/teams/{id}/members/remove"
+        }
+      ]
+    },
+    "teams.editTeamMemberRoles": {
+      "apiMethods": [
+        "editTeamMemberRoles"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/teams/{id}/members/edit_roles"
+        }
+      ]
+    },
+    "users.listUsers": {
+      "apiMethods": [
+        "listUsers"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/users"
+        }
+      ]
+    },
+    "users.getUser": {
+      "apiMethods": [
+        "getUser"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/users/{id}"
+        }
+      ]
+    },
+    "users.createUser": {
+      "apiMethods": [
+        "createUser"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/users"
+        }
+      ]
+    },
+    "users.updateUser": {
+      "apiMethods": [
+        "updateUser"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/users/{id}"
+        }
+      ]
+    },
+    "users.archiveUser": {
+      "apiMethods": [
+        "archiveUser"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/users/{id}/archive"
+        }
+      ]
+    },
+    "users.resetUserPassword": {
+      "apiMethods": [
+        "resetUserPassword"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/users/{id}/reset-password"
+        }
+      ]
+    },
+    "users.listUserApiKeys": {
+      "apiMethods": [
+        "listUserApiKeysByUserId",
+        "resolveUsers"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/users"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users/{userId}/api_keys"
+        }
+      ]
+    },
+    "users.createUserApiKey": {
+      "apiMethods": [
+        "createUserApiKeyByUserId",
+        "resolveUsers"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/users"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/users/{userId}/api_keys"
+        }
+      ]
+    },
+    "users.deleteUserApiKey": {
+      "apiMethods": [
+        "deleteUserApiKeyByUserId",
+        "resolveUsers"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/users"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/users/{userId}/api_keys/{keyId}"
+        }
+      ]
+    },
+    "apps.listApps": {
+      "apiMethods": [
+        "listApplications"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/applications"
+        }
+      ]
+    },
+    "apps.getApp": {
+      "apiMethods": [
+        "getApplication"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/applications/{id}"
+        }
+      ]
+    },
+    "apps.createApp": {
+      "apiMethods": [
+        "createApplication"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/applications"
+        }
+      ]
+    },
+    "apps.updateApp": {
+      "apiMethods": [
+        "updateApplication"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/applications/{id}"
+        }
+      ]
+    },
+    "apps.archiveApp": {
+      "apiMethods": [
+        "archiveApplication"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/applications/{id}/archive"
+        }
+      ]
+    },
+    "envs.listEnvs": {
+      "apiMethods": [
+        "listEnvironments"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/environments"
+        }
+      ]
+    },
+    "envs.getEnv": {
+      "apiMethods": [
+        "getEnvironment"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/environments/{id}"
+        }
+      ]
+    },
+    "envs.createEnv": {
+      "apiMethods": [
+        "createEnvironment"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/environments"
+        }
+      ]
+    },
+    "envs.updateEnv": {
+      "apiMethods": [
+        "updateEnvironment"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/environments/{id}"
+        }
+      ]
+    },
+    "envs.archiveEnv": {
+      "apiMethods": [
+        "archiveEnvironment"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/environments/{id}/archive"
+        }
+      ]
+    },
+    "units.listUnits": {
+      "apiMethods": [
+        "listUnitTypes"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/unit_types"
+        }
+      ]
+    },
+    "units.getUnit": {
+      "apiMethods": [
+        "getUnitType"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/unit_types/{id}"
+        }
+      ]
+    },
+    "units.createUnit": {
+      "apiMethods": [
+        "createUnitType"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/unit_types"
+        }
+      ]
+    },
+    "units.updateUnit": {
+      "apiMethods": [
+        "updateUnitType"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/unit_types/{id}"
+        }
+      ]
+    },
+    "units.archiveUnit": {
+      "apiMethods": [
+        "archiveUnitType"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/unit_types/{id}/archive"
+        }
+      ]
+    },
+    "tags.listTags": {
+      "apiMethods": [
+        "listExperimentTags"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiment_tags"
+        }
+      ]
+    },
+    "tags.getTag": {
+      "apiMethods": [
+        "getExperimentTag"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiment_tags/{id}"
+        }
+      ]
+    },
+    "tags.createTag": {
+      "apiMethods": [
+        "createExperimentTag"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/experiment_tags"
+        }
+      ]
+    },
+    "tags.updateTag": {
+      "apiMethods": [
+        "updateExperimentTag"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_tags/{id}"
+        }
+      ]
+    },
+    "tags.deleteTag": {
+      "apiMethods": [
+        "deleteExperimentTag"
+      ],
+      "endpoints": [
+        {
+          "method": "DELETE",
+          "path": "/v1/experiment_tags/{id}"
+        }
+      ]
+    },
+    "goaltags.listGoalTags": {
+      "apiMethods": [
+        "listGoalTags"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/goal_tags"
+        }
+      ]
+    },
+    "goaltags.getGoalTag": {
+      "apiMethods": [
+        "getGoalTag"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/goal_tags/{id}"
+        }
+      ]
+    },
+    "goaltags.createGoalTag": {
+      "apiMethods": [
+        "createGoalTag"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/goal_tags"
+        }
+      ]
+    },
+    "goaltags.updateGoalTag": {
+      "apiMethods": [
+        "updateGoalTag"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/goal_tags/{id}"
+        }
+      ]
+    },
+    "goaltags.deleteGoalTag": {
+      "apiMethods": [
+        "deleteGoalTag"
+      ],
+      "endpoints": [
+        {
+          "method": "DELETE",
+          "path": "/v1/goal_tags/{id}"
+        }
+      ]
+    },
+    "metrictags.listMetricTags": {
+      "apiMethods": [
+        "listMetricTags"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/metric_tags"
+        }
+      ]
+    },
+    "metrictags.getMetricTag": {
+      "apiMethods": [
+        "getMetricTag"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/metric_tags/{id}"
+        }
+      ]
+    },
+    "metrictags.createMetricTag": {
+      "apiMethods": [
+        "createMetricTag"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/metric_tags"
+        }
+      ]
+    },
+    "metrictags.updateMetricTag": {
+      "apiMethods": [
+        "updateMetricTag"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/metric_tags/{id}"
+        }
+      ]
+    },
+    "metrictags.deleteMetricTag": {
+      "apiMethods": [
+        "deleteMetricTag"
+      ],
+      "endpoints": [
+        {
+          "method": "DELETE",
+          "path": "/v1/metric_tags/{id}"
+        }
+      ]
+    },
+    "metriccategories.listMetricCategories": {
+      "apiMethods": [
+        "listMetricCategories"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/metric_categories"
+        }
+      ]
+    },
+    "metriccategories.getMetricCategory": {
+      "apiMethods": [
+        "getMetricCategory"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/metric_categories/{id}"
+        }
+      ]
+    },
+    "metriccategories.createMetricCategory": {
+      "apiMethods": [
+        "createMetricCategory"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/metric_categories"
+        }
+      ]
+    },
+    "metriccategories.updateMetricCategory": {
+      "apiMethods": [
+        "updateMetricCategory"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/metric_categories/{id}"
+        }
+      ]
+    },
+    "metriccategories.archiveMetricCategory": {
+      "apiMethods": [
+        "archiveMetricCategory"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/metric_categories/{id}/archive"
+        }
+      ]
+    },
+    "auth.whoami": {
+      "apiMethods": [
+        "getCurrentUser"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/auth/current-user"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users/{id}"
+        }
+      ]
+    },
+    "auth.listAuthApiKeys": {
+      "apiMethods": [
+        "listUserApiKeys"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/auth/current-user/api_keys"
+        }
+      ]
+    },
+    "auth.getAuthApiKey": {
+      "apiMethods": [
+        "getUserApiKey"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/auth/current-user/api_keys/{id}"
+        }
+      ]
+    },
+    "auth.createAuthApiKey": {
+      "apiMethods": [
+        "createUserApiKey"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/auth/current-user/api_keys"
+        }
+      ]
+    },
+    "auth.updateAuthApiKey": {
+      "apiMethods": [
+        "updateUserApiKey"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/auth/current-user/api_keys/{id}"
+        }
+      ]
+    },
+    "auth.deleteAuthApiKey": {
+      "apiMethods": [
+        "deleteUserApiKey"
+      ],
+      "endpoints": [
+        {
+          "method": "DELETE",
+          "path": "/auth/current-user/api_keys/{id}"
+        }
+      ]
+    },
+    "auth.resetMyPassword": {
+      "apiMethods": [
+        "updateCurrentUser"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/auth/current-user"
+        }
+      ]
+    },
+    "apikeys.listApiKeys": {
+      "apiMethods": [
+        "listApiKeys"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/api_keys"
+        }
+      ]
+    },
+    "apikeys.getApiKey": {
+      "apiMethods": [
+        "getApiKey"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/api_keys/{id}"
+        }
+      ]
+    },
+    "apikeys.createApiKey": {
+      "apiMethods": [
+        "createApiKey"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/api_keys"
+        }
+      ]
+    },
+    "apikeys.updateApiKey": {
+      "apiMethods": [
+        "updateApiKey"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/api_keys/{id}"
+        }
+      ]
+    },
+    "apikeys.deleteApiKey": {
+      "apiMethods": [
+        "deleteApiKey"
+      ],
+      "endpoints": [
+        {
+          "method": "DELETE",
+          "path": "/v1/api_keys/{id}"
+        }
+      ]
+    },
+    "webhooks.listWebhooks": {
+      "apiMethods": [
+        "listWebhooks"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/webhooks"
+        }
+      ]
+    },
+    "webhooks.getWebhook": {
+      "apiMethods": [
+        "getWebhook"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/webhooks/{id}"
+        }
+      ]
+    },
+    "webhooks.createWebhook": {
+      "apiMethods": [
+        "createWebhook"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/webhooks"
+        }
+      ]
+    },
+    "webhooks.updateWebhook": {
+      "apiMethods": [
+        "updateWebhook"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/webhooks/{id}"
+        }
+      ]
+    },
+    "webhooks.deleteWebhook": {
+      "apiMethods": [
+        "deleteWebhook"
+      ],
+      "endpoints": [
+        {
+          "method": "DELETE",
+          "path": "/v1/webhooks/{id}"
+        }
+      ]
+    },
+    "webhooks.listWebhookEvents": {
+      "apiMethods": [
+        "listWebhookEvents"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/webhook_events"
+        }
+      ]
+    },
+    "roles.listRoles": {
+      "apiMethods": [
+        "listRoles"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/roles"
+        }
+      ]
+    },
+    "roles.getRole": {
+      "apiMethods": [
+        "getRole"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/roles/{id}"
+        }
+      ]
+    },
+    "roles.createRole": {
+      "apiMethods": [
+        "createRole"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/roles"
+        }
+      ]
+    },
+    "roles.updateRole": {
+      "apiMethods": [
+        "updateRole"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/roles/{id}"
+        }
+      ]
+    },
+    "roles.deleteRole": {
+      "apiMethods": [
+        "deleteRole"
+      ],
+      "endpoints": [
+        {
+          "method": "DELETE",
+          "path": "/v1/roles/{id}"
+        }
+      ]
+    },
+    "permissions.listPermissions": {
+      "apiMethods": [
+        "listPermissions"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/permissions"
+        }
+      ]
+    },
+    "permissions.listPermissionCategories": {
+      "apiMethods": [
+        "listPermissionCategories"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/permission_categories"
+        }
+      ]
+    },
+    "permissions.listAccessControlPolicies": {
+      "apiMethods": [
+        "listAccessControlPolicies"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/access_control_policies"
+        }
+      ]
+    },
+    "assetroles.listAssetRoles": {
+      "apiMethods": [
+        "listAssetRoles"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/asset_roles"
+        }
+      ]
+    },
+    "assetroles.getAssetRole": {
+      "apiMethods": [
+        "getAssetRole"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/asset_roles/{id}"
+        }
+      ]
+    },
+    "assetroles.createAssetRole": {
+      "apiMethods": [
+        "createAssetRole"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/asset_roles"
+        }
+      ]
+    },
+    "assetroles.updateAssetRole": {
+      "apiMethods": [
+        "updateAssetRole"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/asset_roles/{id}"
+        }
+      ]
+    },
+    "assetroles.deleteAssetRole": {
+      "apiMethods": [
+        "deleteAssetRole"
+      ],
+      "endpoints": [
+        {
+          "method": "DELETE",
+          "path": "/v1/asset_roles/{id}"
+        }
+      ]
+    },
+    "notifications.listNotifications": {
+      "apiMethods": [
+        "getNotifications"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/notifications/summary"
+        }
+      ]
+    },
+    "notifications.checkNotifications": {
+      "apiMethods": [
+        "hasNewNotifications"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/notifications/has-new"
+        }
+      ]
+    },
+    "notifications.markNotificationsSeen": {
+      "apiMethods": [
+        "markNotificationsSeen"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/notifications/see"
+        }
+      ]
+    },
+    "notifications.markNotificationsRead": {
+      "apiMethods": [
+        "markNotificationsRead"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/notifications/read"
+        }
+      ]
+    },
+    "favorites.addFavorite": {
+      "apiMethods": [
+        "favoriteExperiment",
+        "favoriteMetric"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/favorites/experiment"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/favorites/metric"
+        }
+      ]
+    },
+    "favorites.removeFavorite": {
+      "apiMethods": [
+        "favoriteExperiment",
+        "favoriteMetric"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/favorites/experiment"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/favorites/metric"
+        }
+      ]
+    },
+    "insights.getVelocityInsights": {
+      "apiMethods": [
+        "getVelocityInsights",
+        "resolveTeams",
+        "resolveUnitTypes",
+        "resolveUsers"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/insights/velocity/summary"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/unit_types"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users"
+        }
+      ]
+    },
+    "insights.getVelocityInsightsDetail": {
+      "apiMethods": [
+        "getVelocityInsightsDetail",
+        "resolveApplications",
+        "resolveTeams"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/applications"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/insights/velocity/summary/detail"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        }
+      ]
+    },
+    "insights.getDecisionInsights": {
+      "apiMethods": [
+        "getDecisionInsights",
+        "resolveTeams",
+        "resolveUnitTypes",
+        "resolveUsers"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/insights/decisions/widgets"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/unit_types"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users"
+        }
+      ]
+    },
+    "insights.getDecisionInsightsHistory": {
+      "apiMethods": [
+        "getDecisionInsightsHistory",
+        "resolveApplications",
+        "resolveTeams"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/applications"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/insights/decisions/history"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        }
+      ]
+    },
+    "cors.listCorsOrigins": {
+      "apiMethods": [
+        "listCorsOrigins"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/cors"
+        }
+      ]
+    },
+    "cors.getCorsOrigin": {
+      "apiMethods": [
+        "getCorsOrigin"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/cors/{id}"
+        }
+      ]
+    },
+    "cors.createCorsOrigin": {
+      "apiMethods": [
+        "createCorsOrigin"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/cors"
+        }
+      ]
+    },
+    "cors.updateCorsOrigin": {
+      "apiMethods": [
+        "updateCorsOrigin"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/cors/{id}"
+        }
+      ]
+    },
+    "cors.deleteCorsOrigin": {
+      "apiMethods": [
+        "deleteCorsOrigin"
+      ],
+      "endpoints": [
+        {
+          "method": "DELETE",
+          "path": "/v1/cors/{id}"
+        }
+      ]
+    },
+    "datasources.listDatasources": {
+      "apiMethods": [
+        "listDatasources"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/datasources"
+        }
+      ]
+    },
+    "datasources.getDatasource": {
+      "apiMethods": [
+        "getDatasource"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/datasources/{id}"
+        }
+      ]
+    },
+    "datasources.createDatasource": {
+      "apiMethods": [
+        "createDatasource"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/datasources"
+        }
+      ]
+    },
+    "datasources.updateDatasource": {
+      "apiMethods": [
+        "updateDatasource"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/datasources/{id}"
+        }
+      ]
+    },
+    "datasources.archiveDatasource": {
+      "apiMethods": [
+        "archiveDatasource"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/datasources/{id}/archive"
+        }
+      ]
+    },
+    "datasources.testDatasource": {
+      "apiMethods": [
+        "testDatasource"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/datasources/test"
+        }
+      ]
+    },
+    "datasources.introspectDatasource": {
+      "apiMethods": [
+        "introspectDatasource"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/datasources/introspect"
+        }
+      ]
+    },
+    "datasources.validateDatasourceQuery": {
+      "apiMethods": [
+        "validateDatasourceQuery"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/datasources/validate_query"
+        }
+      ]
+    },
+    "exportconfigs.listExportConfigs": {
+      "apiMethods": [
+        "listExportConfigs"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/export_configs"
+        }
+      ]
+    },
+    "exportconfigs.getExportConfig": {
+      "apiMethods": [
+        "getExportConfig"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/export_configs/{id}"
+        }
+      ]
+    },
+    "exportconfigs.createExportConfig": {
+      "apiMethods": [
+        "createExportConfig"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/export_configs"
+        }
+      ]
+    },
+    "exportconfigs.updateExportConfig": {
+      "apiMethods": [
+        "updateExportConfig"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/export_configs/{id}"
+        }
+      ]
+    },
+    "exportconfigs.archiveExportConfig": {
+      "apiMethods": [
+        "archiveExportConfig"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/export_configs/{id}/archive"
+        }
+      ]
+    },
+    "exportconfigs.pauseExportConfig": {
+      "apiMethods": [
+        "pauseExportConfig"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/export_configs/{id}/pause"
+        }
+      ]
+    },
+    "exportconfigs.listExportHistories": {
+      "apiMethods": [
+        "listExportHistories"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/export_configs/{id}/export_histories"
+        }
+      ]
+    },
+    "updateschedules.listUpdateSchedules": {
+      "apiMethods": [
+        "listUpdateSchedules"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiment_update_schedules"
+        }
+      ]
+    },
+    "updateschedules.getUpdateSchedule": {
+      "apiMethods": [
+        "getUpdateSchedule"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiment_update_schedules/{id}"
+        }
+      ]
+    },
+    "updateschedules.createUpdateSchedule": {
+      "apiMethods": [
+        "createUpdateSchedule"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/experiment_update_schedules"
+        }
+      ]
+    },
+    "updateschedules.updateUpdateSchedule": {
+      "apiMethods": [
+        "updateUpdateSchedule"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_update_schedules/{id}"
+        }
+      ]
+    },
+    "updateschedules.deleteUpdateSchedule": {
+      "apiMethods": [
+        "deleteUpdateSchedule"
+      ],
+      "endpoints": [
+        {
+          "method": "DELETE",
+          "path": "/v1/experiment_update_schedules/{id}"
+        }
+      ]
+    },
+    "customsections.listCustomSections": {
+      "apiMethods": [
+        "listCustomSections"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_sections"
+        }
+      ]
+    },
+    "customsections.createCustomSection": {
+      "apiMethods": [
+        "createCustomSection"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/experiment_custom_sections"
+        }
+      ]
+    },
+    "customsections.updateCustomSection": {
+      "apiMethods": [
+        "updateCustomSection"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_custom_sections/{id}"
+        }
+      ]
+    },
+    "customsections.archiveCustomSection": {
+      "apiMethods": [
+        "archiveCustomSection"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_custom_sections/{id}/archive"
+        }
+      ]
+    },
+    "customsections.reorderCustomSections": {
+      "apiMethods": [
+        "reorderCustomSections"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_custom_sections/order"
+        }
+      ]
+    },
+    "platformconfig.listPlatformConfigs": {
+      "apiMethods": [
+        "listPlatformConfigs"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/configs"
+        }
+      ]
+    },
+    "platformconfig.getPlatformConfig": {
+      "apiMethods": [
+        "getPlatformConfig"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/configs/{id}"
+        }
+      ]
+    },
+    "platformconfig.updatePlatformConfig": {
+      "apiMethods": [
+        "getPlatformConfig",
+        "updatePlatformConfig"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/configs/{id}"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/configs/{id}"
+        }
+      ]
+    },
+    "activity.listActivity": {
+      "apiMethods": [
+        "listExperimentActivity",
+        "listExperiments",
+        "listTeams",
+        "listUsers"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiments"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}/activity"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users"
+        }
+      ]
+    },
+    "statistics.getPowerMatrix": {
+      "apiMethods": [
+        "getPowerAnalysisMatrix"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/statistics/power/plan/matrix"
+        }
+      ]
+    },
+    "events.listEvents": {
+      "apiMethods": [
+        "listEvents"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/events"
+        }
+      ]
+    },
+    "events.listEventsHistory": {
+      "apiMethods": [
+        "listEventsHistory"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/events/history"
+        }
+      ]
+    },
+    "storageconfigs.listStorageConfigs": {
+      "apiMethods": [
+        "listStorageConfigs"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/storage_configs"
+        }
+      ]
+    },
+    "storageconfigs.getStorageConfig": {
+      "apiMethods": [
+        "getStorageConfig"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/storage_configs/{id}"
+        }
+      ]
+    },
+    "storageconfigs.createStorageConfig": {
+      "apiMethods": [
+        "createStorageConfig"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/storage_configs"
+        }
+      ]
+    },
+    "storageconfigs.updateStorageConfig": {
+      "apiMethods": [
+        "updateStorageConfig"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/storage_configs/{id}"
+        }
+      ]
+    },
+    "storageconfigs.testStorageConfig": {
+      "apiMethods": [
+        "testStorageConfig"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/storage_configs/test"
+        }
+      ]
+    },
+    "actiondialogfields.listActionDialogFields": {
+      "apiMethods": [
+        "listExperimentActionDialogFields"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiment_action_dialog_fields"
+        }
+      ]
+    },
+    "actiondialogfields.getActionDialogField": {
+      "apiMethods": [
+        "getExperimentActionDialogField"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiment_action_dialog_fields/{id}"
+        }
+      ]
+    },
+    "actiondialogfields.createActionDialogField": {
+      "apiMethods": [
+        "createExperimentActionDialogField"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/experiment_action_dialog_fields"
+        }
+      ]
+    },
+    "actiondialogfields.updateActionDialogField": {
+      "apiMethods": [
+        "updateExperimentActionDialogField"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_action_dialog_fields/{id}"
+        }
+      ]
+    }
+  },
+  "dynamicApiMethods": []
+}
