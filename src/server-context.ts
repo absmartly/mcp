@@ -1,6 +1,7 @@
 // Shared entity-fetch/shape logic — used by index.ts (Cloudflare Worker),
 // local-server.ts (stdio CLI), and node-http-server.ts (Node HTTP transport).
-import type { APIClient, CustomSectionField } from "@absmartly/cli/api-client";
+import type { CustomSectionField } from "@absmartly/cli/api-client";
+import type { ApiClientLike } from "./api-client-like.js";
 
 const ENTITY_LIST_PAGE_SIZE = 100;
 const ENTITY_LIST_FIRST_PAGE = 1;
@@ -12,7 +13,7 @@ export interface SummarizedEntity {
 }
 
 export interface ServerContext {
-  apiClient: APIClient;
+  apiClient: ApiClientLike;
   endpoint: string;
   authType: string;
   currentUserId: number | null;
@@ -28,7 +29,7 @@ export interface ServerContext {
 }
 
 export async function buildServerContext(
-  apiClient: APIClient,
+  apiClient: ApiClientLike,
   opts: { endpoint: string; authType: string },
 ): Promise<ServerContext> {
   const entityWarnings: string[] = [];
@@ -119,14 +120,14 @@ export async function buildServerContext(
  * entity data (initialize, tools/list, resources/list, most tool calls).
  */
 export interface ServerContextLoader {
-  apiClient: APIClient;
+  apiClient: ApiClientLike;
   endpoint: string;
   authType: string;
   load(): Promise<ServerContext>;
 }
 
 export function createServerContextLoader(
-  apiClient: APIClient,
+  apiClient: ApiClientLike,
   opts: { endpoint: string; authType: string },
 ): ServerContextLoader {
   let pending: Promise<ServerContext> | undefined;

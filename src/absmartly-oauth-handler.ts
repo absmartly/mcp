@@ -2,13 +2,13 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { AuthRequest, OAuthHelpers } from '@cloudflare/workers-oauth-provider';
-import { debug } from './config';
-import type { Env } from './types';
+import { debug } from './config.js';
+import type { Env } from './types.js';
 import {
   DEFAULT_OAUTH_CLIENT_ID,
   OAUTH_STATE_TTL_SECONDS,
   safeKvGet,
-} from './shared';
+} from './shared.js';
 import {
   beginAuthorization,
   generatePkcePair,

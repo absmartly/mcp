@@ -161,6 +161,46 @@ export default async function runTests() {
     restoreFetch();
   });
 
+  await asyncTest('Auth: Service-Key with impersonated user', async () => {
+    const client = new FetchHttpClient('https://example.com', { authToken: 'svc', authType: 'service-key', impersonatedUserId: 42 });
+    let capturedHeaders: Record<string, string> = {};
+    mockFetch(async (_url, opts) => { capturedHeaders = opts?.headers as Record<string, string>; return new Response('{}', { headers: { 'content-type': 'application/json' } }); });
+    await client.request({ method: 'GET', url: '/test' });
+    assertEquals(capturedHeaders['Authorization'], 'Service-Key svc', 'Auth: Service-Key scheme');
+    assertEquals(capturedHeaders['Service-Key-Impersonating-UserId'], '42', 'Auth: impersonated user header');
+    restoreFetch();
+  });
+
+  await asyncTest('Auth: request headers cannot override the credential', async () => {
+    const client = new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'jwt' });
+    let capturedHeaders: Record<string, string> = {};
+    mockFetch(async (_url, opts) => { capturedHeaders = opts?.headers as Record<string, string>; return new Response('{}', { headers: { 'content-type': 'application/json' } }); });
+    await client.request({ method: 'GET', url: '/test', headers: { Authorization: 'Api-Key stolen', 'X-Extra': '1' } });
+    assertEquals(capturedHeaders['Authorization'], 'JWT tok', 'Auth: credential wins over request header');
+    assertEquals(capturedHeaders['X-Extra'], '1', 'Headers: other request headers pass through');
+    restoreFetch();
+  });
+
+  await asyncTest('URL: same-origin absolute URL passes through without /v1', async () => {
+    const client = new FetchHttpClient('https://example.com/v1', { authToken: 'tok', authType: 'jwt' });
+    let capturedUrl = '';
+    mockFetch(async (url) => { capturedUrl = String(url); return new Response('{}', { headers: { 'content-type': 'application/json' } }); });
+    await client.request({ method: 'GET', url: 'https://example.com/auth/current-user' });
+    assertEquals(capturedUrl, 'https://example.com/auth/current-user', 'URL: same-origin absolute URL kept as-is');
+    restoreFetch();
+  });
+
+  await asyncTest('URL: cross-origin absolute URL rejected before fetch', async () => {
+    const client = new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'jwt' });
+    let fetched = false;
+    mockFetch(async () => { fetched = true; return new Response('{}'); });
+    let threw = false;
+    try { await client.request({ method: 'GET', url: 'https://attacker.example/steal' }); }
+    catch (e: any) { threw = e.message.includes('other origins'); }
+    ok(threw && !fetched, 'URL: cross-origin absolute URL rejected, credential never sent');
+    restoreFetch();
+  });
+
   {
     const client = new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'api-key' });
     assertEquals((client as any).timeout, 30000, 'Default timeout: 30000ms');

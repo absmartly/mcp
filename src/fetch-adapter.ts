@@ -1,20 +1,28 @@
 import type { HttpClient, HttpRequestConfig, HttpResponse } from '@absmartly/cli/api-client';
-import { debug } from './config';
-import { MCP_VERSION, CLI_CORE_VERSION } from './version';
+import { debug } from './config.js';
+import { MCP_VERSION, CLI_CORE_VERSION } from './version.js';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
 const API_VERSION_PREFIX = '/v1';
+const ABSOLUTE_URL_PATTERN = /^https?:\/\//i;
 
-export interface FetchHttpClientOptions {
-  authToken: string;
-  authType: 'jwt' | 'api-key';
-  timeout?: number;
+export type FetchHttpClientOptions =
+  | { authToken: string; authType: 'jwt' | 'api-key'; timeout?: number }
+  | { authToken: string; authType: 'service-key'; impersonatedUserId: number; timeout?: number };
+
+function credentialHeaders(options: FetchHttpClientOptions): Record<string, string> {
+  if (options.authType === 'service-key') {
+    return {
+      'Authorization': `Service-Key ${options.authToken}`,
+      'Service-Key-Impersonating-UserId': String(options.impersonatedUserId),
+    };
+  }
+  return { 'Authorization': options.authType === 'jwt' ? `JWT ${options.authToken}` : `Api-Key ${options.authToken}` };
 }
 
 export class FetchHttpClient implements HttpClient {
   private baseUrl: string;
-  private authToken: string;
-  private authType: 'jwt' | 'api-key';
+  private credentialHeaders: Record<string, string>;
   private timeout: number;
 
   constructor(baseUrl: string, options: FetchHttpClientOptions) {
@@ -22,8 +30,7 @@ export class FetchHttpClient implements HttpClient {
     if (this.baseUrl.endsWith(API_VERSION_PREFIX)) {
       this.baseUrl = this.baseUrl.substring(0, this.baseUrl.length - API_VERSION_PREFIX.length);
     }
-    this.authToken = options.authToken;
-    this.authType = options.authType;
+    this.credentialHeaders = credentialHeaders(options);
     this.timeout = options.timeout ?? DEFAULT_REQUEST_TIMEOUT_MS;
   }
 
@@ -32,9 +39,19 @@ export class FetchHttpClient implements HttpClient {
   }
 
   async request<T = unknown>(config: HttpRequestConfig): Promise<HttpResponse<T>> {
-    let url = config.url.startsWith('http://') || config.url.startsWith('https://')
-      ? config.url
-      : `${this.baseUrl}${API_VERSION_PREFIX}${config.url}`;
+    // A cross-origin absolute URL is rejected: accepting one would let a caller
+    // send the attached credential to an arbitrary host. APIClient.getRootUrl()
+    // (getCurrentUser, the auth API-key methods) builds a same-origin absolute
+    // URL without /v1, so that case passes through as-is.
+    let url: string;
+    if (ABSOLUTE_URL_PATTERN.test(config.url)) {
+      if (new URL(config.url).origin !== new URL(this.baseUrl).origin) {
+        throw new Error(`Absolute URLs to other origins are not permitted: ${config.url}`);
+      }
+      url = config.url;
+    } else {
+      url = `${this.baseUrl}${API_VERSION_PREFIX}${config.url}`;
+    }
 
     if (config.params) {
       const searchParams = new URLSearchParams();
@@ -49,15 +66,12 @@ export class FetchHttpClient implements HttpClient {
       }
     }
 
-    const authHeader = this.authType === 'jwt'
-      ? `JWT ${this.authToken}`
-      : `Api-Key ${this.authToken}`;
-
+    // Credential headers go last so a request header can never replace them.
     const headers: Record<string, string> = {
-      'Authorization': authHeader,
       'Content-Type': 'application/json',
       'User-Agent': `ABsmartly-MCP-Server/${MCP_VERSION} (CLI-core/${CLI_CORE_VERSION})`,
       ...config.headers,
+      ...this.credentialHeaders,
     };
 
     const fetchOptions: RequestInit = {
@@ -106,9 +120,9 @@ export class FetchHttpClient implements HttpClient {
     }
 
     const responseHeaders: Record<string, string> = {};
-    for (const [key, value] of response.headers.entries()) {
+    response.headers.forEach((value, key) => {
       responseHeaders[key] = value;
-    }
+    });
 
     debug(`📡 FetchHttpClient: ${response.status} ${config.method} ${url}`);
 
