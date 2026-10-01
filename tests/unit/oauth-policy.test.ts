@@ -19,6 +19,13 @@ import {
 
 const CLAUDE_CODE_CIMD = 'https://claude.ai/oauth/claude-code-client-metadata';
 const CLAUDE_CIMD = 'https://claude.ai/oauth/mcp-oauth-client-metadata';
+const GOOSE_CIMD = 'https://goose-docs.ai/oauth/client-metadata.json';
+const GOOSE_DOCUMENT = {
+  client_id: GOOSE_CIMD,
+  client_name: 'goose',
+  redirect_uris: ['http://127.0.0.1/oauth_callback', 'http://[::1]/oauth_callback'],
+  token_endpoint_auth_method: 'none',
+};
 const CLAUDE_CALLBACK = 'https://claude.ai/api/mcp/auth_callback';
 const UNTRUSTED_CIMD = 'https://attacker.example/client.json';
 const CLAUDE_CODE_DOCUMENT = {
@@ -55,10 +62,11 @@ export default async function run() {
   }
 
   // --- CIMD ---
-  await asyncTest('trusted CIMD list is exactly the Claude, Claude Code and VS Code documents', () => {
+  await asyncTest('trusted CIMD list is exactly the Claude, Claude Code, VS Code and Goose documents', () => {
     assert.deepStrictEqual([...TRUSTED_CIMD_CLIENT_IDS].sort(), [
       CLAUDE_CODE_CIMD,
       CLAUDE_CIMD,
+      GOOSE_CIMD,
       'https://insiders.vscode.dev/oauth/client-metadata.json',
       'https://vscode.dev/oauth/client-metadata.json',
     ].sort());
@@ -70,6 +78,14 @@ export default async function run() {
     const client = await resolveCimdClient(CLAUDE_CIMD, { fetch: mock.fetch });
     assert.deepStrictEqual(client.redirectUris, [CLAUDE_CALLBACK]);
     assert.ok(isAllowedRedirectUri(CLAUDE_CALLBACK));
+  });
+
+  await asyncTest('resolves the Goose document and matches its loopback callback on any port', async () => {
+    const mock = mockFetch(() => jsonResponse(GOOSE_DOCUMENT));
+    const client = await resolveCimdClient(GOOSE_CIMD, { fetch: mock.fetch });
+    assert.deepStrictEqual(client.redirectUris, GOOSE_DOCUMENT.redirect_uris);
+    assert.ok(isRegisteredRedirectUri('http://127.0.0.1:63752/oauth_callback', client.redirectUris));
+    assert.ok(!isRegisteredRedirectUri('http://127.0.0.1:63752/other', client.redirectUris));
   });
 
   await asyncTest('isCimdClientId requires https with a non-root path', () => {

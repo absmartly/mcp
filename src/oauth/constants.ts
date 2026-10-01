@@ -41,6 +41,7 @@ export const TRUSTED_CIMD_CLIENT_IDS = [
   "https://claude.ai/oauth/claude-code-client-metadata",
   "https://vscode.dev/oauth/client-metadata.json",
   "https://insiders.vscode.dev/oauth/client-metadata.json",
+  "https://goose-docs.ai/oauth/client-metadata.json",
 ];
 export const CIMD_MAX_DOCUMENT_BYTES = 5 * 1024;
 export const CIMD_FETCH_TIMEOUT_MS = 5000;
