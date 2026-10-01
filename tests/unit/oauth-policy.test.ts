@@ -26,6 +26,13 @@ const GOOSE_DOCUMENT = {
   redirect_uris: ['http://127.0.0.1/oauth_callback', 'http://[::1]/oauth_callback'],
   token_endpoint_auth_method: 'none',
 };
+const COPILOT_CLI_CIMD = 'https://github.com/copilot/cli/client-metadata.json';
+const COPILOT_CLI_DOCUMENT = {
+  client_id: COPILOT_CLI_CIMD,
+  client_name: 'GitHub Copilot CLI',
+  redirect_uris: ['http://127.0.0.1/', 'http://127.0.0.1/callback'],
+  token_endpoint_auth_method: 'none',
+};
 const CLAUDE_CALLBACK = 'https://claude.ai/api/mcp/auth_callback';
 const UNTRUSTED_CIMD = 'https://attacker.example/client.json';
 const CLAUDE_CODE_DOCUMENT = {
@@ -62,10 +69,11 @@ export default async function run() {
   }
 
   // --- CIMD ---
-  await asyncTest('trusted CIMD list is exactly the Claude, Claude Code, VS Code and Goose documents', () => {
+  await asyncTest('trusted CIMD list is exactly the Claude, Claude Code, VS Code, Goose and Copilot CLI documents', () => {
     assert.deepStrictEqual([...TRUSTED_CIMD_CLIENT_IDS].sort(), [
       CLAUDE_CODE_CIMD,
       CLAUDE_CIMD,
+      COPILOT_CLI_CIMD,
       GOOSE_CIMD,
       'https://insiders.vscode.dev/oauth/client-metadata.json',
       'https://vscode.dev/oauth/client-metadata.json',
@@ -86,6 +94,15 @@ export default async function run() {
     assert.deepStrictEqual(client.redirectUris, GOOSE_DOCUMENT.redirect_uris);
     assert.ok(isRegisteredRedirectUri('http://127.0.0.1:63752/oauth_callback', client.redirectUris));
     assert.ok(!isRegisteredRedirectUri('http://127.0.0.1:63752/other', client.redirectUris));
+  });
+
+  await asyncTest('resolves the Copilot CLI document and matches its loopback callback on an ephemeral port', async () => {
+    const mock = mockFetch(() => jsonResponse(COPILOT_CLI_DOCUMENT));
+    const client = await resolveCimdClient(COPILOT_CLI_CIMD, { fetch: mock.fetch });
+    assert.deepStrictEqual(client.redirectUris, COPILOT_CLI_DOCUMENT.redirect_uris);
+    assert.ok(isRegisteredRedirectUri('http://127.0.0.1:52752/', client.redirectUris));
+    assert.ok(isRegisteredRedirectUri('http://127.0.0.1:52752/callback', client.redirectUris));
+    assert.ok(!isRegisteredRedirectUri('http://127.0.0.1:52752/other', client.redirectUris));
   });
 
   await asyncTest('isCimdClientId requires https with a non-root path', () => {
