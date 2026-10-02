@@ -16,9 +16,47 @@ import {
   validateCommandParams,
 } from "./cli-catalog.js";
 import type { CommandEntry } from "./cli-catalog.js";
+import {
+  reduceToBudget,
+  clampText,
+  enforceHardCap,
+  SUMMARY_LADDER,
+  RAW_LADDER,
+  DEFAULT_JSON_INDENT,
+  OMITTED_FIELD_KEY,
+} from "./response-reduction.js";
+import type { ReductionProfile, ReductionReport } from "./response-reduction.js";
 
 const DEFAULT_LIST_ITEMS = 20;
+const DEFAULT_LIST_PAGE = 1;
 const USER_FIELD_TYPE = 'user';
+export const MAX_RESPONSE_CHARS = 25_000;
+const MAX_COMMANDS_PER_LISTING = 30;
+export const MAX_WARNINGS_SHOWN = 20;
+export const MAX_WARNING_CHARS = 300;
+export const REDUCTION_NOTICE_RESERVE_CHARS = 1_000;
+export const REDUCTION_NOTICE_PREFIX = '\n\n[Response reduced';
+const MAX_ERROR_MESSAGE_CHARS = 2_000;
+const MAX_API_ERRORS_SHOWN = 20;
+const MAX_API_ERROR_ITEM_CHARS = 500;
+const MAX_API_ERROR_RESPONSE_CHARS = 10_000;
+const COMPACT_JSON_INDENT = 0;
+const DERIVED_VIEW_KEYS = ['rows', 'detail'] as const;
+const DERIVED_VIEW_PLACEHOLDER = '[omitted: summarized view derived from `data` — call without `raw: true` to get it]';
+const GENERIC_REDUCTION_HINT = 'To get the omitted parts, narrow the request: a smaller `limit`, a `page`/`items` filter, `show`/`exclude` fields, or drop `raw: true`.';
+const INSIGHTS_REDUCTION_HINT = 'Narrow the `from`/`to` date range or use a coarser `aggregation`.';
+const COMMAND_REDUCTION_HINTS: Record<string, string> = {
+  'statistics.getPowerMatrix': 'Pass fewer `config.sample_sizes`, `config.minimum_detectable_effects`, `config.powers`, or `config.alphas` values to shrink the matrix.',
+  'insights.getVelocityInsights': INSIGHTS_REDUCTION_HINT,
+  'insights.getDecisionInsights': INSIGHTS_REDUCTION_HINT,
+  'insights.getVelocityInsightsDetail': INSIGHTS_REDUCTION_HINT,
+  'insights.getDecisionInsightsHistory': INSIGHTS_REDUCTION_HINT,
+};
+const PREVIEW_CONFIRM_INSTRUCTION = '\n\nShow this preview to the user. If they confirm, call `execute_command` again with the same `group`, `command`, and `params`, plus `confirmed: true`, to actually create the experiment.';
+const PREVIEW_INCOMPLETE_PREFIX = '\n\n**This preview was too large to display in full — parts of the resolved payload above are omitted';
+const PREVIEW_INCOMPLETE_SUFFIX = '.** Do NOT call execute_command with confirmed: true based on this preview. Reduce the template size (e.g. shorten variant configs) and try again so the full payload can be reviewed first.';
+const PREVIEW_HEADER_LINES = ['**Preview — experiment NOT YET created.**', '', 'Resolved payload that would be sent to the API:', '', '```json'];
+const PREVIEW_CLOSE_FENCE = '```';
 // The only command whose documentation and auto-population use entity data
 // (custom fields, current user). Every other command's docs and validation
 // errors must not trigger the lazy entity load on the stateless HTTP transport.
@@ -47,12 +85,40 @@ export interface ToolContext {
 }
 
 function formatCommandList(entries: CommandEntry[]): string {
-  return entries.map(m => {
+  const shown = entries.slice(0, MAX_COMMANDS_PER_LISTING);
+  const rendered = shown.map(m => {
     const paramList = m.params.length > 0
       ? m.params.map(p => `  - \`${p.name}\` (${p.type}${p.required ? ', required' : ''}): ${p.description}`).join('\n')
       : '  (no parameters)';
     return `### ${m.group}.${m.command}\n${m.description}\n${m.dangerous ? '**WARNING: Destructive operation**\n' : ''}**Params:**\n${paramList}\n**Returns:** ${m.returns}`;
   }).join('\n\n---\n\n');
+
+  if (entries.length <= MAX_COMMANDS_PER_LISTING) {
+    return rendered;
+  }
+  const remaining = entries.length - MAX_COMMANDS_PER_LISTING;
+  const names = entries.slice(MAX_COMMANDS_PER_LISTING).map(e => `${e.group}.${e.command}`).join(', ');
+  return rendered + `\n\n---\n\n(${remaining} more matching commands not shown: ${names}. Narrow your \`group\`/\`search\`, or use get_command_docs for a specific command's full details.)`;
+}
+
+// Applies default items/page pagination to commandParams, but only when the
+// command's catalog entry actually declares an `items`/`page` param. Commands
+// with no declared pagination params (empty params: []) or a single catch-all
+// `params` object (e.g. listEvents, listActivity) would otherwise get an
+// unsupported/inert key silently attached to commandParams.
+export function applyDefaultPagination(
+  entry: CommandEntry,
+  commandParams: Record<string, unknown>,
+  limit: number | undefined,
+): void {
+  const itemsLimit = limit ?? DEFAULT_LIST_ITEMS;
+  const declaredParamNames = new Set(entry.params.map((p) => p.name));
+  if (declaredParamNames.has('items') && commandParams.items === undefined) {
+    commandParams.items = itemsLimit;
+  }
+  if (declaredParamNames.has('page') && commandParams.page === undefined) {
+    commandParams.page = DEFAULT_LIST_PAGE;
+  }
 }
 
 export function autoPopulateCustomFields(
@@ -96,6 +162,16 @@ export function autoPopulateCustomFields(
   data.custom_section_field_values = fieldValues;
 }
 
+function formatParamSummary(entry: CommandEntry): string {
+  if (entry.params.length === 0) {
+    return `${entry.group}.${entry.command} takes no parameters.`;
+  }
+  const paramList = entry.params
+    .map((p) => `${p.name} (${p.type}${p.required ? ', required' : ''})`)
+    .join(', ');
+  return `${entry.group}.${entry.command} params: ${paramList}.`;
+}
+
 function buildCommandDoc(entry: CommandEntry, customFields: readonly any[]): string {
   let doc = `# ${entry.group}.${entry.command}\n\n**Group:** ${entry.group}\n**Description:** ${entry.description}\n`;
   if (entry.dangerous) {
@@ -135,6 +211,115 @@ function buildCommandDoc(entry: CommandEntry, customFields: readonly any[]): str
   }
 
   return doc;
+}
+
+export function capWarningLines(warnings: unknown[]): string[] {
+  const lines = warnings.slice(0, MAX_WARNINGS_SHOWN).map((w) => `- ${clampText(String(w), MAX_WARNING_CHARS)}`);
+  if (warnings.length > MAX_WARNINGS_SHOWN) {
+    lines.push(`- (${warnings.length - MAX_WARNINGS_SHOWN} more warnings omitted)`);
+  }
+  return lines;
+}
+
+function formatApiErrorValue(value: unknown, maxChars: number): string {
+  return typeof value === 'string'
+    ? clampText(value, maxChars)
+    : reduceToBudget(value, { budgetChars: maxChars, ladder: RAW_LADDER, indent: COMPACT_JSON_INDENT }).text;
+}
+
+export function formatResultMeta(cmdResult: Record<string, unknown>, cap: boolean = true): string {
+  let meta = '';
+  if (Array.isArray(cmdResult.warnings) && cmdResult.warnings.length > 0) {
+    const warningLines = cap
+      ? capWarningLines(cmdResult.warnings)
+      : cmdResult.warnings.map((w) => `- ${String(w)}`);
+    meta += `\n\nWarnings:\n${warningLines.join('\n')}`;
+  }
+  if (cmdResult.pagination) {
+    const pg = cmdResult.pagination as { page: number; items: number; hasMore: boolean };
+    if (pg.hasMore) {
+      meta += `\n\n(Page ${pg.page}, ${pg.items} items per page. More results available — increase page number.)`;
+    }
+  }
+  return meta;
+}
+
+function describeReduction(report: ReductionReport): string {
+  if (report.skeleton) return 'only the top-level shape could be shown';
+  const parts: string[] = [];
+  if (report.arraysCapped > 0) parts.push(`${report.arraysCapped} array(s) capped (${report.itemsOmitted} items omitted)`);
+  if (report.stringsClipped > 0) parts.push(`${report.stringsClipped} long string(s) clipped`);
+  if (report.subtreesStubbed > 0) parts.push(`${report.subtreesStubbed} nested value(s) summarized`);
+  if (report.keysOmitted > 0) parts.push(`${report.keysOmitted} field(s) omitted`);
+  return parts.join(', ');
+}
+
+interface ReductionCauses {
+  derivedViewsDropped?: boolean;
+  metaCapped?: boolean;
+}
+
+const DERIVED_VIEWS_DROPPED_DESCRIPTION = 'the summarized `rows`/`detail` view was omitted since it duplicates `data`';
+const META_CAPPED_DESCRIPTION = 'warnings were capped/truncated';
+const FALLBACK_REDUCTION_DESCRIPTION = 'the response was restructured to fit within the limit';
+
+function describeCauses(report: ReductionReport, causes: ReductionCauses): string {
+  const parts: string[] = [];
+  if (causes.derivedViewsDropped) parts.push(DERIVED_VIEWS_DROPPED_DESCRIPTION);
+  if (causes.metaCapped) parts.push(META_CAPPED_DESCRIPTION);
+  const reductionDesc = describeReduction(report);
+  if (reductionDesc) parts.push(reductionDesc);
+  if (parts.length === 0) parts.push(FALLBACK_REDUCTION_DESCRIPTION);
+  return parts.join(', ');
+}
+
+export function formatReductionNotice(
+  report: ReductionReport,
+  group: string,
+  command: string,
+  causes: ReductionCauses = {},
+): string {
+  const hint = COMMAND_REDUCTION_HINTS[`${group}.${command}`] ?? GENERIC_REDUCTION_HINT;
+  return `${REDUCTION_NOTICE_PREFIX} — ${report.originalChars} characters exceeds the ${MAX_RESPONSE_CHARS}-character limit for ${group}.${command}. ` +
+    `The JSON above is valid but structurally reduced: ${describeCauses(report, causes)}. ` +
+    `Omissions are marked in place (\`${OMITTED_FIELD_KEY}\` fields and "omitted"/"clipped" markers); ids and names are kept. ${hint}]`;
+}
+
+function hasDerivedViews(cmdResult: Record<string, unknown>): boolean {
+  if (cmdResult.data === undefined) return false;
+  return DERIVED_VIEW_KEYS.some((key) => cmdResult[key] !== undefined);
+}
+
+function withoutDerivedViews(cmdResult: Record<string, unknown>): Record<string, unknown> {
+  if (cmdResult.data === undefined) return cmdResult;
+  const copy: Record<string, unknown> = { ...cmdResult };
+  for (const key of DERIVED_VIEW_KEYS) {
+    if (copy[key] !== undefined) copy[key] = DERIVED_VIEW_PLACEHOLDER;
+  }
+  return copy;
+}
+
+function renderCommandResult(
+  output: unknown,
+  reducible: unknown,
+  cmdResult: Record<string, unknown>,
+  ladder: readonly ReductionProfile[],
+  group: string,
+  command: string,
+  derivedViewsDropped: boolean = false,
+): string {
+  const fullMeta = formatResultMeta(cmdResult, false);
+  const full = JSON.stringify(output, null, DEFAULT_JSON_INDENT);
+  if (full.length + fullMeta.length <= MAX_RESPONSE_CHARS) {
+    return full + fullMeta;
+  }
+  const meta = formatResultMeta(cmdResult, true);
+  const metaCapped = meta.length !== fullMeta.length;
+  const budgetChars = MAX_RESPONSE_CHARS - meta.length - REDUCTION_NOTICE_RESERVE_CHARS;
+  const { text, report } = reduceToBudget(reducible, { budgetChars, ladder });
+  const originalChars = full.length + fullMeta.length;
+  const notice = formatReductionNotice({ ...report, originalChars }, group, command, { derivedViewsDropped, metaCapped });
+  return enforceHardCap(text + notice + meta, MAX_RESPONSE_CHARS);
 }
 
 export function setupTools(server: McpServer, ctx: ToolContext): void {
@@ -276,16 +461,12 @@ To create experiments, use group "experiments", command "createExperimentFromTem
       // — without this guard, the call returns success but does nothing).
       const validationErrors = validateCommandParams(entry, params.params || {});
       if (validationErrors.length > 0) {
-        if (entry.command === ENTITY_DEPENDENT_COMMAND) {
-          await ctx.ensureEntities?.();
-        }
-        const docs = buildCommandDoc(entry, ctx.customFields);
         return {
           content: [{
             type: "text" as const,
             text: `Param validation failed for ${params.group}.${params.command}:\n` +
               validationErrors.map((e) => `  - ${e}`).join('\n') +
-              `\n\n---\n\n${docs}`,
+              `\n\n${formatParamSummary(entry)} Use get_command_docs for full details.`,
           }],
         };
       }
@@ -360,22 +541,35 @@ To create experiments, use group "experiments", command "createExperimentFromTem
               template,
               (commandParams.defaultType as string) || 'test',
             );
-            const lines: string[] = [];
-            lines.push('**Preview — experiment NOT YET created.**');
-            lines.push('');
-            lines.push('Resolved payload that would be sent to the API:');
-            lines.push('');
-            lines.push('```json');
-            lines.push(JSON.stringify(payload, null, 2));
-            lines.push('```');
-            if (warnings && warnings.length > 0) {
-              lines.push('');
-              lines.push('**Warnings:**');
-              for (const w of warnings) lines.push(`- ${w}`);
+
+            // Phase 1: Try the fully uncapped candidate (all warnings, unreduced payload, confirm instruction).
+            // If it fits, return it byte-identical to the original code's output.
+            const uncappedWarningLines = warnings && warnings.length > 0
+              ? ['', '**Warnings:**', ...warnings.map((w) => `- ${String(w)}`)]
+              : [];
+            const uncappedPayloadText = JSON.stringify(payload, null, DEFAULT_JSON_INDENT);
+            const uncappedBody = [...PREVIEW_HEADER_LINES, uncappedPayloadText, PREVIEW_CLOSE_FENCE, ...uncappedWarningLines].join('\n');
+            const uncappedFull = uncappedBody + PREVIEW_CONFIRM_INSTRUCTION;
+
+            if (uncappedFull.length <= MAX_RESPONSE_CHARS) {
+              return { content: [{ type: "text" as const, text: uncappedFull }] };
             }
-            lines.push('');
-            lines.push('Show this preview to the user. If they confirm, call `execute_command` again with the same `group`, `command`, and `params`, plus `confirmed: true`, to actually create the experiment.');
-            return { content: [{ type: "text" as const, text: lines.join('\n') }] };
+
+            // Phase 2: Uncapped didn't fit — apply capping and structural reduction.
+            const cappedWarningLines = warnings && warnings.length > 0
+              ? ['', '**Warnings:**', ...capWarningLines(warnings)]
+              : [];
+            const fixedChars = [...PREVIEW_HEADER_LINES, PREVIEW_CLOSE_FENCE, ...cappedWarningLines].join('\n').length + 1;
+            const tailReserve = Math.max(PREVIEW_CONFIRM_INSTRUCTION.length, PREVIEW_INCOMPLETE_PREFIX.length + REDUCTION_NOTICE_RESERVE_CHARS + PREVIEW_INCOMPLETE_SUFFIX.length);
+            const { text: payloadText, report } = reduceToBudget(payload, {
+              budgetChars: MAX_RESPONSE_CHARS - fixedChars - tailReserve,
+              ladder: RAW_LADDER,
+            });
+            const body = [...PREVIEW_HEADER_LINES, payloadText, PREVIEW_CLOSE_FENCE, ...cappedWarningLines].join('\n');
+            const tail = report.reduced
+              ? `${PREVIEW_INCOMPLETE_PREFIX} (${describeReduction(report)})${PREVIEW_INCOMPLETE_SUFFIX}`
+              : PREVIEW_CONFIRM_INSTRUCTION;
+            return { content: [{ type: "text" as const, text: enforceHardCap(body + tail, MAX_RESPONSE_CHARS) }] };
           } catch (previewError: any) {
             const msg = previewError?.message || String(previewError);
             return {
@@ -397,15 +591,9 @@ To create experiments, use group "experiments", command "createExperimentFromTem
           );
         }
 
-        // Apply default items limit for list operations
-        const itemsLimit = params.limit ?? DEFAULT_LIST_ITEMS;
+        // Apply default items limit for list operations.
         if (params.command.startsWith('list') || params.command.startsWith('search')) {
-          if (commandParams.items === undefined) {
-            commandParams.items = itemsLimit;
-          }
-          if (commandParams.page === undefined) {
-            commandParams.page = 1;
-          }
+          applyDefaultPagination(entry, commandParams, params.limit);
         }
 
         // Fill in apiEndpoint for commands that need it (clone, generateTemplate, etc.)
@@ -430,52 +618,74 @@ To create experiments, use group "experiments", command "createExperimentFromTem
           output = cmdResult.rows ?? cmdResult.detail ?? cmdResult.data ?? cmdResult;
         }
 
-        let text = JSON.stringify(output, null, 2);
-
-        // Append warnings if any
-        if (cmdResult.warnings && Array.isArray(cmdResult.warnings) && cmdResult.warnings.length > 0) {
-          text += `\n\nWarnings:\n${(cmdResult.warnings as string[]).map(w => `- ${w}`).join('\n')}`;
-        }
-
-        // Append pagination info
-        if (cmdResult.pagination) {
-          const pg = cmdResult.pagination as { page: number; items: number; hasMore: boolean };
-          if (pg.hasMore) {
-            text += `\n\n(Page ${pg.page}, ${pg.items} items per page. More results available — increase page number.)`;
-          }
-        }
-
+        const text = params.raw
+          ? renderCommandResult(output, withoutDerivedViews(cmdResult), cmdResult, RAW_LADDER, params.group, params.command, hasDerivedViews(cmdResult))
+          : renderCommandResult(output, output, cmdResult, SUMMARY_LADDER, params.group, params.command);
         return { content: [{ type: "text" as const, text }] };
       } catch (error: any) {
         const errorMsg = error instanceof Error ? error.message : String(error);
-        const parts: string[] = [`Error executing ${params.group}.${params.command}: ${errorMsg}`];
 
-        // Surface API response details (validation errors, field-level errors, etc.)
+        // Phase 1: Build fully uncapped output (all errors, no clipping, no structural reduction).
+        const uncappedParts: string[] = [`Error executing ${params.group}.${params.command}: ${errorMsg}`];
         if (error.statusCode) {
-          parts.push(`\nHTTP Status: ${error.statusCode}`);
+          uncappedParts.push(`\nHTTP Status: ${error.statusCode}`);
         }
         if (error.response) {
           try {
             const resp = typeof error.response === 'string' ? JSON.parse(error.response) : error.response;
             if (resp.errors && Array.isArray(resp.errors)) {
-              parts.push(`\nValidation errors:\n${resp.errors.map((e: any) => `  - ${typeof e === 'string' ? e : JSON.stringify(e)}`).join('\n')}`);
+              uncappedParts.push(`\nValidation errors:\n${resp.errors.map((e: unknown) => `  - ${typeof e === 'string' ? e : JSON.stringify(e)}`).join('\n')}`);
             } else if (resp.error) {
-              parts.push(`\nAPI error: ${typeof resp.error === 'string' ? resp.error : JSON.stringify(resp.error)}`);
+              uncappedParts.push(`\nAPI error: ${typeof resp.error === 'string' ? resp.error : JSON.stringify(resp.error)}`);
             } else {
-              parts.push(`\nAPI response: ${JSON.stringify(resp, null, 2)}`);
+              uncappedParts.push(`\nAPI response: ${JSON.stringify(resp, null, 2)}`);
             }
           } catch {
-            parts.push(`\nAPI response: ${String(error.response)}`);
+            uncappedParts.push(`\nAPI response: ${String(error.response)}`);
           }
         }
 
         // For template errors, hint at the docs resource
+        let errorFooter = '';
         if (params.command === 'createExperimentFromTemplate') {
-          parts.push('\nTip: Read the absmartly://docs/templates resource for valid template examples.');
+          errorFooter = '\nTip: Read the absmartly://docs/templates resource for valid template examples.';
         }
 
-        ctx.log?.('error', parts[0]);
-        return { content: [{ type: "text" as const, text: parts.join('') }] };
+        const uncappedBody = uncappedParts.join('') + errorFooter;
+
+        // Phase 1: Try the fully uncapped output. If it fits, return it byte-identical.
+        if (uncappedBody.length <= MAX_RESPONSE_CHARS) {
+          ctx.log?.('error', uncappedParts[0]);
+          return { content: [{ type: "text" as const, text: uncappedBody }] };
+        }
+
+        // Phase 2: Uncapped didn't fit — rebuild with capping and structural reduction.
+        const cappedParts: string[] = [`Error executing ${params.group}.${params.command}: ${clampText(errorMsg, MAX_ERROR_MESSAGE_CHARS)}`];
+        if (error.statusCode) {
+          cappedParts.push(`\nHTTP Status: ${error.statusCode}`);
+        }
+        if (error.response) {
+          try {
+            const resp = typeof error.response === 'string' ? JSON.parse(error.response) : error.response;
+            if (resp.errors && Array.isArray(resp.errors)) {
+              const shown = resp.errors.slice(0, MAX_API_ERRORS_SHOWN).map((e: unknown) => `  - ${formatApiErrorValue(e, MAX_API_ERROR_ITEM_CHARS)}`);
+              if (resp.errors.length > MAX_API_ERRORS_SHOWN) {
+                shown.push(`  - (${resp.errors.length - MAX_API_ERRORS_SHOWN} more validation errors omitted)`);
+              }
+              cappedParts.push(`\nValidation errors:\n${shown.join('\n')}`);
+            } else if (resp.error) {
+              cappedParts.push(`\nAPI error: ${formatApiErrorValue(resp.error, MAX_ERROR_MESSAGE_CHARS)}`);
+            } else {
+              cappedParts.push(`\nAPI response: ${reduceToBudget(resp, { budgetChars: MAX_API_ERROR_RESPONSE_CHARS, ladder: RAW_LADDER }).text}`);
+            }
+          } catch {
+            cappedParts.push(`\nAPI response: ${clampText(String(error.response), MAX_API_ERROR_RESPONSE_CHARS)}`);
+          }
+        }
+        const cappedBody = cappedParts.join('') + errorFooter;
+
+        ctx.log?.('error', uncappedParts[0]);
+        return { content: [{ type: "text" as const, text: enforceHardCap(cappedBody, MAX_RESPONSE_CHARS) }] };
       }
     }
   );
