@@ -5,6 +5,7 @@ import { MCP_VERSION, CLI_CORE_VERSION } from './version.js';
 const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
 const API_VERSION_PREFIX = '/v1';
 const ABSOLUTE_URL_PATTERN = /^https?:\/\//i;
+const FETCH_REDIRECT_MODE = 'manual';
 
 export type FetchHttpClientOptions =
   | { authToken: string; authType: 'jwt' | 'api-key'; timeout?: number }
@@ -66,17 +67,27 @@ export class FetchHttpClient implements HttpClient {
       }
     }
 
-    // Credential headers go last so a request header can never replace them.
-    const headers: Record<string, string> = {
+    // Header names are case-insensitive, so set() replaces a request header
+    // of any casing. Credential headers go last so a request header can never
+    // replace them.
+    const headers = new Headers({
       'Content-Type': 'application/json',
       'User-Agent': `ABsmartly-MCP-Server/${MCP_VERSION} (CLI-core/${CLI_CORE_VERSION})`,
-      ...config.headers,
-      ...this.credentialHeaders,
-    };
+    });
+    for (const [name, value] of Object.entries(config.headers ?? {})) {
+      headers.set(name, value);
+    }
+    for (const [name, value] of Object.entries(this.credentialHeaders)) {
+      headers.set(name, value);
+    }
 
+    // Redirects are not followed: the origin check above covers only the first
+    // URL, and a followed redirect would carry the credential to wherever it
+    // points. A 3xx response fails the !response.ok check below.
     const fetchOptions: RequestInit = {
       method: config.method,
       headers,
+      redirect: FETCH_REDIRECT_MODE,
       signal: AbortSignal.timeout(this.timeout),
     };
 

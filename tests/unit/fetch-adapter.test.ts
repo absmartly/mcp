@@ -65,25 +65,25 @@ export default async function runTests() {
 
   await asyncTest('Auth: JWT format', async () => {
     const client = new FetchHttpClient('https://example.com', { authToken: 'my-jwt', authType: 'jwt' });
-    let capturedHeaders: Record<string, string> = {};
+    let capturedHeaders = new Headers();
     mockFetch(async (_url, opts) => {
-      capturedHeaders = opts?.headers as Record<string, string>;
+      capturedHeaders = new Headers(opts?.headers);
       return new Response('{}', { headers: { 'content-type': 'application/json' } });
     });
     await client.request({ method: 'GET', url: '/test' });
-    assertEquals(capturedHeaders['Authorization'], 'JWT my-jwt', 'Auth: JWT format');
+    assertEquals(capturedHeaders.get('Authorization'), 'JWT my-jwt', 'Auth: JWT format');
     restoreFetch();
   });
 
   await asyncTest('Auth: Api-Key format', async () => {
     const client = new FetchHttpClient('https://example.com', { authToken: 'my-key', authType: 'api-key' });
-    let capturedHeaders: Record<string, string> = {};
+    let capturedHeaders = new Headers();
     mockFetch(async (_url, opts) => {
-      capturedHeaders = opts?.headers as Record<string, string>;
+      capturedHeaders = new Headers(opts?.headers);
       return new Response('{}', { headers: { 'content-type': 'application/json' } });
     });
     await client.request({ method: 'GET', url: '/test' });
-    assertEquals(capturedHeaders['Authorization'], 'Api-Key my-key', 'Auth: Api-Key format');
+    assertEquals(capturedHeaders.get('Authorization'), 'Api-Key my-key', 'Auth: Api-Key format');
     restoreFetch();
   });
 
@@ -163,21 +163,43 @@ export default async function runTests() {
 
   await asyncTest('Auth: Service-Key with impersonated user', async () => {
     const client = new FetchHttpClient('https://example.com', { authToken: 'svc', authType: 'service-key', impersonatedUserId: 42 });
-    let capturedHeaders: Record<string, string> = {};
-    mockFetch(async (_url, opts) => { capturedHeaders = opts?.headers as Record<string, string>; return new Response('{}', { headers: { 'content-type': 'application/json' } }); });
+    let capturedHeaders = new Headers();
+    mockFetch(async (_url, opts) => { capturedHeaders = new Headers(opts?.headers); return new Response('{}', { headers: { 'content-type': 'application/json' } }); });
     await client.request({ method: 'GET', url: '/test' });
-    assertEquals(capturedHeaders['Authorization'], 'Service-Key svc', 'Auth: Service-Key scheme');
-    assertEquals(capturedHeaders['Service-Key-Impersonating-UserId'], '42', 'Auth: impersonated user header');
+    assertEquals(capturedHeaders.get('Authorization'), 'Service-Key svc', 'Auth: Service-Key scheme');
+    assertEquals(capturedHeaders.get('Service-Key-Impersonating-UserId'), '42', 'Auth: impersonated user header');
     restoreFetch();
   });
 
   await asyncTest('Auth: request headers cannot override the credential', async () => {
     const client = new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'jwt' });
-    let capturedHeaders: Record<string, string> = {};
-    mockFetch(async (_url, opts) => { capturedHeaders = opts?.headers as Record<string, string>; return new Response('{}', { headers: { 'content-type': 'application/json' } }); });
+    let capturedHeaders = new Headers();
+    mockFetch(async (_url, opts) => { capturedHeaders = new Headers(opts?.headers); return new Response('{}', { headers: { 'content-type': 'application/json' } }); });
     await client.request({ method: 'GET', url: '/test', headers: { Authorization: 'Api-Key stolen', 'X-Extra': '1' } });
-    assertEquals(capturedHeaders['Authorization'], 'JWT tok', 'Auth: credential wins over request header');
-    assertEquals(capturedHeaders['X-Extra'], '1', 'Headers: other request headers pass through');
+    assertEquals(capturedHeaders.get('Authorization'), 'JWT tok', 'Auth: credential wins over request header');
+    assertEquals(capturedHeaders.get('X-Extra'), '1', 'Headers: other request headers pass through');
+    restoreFetch();
+  });
+
+  await asyncTest('Auth: differently cased request headers cannot override the credential', async () => {
+    const client = new FetchHttpClient('https://example.com', { authToken: 'svc', authType: 'service-key', impersonatedUserId: 42 });
+    let capturedHeaders = new Headers();
+    mockFetch(async (_url, opts) => { capturedHeaders = new Headers(opts?.headers); return new Response('{}', { headers: { 'content-type': 'application/json' } }); });
+    await client.request({ method: 'GET', url: '/test', headers: { authorization: 'Api-Key stolen', 'service-key-impersonating-userid': '1' } });
+    assertEquals(capturedHeaders.get('Authorization'), 'Service-Key svc', 'Auth: credential replaces lower-cased Authorization');
+    assertEquals(capturedHeaders.get('Service-Key-Impersonating-UserId'), '42', 'Auth: impersonated user replaces lower-cased header');
+    restoreFetch();
+  });
+
+  await asyncTest('Redirect: redirects are not followed', async () => {
+    const client = new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'jwt' });
+    let capturedRedirect: string | undefined;
+    mockFetch(async (_url, opts) => { capturedRedirect = opts?.redirect; return new Response(null, { status: 302, headers: { location: 'https://attacker.example/' } }); });
+    let threw = false;
+    try { await client.request({ method: 'GET', url: '/test' }); }
+    catch (e: any) { threw = e.message.includes('HTTP 302'); }
+    assertEquals(capturedRedirect, 'manual', 'Redirect: fetch called with redirect: manual');
+    ok(threw, 'Redirect: 3xx response is rejected');
     restoreFetch();
   });
 
