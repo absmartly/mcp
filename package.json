@@ -6,6 +6,9 @@
   "module": "./dist/core.js",
   "types": "./dist/core.d.ts",
   "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "bin": {
     "absmartly-mcp": "bin/absmartly-mcp.mjs"
   },
@@ -103,7 +106,8 @@
     "upload:dxt": "./scripts/build-dxt.sh",
     "install:dxt": "npm install -g @anthropic-ai/dxt",
     "manifest": "tsx scripts/endpoint-manifest.ts",
-    "manifest:check": "tsx scripts/endpoint-manifest.ts --check"
+    "manifest:check": "tsx scripts/endpoint-manifest.ts --check",
+    "check:cjs-consumer": "node scripts/check-cjs-consumer.mjs"
   },
   "keywords": [
     "mcp",

@@ -693,7 +693,7 @@ Existing `@absmartly/mcp`, `@absmartly/mcp/node-http` and `@absmartly/mcp/oauth`
 
 ### Prerequisites
 
-- Node.js 22+
+- Node.js 22.12.0+ (the CommonJS entries `require()` the ESM-only `@absmartly/cli`, which needs unflagged `require(esm)`)
 - Cloudflare account (for remote deployment)
 - ABsmartly account and API key
 
