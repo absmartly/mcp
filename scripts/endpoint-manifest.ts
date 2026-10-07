@@ -167,11 +167,12 @@ function collectApiMethods(file: string, body: string, apiMethodNames: Set<strin
   }
 }
 
+const CLI_CATALOG_SOURCE = readFileSync(join(ROOT, "src", "cli-catalog.ts"), "utf-8");
+
 // Mirrors the CORE_MODULES map in src/cli-catalog.ts (group → @absmartly/cli/core/<dir>).
 function coreModuleFile(group: string): string {
-  const catalog = readFileSync(join(ROOT, "src", "cli-catalog.ts"), "utf-8");
-  const alias = catalog.match(new RegExp(`^\\s+${group}: (\\w+) as unknown`, "m"))?.[1];
-  const dir = alias && catalog.match(new RegExp(`import \\* as ${alias} from "@absmartly/cli/core/([\\w-]+)"`))?.[1];
+  const alias = CLI_CATALOG_SOURCE.match(new RegExp(`^\\s+${group}: (\\w+) as unknown`, "m"))?.[1];
+  const dir = alias && CLI_CATALOG_SOURCE.match(new RegExp(`import \\* as ${alias} from "@absmartly/cli/core/([\\w-]+)"`))?.[1];
   if (!dir) throw new Error(`Cannot find the @absmartly/cli core module for catalog group "${group}"`);
   return join(CLI_DIST, "core", dir, "index.js");
 }
