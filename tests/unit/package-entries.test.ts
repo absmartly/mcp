@@ -17,6 +17,8 @@ const TEST_OUT_DIR = '.test-dist/cjs';
 const WORKER_ONLY_PACKAGES = ['hono', '@cloudflare/workers-oauth-provider', 'agents', 'workers-mcp', 'dotenv'];
 const WORKER_ONLY_SOURCES = ['index.ts', 'absmartly-oauth-handler.ts', 'oauth-worker-guards.ts', 'session-provider.ts', 'resources.ts', 'dxt-bundle.ts', 'worker.ts'];
 const NODE_ENTRY_SOURCES = ['src/core.ts', 'src/oauth/index.ts'];
+const STDIO_BIN = 'bin/absmartly-mcp.mjs';
+const STDIO_BIN_ENTRY = 'local-server.js';
 const BUILTINS = new Set(builtinModules);
 
 function packageName(specifier: string): string {
@@ -116,6 +118,13 @@ export default async function runTests() {
     const transitiveWorkerOnly = ['@cloudflare/workers-oauth-provider', 'agents', 'workers-mcp', 'dotenv'].filter(d => reached.has(d));
     ok(transitiveWorkerOnly.length === 0, `${entry}: no transitive path to a Worker-only package`, `reaches ${transitiveWorkerOnly.join(', ')}`);
   }
+
+  // The published stdio bin must start from installed files: a runtime
+  // `npx tsx` fetches a package that a production install does not contain.
+  const bin = readFileSync(join(ROOT, STDIO_BIN), 'utf-8');
+  ok(pkg.bin?.['absmartly-mcp'] === STDIO_BIN, `package.json: bin points at ${STDIO_BIN}`);
+  ok(!/\bnpx\b|\btsx\b/.test(bin), `${STDIO_BIN}: does not run npx or tsx`);
+  ok(bin.includes(`'${STDIO_BIN_ENTRY}'`) && bin.includes("'dist'"), `${STDIO_BIN}: imports the compiled dist/${STDIO_BIN_ENTRY}`);
 
   for (const dep of WORKER_ONLY_PACKAGES) {
     ok(!(dep in (pkg.dependencies ?? {})), `package.json: ${dep} is not a runtime dependency`);
