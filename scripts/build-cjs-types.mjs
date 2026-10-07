@@ -4,8 +4,9 @@
 // a package.json with "type": "commonjs", so TypeScript (node16/nodenext)
 // reads these copies as CommonJS declarations; the originals in dist/ sit in
 // the package's "type": "module" scope and would describe the CommonJS build
-// as ESM ("masquerading as ESM"). Declaration maps are not copied: their
-// relative source paths only resolve from dist/.
+// as ESM ("masquerading as ESM"). Declaration maps are not copied (their
+// relative source paths only resolve from dist/), so the copies' trailing
+// sourceMappingURL comments are stripped too.
 //
 // A CommonJS declaration may only type-import an ESM-only package (one with
 // no "require" export condition, such as @absmartly/cli) with an explicit
@@ -17,6 +18,7 @@ import { fileURLToPath } from 'url';
 
 const DECLARATION_SUFFIX = '.d.ts';
 const RESOLUTION_MODE_ATTRIBUTE = 'with { "resolution-mode": "import" }';
+const SOURCE_MAPPING_URL_PATTERN = /^\/\/# sourceMappingURL=.*\n?/gm;
 const TYPE_IMPORT_PATTERN = /^(import type [^;]*? from (['"])([^.'"][^'"]*)\2)(;?)$/gm;
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -45,7 +47,7 @@ function isEsmOnly(specifier) {
 }
 
 function toCommonJsDeclaration(source) {
-  return source.replace(TYPE_IMPORT_PATTERN, (line, statement, _quote, specifier, semicolon) =>
+  return source.replace(SOURCE_MAPPING_URL_PATTERN, '').replace(TYPE_IMPORT_PATTERN, (line, statement, _quote, specifier, semicolon) =>
     isEsmOnly(specifier) ? `${statement} ${RESOLUTION_MODE_ATTRIBUTE}${semicolon}` : line);
 }
 
