@@ -1,5 +1,6 @@
 import {
   ALLOWED_REDIRECT_CUSTOM_SCHEMES,
+  ALLOWED_REDIRECT_HTTPS_CALLBACK_PATTERNS,
   ALLOWED_REDIRECT_HTTPS_CALLBACKS,
   ALLOWED_REDIRECT_LOOPBACK_HOSTS,
 } from "./constants.js";
@@ -8,9 +9,9 @@ const HTTPS_PROTOCOL = "https:";
 const HTTP_PROTOCOL = "http:";
 const PREFIX_ENTRY_SUFFIX = "/";
 
-// Accepts the hosted callbacks in ALLOWED_REDIRECT_HTTPS_CALLBACKS, http only on
-// loopback (any port, RFC 8252), and native app schemes. Rejects fragments and
-// embedded credentials.
+// Accepts the hosted callbacks in ALLOWED_REDIRECT_HTTPS_CALLBACKS (or matching
+// ALLOWED_REDIRECT_HTTPS_CALLBACK_PATTERNS), http only on loopback (any port, RFC 8252),
+// and native app schemes. Rejects fragments and embedded credentials.
 export function isAllowedRedirectUri(redirectUri: string): boolean {
   let parsed: URL;
   try {
@@ -25,7 +26,7 @@ export function isAllowedRedirectUri(redirectUri: string): boolean {
       allowed.endsWith(PREFIX_ENTRY_SUFFIX)
         ? callback.startsWith(allowed) && callback.length > allowed.length
         : callback === allowed
-    );
+    ) || ALLOWED_REDIRECT_HTTPS_CALLBACK_PATTERNS.some((pattern) => pattern.test(callback));
   }
   if (parsed.protocol === HTTP_PROTOCOL) return ALLOWED_REDIRECT_LOOPBACK_HOSTS.includes(parsed.hostname);
   return ALLOWED_REDIRECT_CUSTOM_SCHEMES.includes(parsed.protocol);
