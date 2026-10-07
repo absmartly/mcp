@@ -7,7 +7,8 @@
 //  - the CommonJS build loads with plain require(), with no Worker-only
 //    module ending up in require.cache.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, existsSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { createRequire, builtinModules } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,7 +19,11 @@ const WORKER_ONLY_PACKAGES = ['hono', '@cloudflare/workers-oauth-provider', 'age
 const WORKER_ONLY_SOURCES = ['index.ts', 'absmartly-oauth-handler.ts', 'oauth-worker-guards.ts', 'session-provider.ts', 'resources.ts', 'dxt-bundle.ts', 'worker.ts'];
 const NODE_ENTRY_SOURCES = ['src/core.ts', 'src/oauth/index.ts'];
 const STDIO_BIN = 'bin/absmartly-mcp.mjs';
-const STDIO_BIN_ENTRY = 'local-server.js';
+const STDIO_BIN_ENTRY = 'dist/local-server.js';
+const STDIO_BIN_MARKER = 'absmartly-mcp stdio entry started';
+const STDIO_BIN_ARGS = ['--profile=test'];
+// Real dist/ siblings the bin could wrongly import; each is a silent stub.
+const STDIO_BIN_DECOYS = ['dist/version.js', 'dist/core.js', 'dist/index.js'];
 const BUILTINS = new Set(builtinModules);
 
 function packageName(specifier: string): string {
@@ -124,7 +129,28 @@ export default async function runTests() {
   const bin = readFileSync(join(ROOT, STDIO_BIN), 'utf-8');
   ok(pkg.bin?.['absmartly-mcp'] === STDIO_BIN, `package.json: bin points at ${STDIO_BIN}`);
   ok(!/\bnpx\b|\btsx\b/.test(bin), `${STDIO_BIN}: does not run npx or tsx`);
-  ok(bin.includes(`'${STDIO_BIN_ENTRY}'`) && bin.includes("'dist'"), `${STDIO_BIN}: imports the compiled dist/${STDIO_BIN_ENTRY}`);
+
+  // Run the bin from a scratch package whose compiled server is a stub that
+  // reports it ran, next to silent stubs of other dist/ modules, so this checks
+  // which module the bin actually executes (and that it forwards argv) without
+  // needing a build or a backend.
+  const scratch = mkdtempSync(join(tmpdir(), 'mcp-stdio-bin-'));
+  try {
+    mkdirSync(join(scratch, dirname(STDIO_BIN)), { recursive: true });
+    mkdirSync(join(scratch, dirname(STDIO_BIN_ENTRY)), { recursive: true });
+    copyFileSync(join(ROOT, STDIO_BIN), join(scratch, STDIO_BIN));
+    for (const decoy of STDIO_BIN_DECOYS) writeFileSync(join(scratch, decoy), 'export {};\n');
+    writeFileSync(join(scratch, STDIO_BIN_ENTRY),
+      `console.log(JSON.stringify({ marker: ${JSON.stringify(STDIO_BIN_MARKER)}, args: process.argv.slice(2) }));\n`);
+    const stdout = execFileSync(process.execPath, [join(scratch, STDIO_BIN), ...STDIO_BIN_ARGS], { encoding: 'utf-8', stdio: 'pipe' });
+    const started = JSON.parse(stdout.trim().split('\n').pop() ?? '{}');
+    ok(started.marker === STDIO_BIN_MARKER, `${STDIO_BIN}: runs ${STDIO_BIN_ENTRY}`, stdout);
+    ok(JSON.stringify(started.args) === JSON.stringify(STDIO_BIN_ARGS), `${STDIO_BIN}: forwards its arguments`, JSON.stringify(started.args));
+  } catch (e: any) {
+    ok(false, `${STDIO_BIN}: runs ${STDIO_BIN_ENTRY}`, e.stderr?.toString() || e.message);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 
   for (const dep of WORKER_ONLY_PACKAGES) {
     ok(!(dep in (pkg.dependencies ?? {})), `package.json: ${dep} is not a runtime dependency`);
