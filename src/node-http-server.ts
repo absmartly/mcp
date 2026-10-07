@@ -151,11 +151,11 @@ const STATEFUL_CAPABILITIES = {
   prompts: { listChanged: true },
 };
 
-async function createServerFor(
+function createServerFor(
   ctx: NodeMcpRequestContext,
   apiClient: APIClient,
   stateful: boolean,
-): Promise<{ server: McpServer; entities: ServerContextLoader }> {
+): { server: McpServer; entities: ServerContextLoader } {
   // Lazy: entity lists are fetched only if this message's handler needs
   // them, not on every POST (initialize, tools/list, etc. skip it).
   const entities = createServerContextLoader(apiClient, { endpoint: ctx.endpoint, authType: ctx.authType });
@@ -198,7 +198,7 @@ function createStatelessHandler(
 
       try {
         const requestCtx = await buildContext(req);
-        ({ server } = await createServerFor(requestCtx, requestCtx.apiClient, false));
+        ({ server } = createServerFor(requestCtx, requestCtx.apiClient, false));
 
         transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
         await server.connect(transport);
@@ -249,10 +249,12 @@ function createStatefulHandler(
     try { await session.server.close(); } catch { /* already closed */ }
   };
 
+  const isExpired = (s: McpSession, t: number) =>
+    t - s.createdAt > maxSessionAgeMs || (s.activeStreams === 0 && t - s.lastActivityAt > idleTtlMs);
+
   const sweepExpired = async () => {
     const t = now();
-    const expired = [...store.values()].filter(s =>
-      t - s.createdAt > maxSessionAgeMs || (s.activeStreams === 0 && t - s.lastActivityAt > idleTtlMs));
+    const expired = [...store.values()].filter(s => isExpired(s, t));
     await Promise.all(expired.map(destroy));
     return expired.length;
   };
@@ -283,7 +285,15 @@ function createStatefulHandler(
       jsonRpcError(res, 404, -32001, "Session not found");
       return undefined;
     }
-    session.lastActivityAt = now();
+    // The sweep runs on a timer, so a request can arrive between expiry and
+    // the next sweep; it must not revive the session.
+    const t = now();
+    if (isExpired(session, t)) {
+      await destroy(session);
+      jsonRpcError(res, 404, -32001, "Session not found");
+      return undefined;
+    }
+    session.lastActivityAt = t;
     session.apiClient = ctx.apiClient;
     // Entities are cached per request, as in stateless mode; otherwise a
     // reread after notifyResourceUpdated would return the session's first fetch.
@@ -300,7 +310,7 @@ function createStatefulHandler(
       },
     });
     const holder = { apiClient: ctx.apiClient };
-    const { server, entities } = await createServerFor(ctx, apiClient, true);
+    const { server, entities } = createServerFor(ctx, apiClient, true);
     let session: McpSession | undefined;
 
     server.server.setRequestHandler(SubscribeRequestSchema, async (request) => {
@@ -415,9 +425,10 @@ function createStatefulHandler(
     async notifyListChanged(kind, target) {
       const targets = [...store.values()].filter(s => !target?.principal || s.principal === target.principal);
       await Promise.all(targets.map(s => {
-        if (kind === "tools") return s.server.sendToolListChanged();
-        if (kind === "resources") return s.server.sendResourceListChanged();
-        return s.server.sendPromptListChanged();
+        // McpServer's send*ListChanged() return void; the Server ones return the send promise.
+        if (kind === "tools") return s.server.server.sendToolListChanged();
+        if (kind === "resources") return s.server.server.sendResourceListChanged();
+        return s.server.server.sendPromptListChanged();
       }));
       return targets.length;
     },

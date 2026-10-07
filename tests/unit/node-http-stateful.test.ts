@@ -265,6 +265,17 @@ export default async function run() {
         });
     });
 
+    await test('stateful: a request after the idle TTL but before the sweep does not revive the session', async () => {
+        let clock = 1_000_000;
+        await withServer({ stateful: { idleTtlMs: 1000, now: () => clock } }, async ({ init, post }) => {
+            const { sessionId } = await init('alice');
+            clock += 1500;
+            const late = await post('alice', sessionId, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
+            assert.strictEqual(late.status, 404);
+            await late.text();
+        });
+    });
+
     await test('stateful: sessions past maxSessionAgeMs are evicted even with an open stream', async () => {
         let clock = 1_000_000;
         await withServer({ stateful: { maxSessionAgeMs: 5000, now: () => clock } }, async ({ url, handler, init }) => {
