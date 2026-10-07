@@ -19,9 +19,9 @@ import type { IncomingMessage, ServerResponse } from "http";
 import { fileURLToPath } from "url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { ErrorCode, InitializeRequestSchema, LATEST_PROTOCOL_VERSION, McpError, SUPPORTED_PROTOCOL_VERSIONS, isInitializeRequest, SubscribeRequestSchema, UnsubscribeRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { ErrorCode, McpError, isInitializeRequest, SubscribeRequestSchema, UnsubscribeRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { APIClient } from "@absmartly/cli/api-client";
-import { createServerContextLoader } from "./server-context.js";
+import { createServerContextLoader, type ServerContextLoader } from "./server-context.js";
 import { registerServer } from "./register-server.js";
 import { MCP_VERSION } from "./version.js";
 
@@ -55,6 +55,8 @@ export interface McpSession {
   readonly server: McpServer;
   readonly transport: StreamableHTTPServerTransport;
   apiClient: APIClient;
+  /** Entity lists backing resources/prompts; invalidated on every request. */
+  readonly entities: ServerContextLoader;
 }
 
 /**
@@ -131,26 +133,18 @@ function jsonRpcError(res: ServerResponse, status: number, code: number, message
   }));
 }
 
-/**
- * McpServer's register*() calls add `listChanged: true` for tools, resources
- * and prompts, and the SDK has no public API to unset a capability. A
- * stateless transport can never deliver those notifications, so replace the
- * initialize handler with one reporting only what is deliverable (public SDK
- * API only: setRequestHandler).
- */
-function advertiseOnlyDeliverableCapabilities(server: McpServer): void {
-  server.server.setRequestHandler(InitializeRequestSchema, async (request) => {
-    const requested = request.params.protocolVersion;
-    return {
-      protocolVersion: SUPPORTED_PROTOCOL_VERSIONS.includes(requested) ? requested : LATEST_PROTOCOL_VERSION,
-      capabilities: STATELESS_CAPABILITIES,
-      serverInfo: SERVER_INFO,
-    };
-  });
-}
-
 const SERVER_INFO = { name: "ABsmartly MCP Server", version: MCP_VERSION };
-const STATELESS_CAPABILITIES = { tools: {}, resources: {}, prompts: {} };
+/**
+ * McpServer's register*() calls force `listChanged: true` for tools,
+ * resources and prompts. registerCapabilities() merges per key, so applying
+ * this afterwards turns off only what a stateless transport can never
+ * deliver and keeps everything else the SDK registered (e.g. completions).
+ */
+const STATELESS_UNDELIVERABLE_CAPABILITIES = {
+  tools: { listChanged: false },
+  resources: { subscribe: false, listChanged: false },
+  prompts: { listChanged: false },
+};
 const STATEFUL_CAPABILITIES = {
   tools: { listChanged: true },
   resources: { subscribe: true, listChanged: true },
@@ -161,14 +155,14 @@ async function createServerFor(
   ctx: NodeMcpRequestContext,
   apiClient: APIClient,
   stateful: boolean,
-): Promise<McpServer> {
+): Promise<{ server: McpServer; entities: ServerContextLoader }> {
   // Lazy: entity lists are fetched only if this message's handler needs
   // them, not on every POST (initialize, tools/list, etc. skip it).
-  const serverCtx = createServerContextLoader(apiClient, { endpoint: ctx.endpoint, authType: ctx.authType });
-  const server = new McpServer(SERVER_INFO, { capabilities: stateful ? STATEFUL_CAPABILITIES : STATELESS_CAPABILITIES });
-  registerServer(server, serverCtx, { docsDir: ctx.docsDir ?? DEFAULT_DOCS_DIR });
-  if (!stateful) advertiseOnlyDeliverableCapabilities(server);
-  return server;
+  const entities = createServerContextLoader(apiClient, { endpoint: ctx.endpoint, authType: ctx.authType });
+  const server = new McpServer(SERVER_INFO, stateful ? { capabilities: STATEFUL_CAPABILITIES } : {});
+  registerServer(server, entities, { docsDir: ctx.docsDir ?? DEFAULT_DOCS_DIR });
+  if (!stateful) server.server.registerCapabilities(STATELESS_UNDELIVERABLE_CAPABILITIES);
+  return { server, entities };
 }
 
 export function createStreamableHttpHandler(
@@ -204,7 +198,7 @@ function createStatelessHandler(
 
       try {
         const requestCtx = await buildContext(req);
-        server = await createServerFor(requestCtx, requestCtx.apiClient, false);
+        ({ server } = await createServerFor(requestCtx, requestCtx.apiClient, false));
 
         transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
         await server.connect(transport);
@@ -245,7 +239,6 @@ function createStatefulHandler(
   const maxSubscriptions = opts.maxSubscriptionsPerSession ?? 100;
   const generateId = opts.sessionIdGenerator ?? randomUUID;
   const now = opts.now ?? Date.now;
-  // Initializes in flight that will occupy a slot once the session id is issued.
   let pendingInitializes = 0;
   const pendingByPrincipal = new Map<string, number>();
 
@@ -291,8 +284,10 @@ function createStatefulHandler(
       return undefined;
     }
     session.lastActivityAt = now();
-    // Adopt the freshest credentials the host resolved for this request.
     session.apiClient = ctx.apiClient;
+    // Entities are cached per request, as in stateless mode; otherwise a
+    // reread after notifyResourceUpdated would return the session's first fetch.
+    session.entities.invalidate();
     return session;
   };
 
@@ -305,7 +300,7 @@ function createStatefulHandler(
       },
     });
     const holder = { apiClient: ctx.apiClient };
-    const server = await createServerFor(ctx, apiClient, true);
+    const { server, entities } = await createServerFor(ctx, apiClient, true);
     let session: McpSession | undefined;
 
     server.server.setRequestHandler(SubscribeRequestSchema, async (request) => {
@@ -326,7 +321,7 @@ function createStatefulHandler(
         const t = now();
         session = {
           id, principal, createdAt: t, lastActivityAt: t, activeStreams: 0,
-          subscriptions: new Set(), server, transport,
+          subscriptions: new Set(), server, transport, entities,
           get apiClient() { return holder.apiClient; },
           set apiClient(v: APIClient) { holder.apiClient = v; },
         };
@@ -365,19 +360,13 @@ function createStatefulHandler(
         }
         pendingInitializes++;
         pendingByPrincipal.set(ctx.principal, (pendingByPrincipal.get(ctx.principal) ?? 0) + 1);
-        let released = false;
-        const release = () => {
-          if (released) return;
-          released = true;
-          pendingInitializes--;
-          const n = (pendingByPrincipal.get(ctx.principal!) ?? 1) - 1;
-          if (n <= 0) pendingByPrincipal.delete(ctx.principal!); else pendingByPrincipal.set(ctx.principal!, n);
-        };
         try {
           const transport = await startSession(ctx, ctx.principal, res);
           await transport.handleRequest(req, res, body);
         } finally {
-          release();
+          pendingInitializes--;
+          const n = (pendingByPrincipal.get(ctx.principal) ?? 1) - 1;
+          if (n <= 0) pendingByPrincipal.delete(ctx.principal); else pendingByPrincipal.set(ctx.principal, n);
         }
       } catch (error) {
         console.error("Error handling MCP request:", error);

@@ -16,9 +16,10 @@ function parseMessage(text: string): any {
 async function withServer(
     options: NodeMcpHandlerOptions | undefined,
     fn: (ctx: { url: string; handler: NodeMcpHandler; init: (principal: string) => Promise<{ sessionId: string; message: any }>; post: (principal: string, sessionId: string | undefined, body: unknown) => Promise<Response> }) => Promise<void>,
+    apiClient: () => any = () => ({}),
 ) {
     const handler = createStreamableHttpHandler(async (req) => ({
-        apiClient: {} as any,
+        apiClient: apiClient(),
         endpoint: 'https://demo.absmartly.com',
         authType: 'API Key',
         principal: req.headers['x-principal'] as string | undefined,
@@ -114,6 +115,7 @@ export default async function run() {
             assert.strictEqual(res.headers.get('mcp-session-id'), null);
             const caps = parseMessage(await res.text()).result.capabilities;
             assert.ok(!caps.resources.subscribe && !caps.resources.listChanged && !caps.tools.listChanged && !caps.prompts.listChanged, JSON.stringify(caps));
+            assert.deepStrictEqual(caps.completions, {}, 'completions (create-experiment.type) must stay advertised');
             for (const method of ['GET', 'DELETE']) {
                 const r = await fetch(url, { method, headers: { Accept: 'text/event-stream', 'x-principal': 'alice' } });
                 assert.strictEqual(r.status, 405);
@@ -138,6 +140,7 @@ export default async function run() {
             assert.strictEqual(caps.resources.listChanged, true);
             assert.strictEqual(caps.tools.listChanged, true);
             assert.strictEqual(caps.prompts.listChanged, true);
+            assert.deepStrictEqual(caps.completions, {});
         });
     });
 
@@ -223,7 +226,6 @@ export default async function run() {
                 assert.strictEqual(r.status, 404, method);
                 await r.text();
             }
-            // Still alive for the owner.
             const ok = await post('alice', sessionId, { jsonrpc: '2.0', id: 3, method: 'tools/list' });
             assert.strictEqual(ok.status, 200);
             await ok.text();
@@ -282,6 +284,28 @@ export default async function run() {
             const b = await post('alice', sessionId, { jsonrpc: '2.0', id: 3, method: 'resources/subscribe', params: { uri: 'absmartly://b' } });
             assert.strictEqual(parseMessage(await b.text()).error.code, -32600);
         });
+    });
+
+    await test('stateful: entity resources are refetched on a later request, so a reread after notifyResourceUpdated is fresh', async () => {
+        let goalName = 'before';
+        let goalFetches = 0;
+        const apiClient = () => ({
+            getCurrentUser: async () => ({ id: 1 }),
+            listGoals: async () => { goalFetches++; return [{ id: 1, name: goalName }]; },
+        });
+        await withServer({ stateful: true }, async ({ handler, init, post }) => {
+            const { sessionId } = await init('alice');
+            const uri = 'absmartly://entities/goals';
+            const read = async (id: number) => {
+                const r = await post('alice', sessionId, { jsonrpc: '2.0', id, method: 'resources/read', params: { uri } });
+                return JSON.parse(parseMessage(await r.text()).result.contents[0].text)[0].name;
+            };
+            assert.strictEqual(await read(2), 'before');
+            goalName = 'after';
+            await handler.notifyResourceUpdated(uri);
+            assert.strictEqual(await read(3), 'after');
+            assert.strictEqual(goalFetches, 2);
+        }, apiClient);
     });
 
     await test('stateful: GET/DELETE without a principal get 401, not 404/400', async () => {
