@@ -127,12 +127,7 @@ function parseModule(file: string): ModuleInfo {
     }
   };
   for (const m of source.matchAll(/^import \{([^}]*)\} from '(\.[^']+)'/gm)) bindingList(m[1], m[2], info.imports);
-  for (const m of source.matchAll(/^export \{([^}]*)\} from '(\.[^']+)'/gm)) {
-    for (const part of m[1].split(",")) {
-      const [imported, exported] = part.trim().split(/\s+as\s+/);
-      if (imported) info.reexports.set((exported ?? imported).trim(), { file: resolve(dirname(file), m[2]), name: imported.trim() });
-    }
-  }
+  for (const m of source.matchAll(/^export \{([^}]*)\} from '(\.[^']+)'/gm)) bindingList(m[1], m[2], info.reexports);
 
   const decls = [...source.matchAll(/^(?:export )?(?:async )?function\*? (\w+)\(|^(?:export )?const (\w+) = (?:async )?(?:\([^)]*\)|\w+) =>/gm)];
   const topLevel = [...source.matchAll(/^\S/gm)].map(m => m.index!);
