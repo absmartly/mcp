@@ -280,7 +280,32 @@ export default async function run() {
             const a = await post('alice', sessionId, { jsonrpc: '2.0', id: 2, method: 'resources/subscribe', params: { uri: 'absmartly://a' } });
             assert.ok('result' in parseMessage(await a.text()));
             const b = await post('alice', sessionId, { jsonrpc: '2.0', id: 3, method: 'resources/subscribe', params: { uri: 'absmartly://b' } });
-            assert.ok('error' in parseMessage(await b.text()));
+            assert.strictEqual(parseMessage(await b.text()).error.code, -32600);
+        });
+    });
+
+    await test('stateful: GET/DELETE without a principal get 401, not 404/400', async () => {
+        await withServer({ stateful: true }, async ({ url, init }) => {
+            const { sessionId } = await init('alice');
+            for (const [method, accept] of [['GET', 'text/event-stream'], ['DELETE', ACCEPT]] as const) {
+                for (const headers of [{ 'mcp-session-id': sessionId }, {}]) {
+                    const r = await fetch(url, { method, headers: { Accept: accept, 'mcp-protocol-version': '2025-06-18', ...headers } });
+                    assert.strictEqual(r.status, 401, `${method} ${JSON.stringify(headers)}`);
+                    await r.text();
+                }
+            }
+        });
+    });
+
+    await test('stateful: a DELETE the SDK rejects (bad protocol version) keeps the session', async () => {
+        await withServer({ stateful: true }, async ({ url, init, post }) => {
+            const { sessionId } = await init('alice');
+            const del = await fetch(url, { method: 'DELETE', headers: { 'x-principal': 'alice', 'mcp-session-id': sessionId, 'mcp-protocol-version': '1999-01-01' } });
+            assert.strictEqual(del.status, 400);
+            await del.text();
+            const ok = await post('alice', sessionId, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
+            assert.strictEqual(ok.status, 200);
+            await ok.text();
         });
     });
 

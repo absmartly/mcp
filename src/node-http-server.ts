@@ -19,7 +19,7 @@ import type { IncomingMessage, ServerResponse } from "http";
 import { fileURLToPath } from "url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { InitializeRequestSchema, LATEST_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS, isInitializeRequest, SubscribeRequestSchema, UnsubscribeRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { ErrorCode, InitializeRequestSchema, LATEST_PROTOCOL_VERSION, McpError, SUPPORTED_PROTOCOL_VERSIONS, isInitializeRequest, SubscribeRequestSchema, UnsubscribeRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { APIClient } from "@absmartly/cli/api-client";
 import { createServerContextLoader } from "./server-context.js";
 import { registerServer } from "./register-server.js";
@@ -270,8 +270,15 @@ function createStatefulHandler(
   const countFor = (principal: string) =>
     [...store.values()].filter(s => s.principal === principal).length + (pendingByPrincipal.get(principal) ?? 0);
 
+  const requirePrincipal = (res: ServerResponse, ctx: NodeMcpRequestContext): ctx is NodeMcpRequestContext & { principal: string } => {
+    if (ctx.principal) return true;
+    jsonRpcError(res, 401, -32001, "Stateful sessions require an authenticated principal");
+    return false;
+  };
+
   /** Resolves the session for a request, enforcing principal binding. Sends the error response and returns undefined on failure. */
   const authorize = async (req: IncomingMessage, res: ServerResponse, ctx: NodeMcpRequestContext): Promise<McpSession | undefined> => {
+    if (!requirePrincipal(res, ctx)) return undefined;
     const id = req.headers["mcp-session-id"];
     if (typeof id !== "string") {
       jsonRpcError(res, 400, -32000, "Bad Request: Mcp-Session-Id header is required");
@@ -303,7 +310,7 @@ function createStatefulHandler(
 
     server.server.setRequestHandler(SubscribeRequestSchema, async (request) => {
       if (session && !session.subscriptions.has(request.params.uri) && session.subscriptions.size >= maxSubscriptions) {
-        throw new Error(`Subscription limit reached (${maxSubscriptions})`);
+        throw new McpError(ErrorCode.InvalidRequest, `Subscription limit reached (${maxSubscriptions})`);
       }
       session?.subscriptions.add(request.params.uri);
       return {};
@@ -337,10 +344,7 @@ function createStatefulHandler(
     async post(req, res, body) {
       try {
         const ctx = await buildContext(req);
-        if (!ctx.principal) {
-          jsonRpcError(res, 401, -32001, "Stateful sessions require an authenticated principal");
-          return;
-        }
+        if (!requirePrincipal(res, ctx)) return;
         if (req.headers["mcp-session-id"] !== undefined) {
           const session = await authorize(req, res, ctx);
           if (session) await session.transport.handleRequest(req, res, body);
@@ -403,8 +407,9 @@ function createStatefulHandler(
         const ctx = await buildContext(req);
         const session = await authorize(req, res, ctx);
         if (!session) return;
+        // onsessionclosed destroys the session, and only once the SDK has
+        // accepted the DELETE; a rejected one (e.g. bad protocol version) keeps it.
         await session.transport.handleRequest(req, res);
-        await destroy(session);
       } catch (error) {
         console.error("Error handling MCP request:", error);
         jsonRpcError(res, 500, -32603, "Internal server error");
