@@ -80,7 +80,7 @@
     "@modelcontextprotocol/sdk": "^1.27.1",
     "agents": "^0.0.95",
     "dotenv": "^17.0.0",
-    "hono": "^4.8.5",
+    "hono": "^4.12.25",
     "workers-mcp": "^0.0.13",
     "zod": "^3.25.67"
   },
@@ -90,6 +90,6 @@
     "jsonwebtoken": "^9.0.2",
     "tsx": "^4.21.0",
     "typescript": "^5.3.3",
-    "wrangler": "^4.93.0"
+    "wrangler": "^4.103.0"
   }
 }
