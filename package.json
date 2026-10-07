@@ -11,21 +11,36 @@
   },
   "exports": {
     ".": {
-      "types": "./dist/core.d.ts",
-      "import": "./dist/core.js",
-      "require": "./dist/cjs/core.js",
+      "import": {
+        "types": "./dist/core.d.ts",
+        "default": "./dist/core.js"
+      },
+      "require": {
+        "types": "./dist/cjs/types/core.d.ts",
+        "default": "./dist/cjs/core.js"
+      },
       "default": "./dist/core.js"
     },
     "./node-http": {
-      "types": "./dist/core.d.ts",
-      "import": "./dist/core.js",
-      "require": "./dist/cjs/core.js",
+      "import": {
+        "types": "./dist/core.d.ts",
+        "default": "./dist/core.js"
+      },
+      "require": {
+        "types": "./dist/cjs/types/core.d.ts",
+        "default": "./dist/cjs/core.js"
+      },
       "default": "./dist/core.js"
     },
     "./oauth": {
-      "types": "./dist/oauth/index.d.ts",
-      "import": "./dist/oauth/index.js",
-      "require": "./dist/cjs/oauth.js",
+      "import": {
+        "types": "./dist/oauth/index.d.ts",
+        "default": "./dist/oauth/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/types/oauth/index.d.ts",
+        "default": "./dist/cjs/oauth.js"
+      },
       "default": "./dist/oauth/index.js"
     },
     "./worker": {
@@ -58,7 +73,7 @@
   ],
   "scripts": {
     "prebuild": "node scripts/sync-version.js",
-    "build": "tsc && node scripts/build-cjs.mjs",
+    "build": "tsc && node scripts/build-cjs.mjs && node scripts/build-cjs-types.mjs",
     "predev": "node scripts/sync-version.js",
     "dev": "wrangler dev",
     "predeploy": "node scripts/sync-version.js",

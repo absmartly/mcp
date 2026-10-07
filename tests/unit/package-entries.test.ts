@@ -127,8 +127,12 @@ export default async function runTests() {
 
   for (const subpath of ['.', './node-http', './oauth']) {
     const conditions = pkg.exports?.[subpath] ?? {};
-    ok(typeof conditions.import === 'string' && typeof conditions.require === 'string' && typeof conditions.types === 'string',
-      `exports["${subpath}"] has types, import and require`, JSON.stringify(conditions));
+    ok(typeof conditions.import?.types === 'string' && typeof conditions.import?.default === 'string',
+      `exports["${subpath}"].import has types and default`, JSON.stringify(conditions));
+    // CommonJS declarations live under dist/cjs/ (a "type": "commonjs" scope) so
+    // node16/nodenext resolvers do not read them as ESM.
+    ok(typeof conditions.require?.default === 'string' && /^\.\/dist\/cjs\/.+\.d\.ts$/.test(conditions.require?.types ?? ''),
+      `exports["${subpath}"].require has CommonJS-scoped types and default`, JSON.stringify(conditions));
   }
   ok(pkg.exports?.['./worker']?.require === undefined, 'exports["./worker"] is ESM-only (Workers are ESM)');
   ok(typeof pkg.exports?.['./endpoint-manifest.json'] === 'string', 'exports the endpoint manifest');
