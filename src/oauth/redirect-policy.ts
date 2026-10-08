@@ -3,6 +3,8 @@ import {
   ALLOWED_REDIRECT_HTTPS_CALLBACK_PATTERNS,
   ALLOWED_REDIRECT_HTTPS_CALLBACKS,
   ALLOWED_REDIRECT_LOOPBACK_HOSTS,
+  SHARED_CALLBACK_HOST_PATTERNS,
+  SHARED_CALLBACK_HOSTS,
 } from "./constants.js";
 
 const HTTPS_PROTOCOL = "https:";
@@ -39,6 +41,15 @@ export function isLoopbackRedirectUri(redirectUri: string): boolean {
   } catch {
     return false;
   }
+}
+
+// An allowed https callback on a multi-tenant agent platform (see SHARED_CALLBACK_HOSTS).
+export function isSharedCallbackRedirectUri(redirectUri: string): boolean {
+  if (!isAllowedRedirectUri(redirectUri)) return false;
+  const parsed = new URL(redirectUri);
+  if (parsed.protocol !== HTTPS_PROTOCOL) return false;
+  return SHARED_CALLBACK_HOSTS.includes(parsed.hostname) ||
+    SHARED_CALLBACK_HOST_PATTERNS.some((pattern) => pattern.test(parsed.hostname));
 }
 
 // RFC 8252 §7.3: a loopback redirect matches a registered loopback URI regardless of

@@ -43,6 +43,18 @@ export const ALLOWED_REDIRECT_HTTPS_CALLBACK_PATTERNS = [
   /^https:\/\/bedrock-agentcore\.[a-z]{2}(-[a-z]+)+-\d+\.amazonaws\.com\/identities\/oauth2\/callback\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/,
   /^https:\/\/global\.consent\.azure-apim\.net\/redirect\/[a-z0-9-]+$/,
 ];
+// Hosts of allowed callbacks that belong to a multi-tenant agent platform: any
+// organization can configure its own connector there and receive codes on the same host,
+// so the consent page warns that the host alone does not identify whose connector it is.
+export const SHARED_CALLBACK_HOSTS = [
+  "global.consent.azure-apim.net",
+  "vertexaisearch.cloud.google.com",
+  "www.perplexity.ai",
+  "enterprise.perplexity.ai",
+];
+export const SHARED_CALLBACK_HOST_PATTERNS = [
+  /^bedrock-agentcore\.[a-z]{2}(-[a-z]+)+-\d+\.amazonaws\.com$/,
+];
 export const ALLOWED_REDIRECT_LOOPBACK_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
 export const ALLOWED_REDIRECT_CUSTOM_SCHEMES = ["cursor:", "claude:"];
 
