@@ -64,7 +64,7 @@ Two OAuth layers are involved:
 
 ### Shared policy: `src/oauth/` (published as `@absmartly/mcp/oauth`)
 Authorization-server policy is platform-neutral so the backend's `/mcp` endpoint can use the same code. It uses only Web APIs (`URL`, `fetch`, `crypto.subtle`); never import `hono`, `@cloudflare/*`, `agents` or `KVNamespace` there, and use `.js` import specifiers.
-- `redirect-policy.ts`: `isAllowedRedirectUri`. Codes may only go to the hosted callbacks in `ALLOWED_REDIRECT_HTTPS_CALLBACKS`, loopback http (any port), or the app schemes in `ALLOWED_REDIRECT_CUSTOM_SCHEMES`. To support a new hosted MCP client, add its exact callback to the constant.
+- `redirect-policy.ts`: `isAllowedRedirectUri`. Codes may only go to the hosted callbacks in `ALLOWED_REDIRECT_HTTPS_CALLBACKS`, loopback http (any port), or the app schemes in `ALLOWED_REDIRECT_CUSTOM_SCHEMES`. To support a new hosted MCP client, add its exact callback to the constant. Callbacks whose host or last path segment varies (AWS Bedrock AgentCore's regional host + UUID, Copilot Studio's per-connector id) go in `ALLOWED_REDIRECT_HTTPS_CALLBACK_PATTERNS` as fully anchored regexes over origin + path.
 - `registration.ts`: `validateClientRegistration` for `/register` (allowlist, auth method) and a byte-counting body reader.
 - `cimd.ts`: Client ID Metadata Documents. Only URLs in `TRUSTED_CIMD_CLIENT_IDS` are ever fetched.
 - `consent.ts`: `beginAuthorization` / `submitConsent`. The consent step is a server-side transaction bound to a per-transaction `__Host-` cookie; the POST reads every parameter from the stored transaction, never the form. Also enforces a registered + allowlisted `redirect_uri` and S256 PKCE on every request, including for clients registered before the allowlist existed.

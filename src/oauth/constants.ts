@@ -30,6 +30,30 @@ export const ALLOWED_REDIRECT_HTTPS_CALLBACKS = [
   "https://insiders.vscode.dev/redirect",
   "https://www.cursor.com/agents/mcp/oauth/callback",
   "https://integrations.productboard.com/oauth2/callback",
+  "https://claude.com/api/mcp/auth_callback",
+  "https://www.perplexity.ai/rest/connections/oauth_callback",
+  "https://enterprise.perplexity.ai/rest/connections/oauth_callback",
+  "https://vertexaisearch.cloud.google.com/oauth-redirect",
+  "https://global.consent.azure-apim.net/redirect",
+];
+// Hosted callbacks whose host or last path segment varies, matched in full against
+// origin + path. AWS Bedrock AgentCore uses a regional host and a per-credential-provider
+// UUID; Microsoft Copilot Studio / Azure AI Foundry use a per-connector id.
+export const ALLOWED_REDIRECT_HTTPS_CALLBACK_PATTERNS = [
+  /^https:\/\/bedrock-agentcore\.[a-z]{2}(-[a-z]+)+-\d+\.amazonaws\.com\/identities\/oauth2\/callback\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/,
+  /^https:\/\/global\.consent\.azure-apim\.net\/redirect\/[a-z0-9-]+$/,
+];
+// Hosts of allowed callbacks that belong to a multi-tenant agent platform: any
+// organization can configure its own connector there and receive codes on the same host,
+// so the consent page warns that the host alone does not identify whose connector it is.
+export const SHARED_CALLBACK_HOSTS = [
+  "global.consent.azure-apim.net",
+  "vertexaisearch.cloud.google.com",
+  "www.perplexity.ai",
+  "enterprise.perplexity.ai",
+];
+export const SHARED_CALLBACK_HOST_PATTERNS = [
+  /^bedrock-agentcore\.[a-z]{2}(-[a-z]+)+-\d+\.amazonaws\.com$/,
 ];
 export const ALLOWED_REDIRECT_LOOPBACK_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
 export const ALLOWED_REDIRECT_CUSTOM_SCHEMES = ["cursor:", "claude:"];

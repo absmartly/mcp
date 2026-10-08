@@ -14,6 +14,7 @@ import {
   verifyPkceS256,
   generatePkcePair,
   isAllowedRedirectUri,
+  isSharedCallbackRedirectUri,
   TRUSTED_CIMD_CLIENT_IDS,
 } from '../../src/oauth/index.js';
 
@@ -153,6 +154,23 @@ export default async function run() {
     assert.deepStrictEqual(client.redirectUris, ['http://localhost/callback']);
     assert.throws(() => parseCimdDocument(CLAUDE_CODE_CIMD, { ...CLAUDE_CODE_DOCUMENT, redirect_uris: ['https://attacker.com/cb'] }), CimdError);
     assert.throws(() => parseCimdDocument(CLAUDE_CODE_CIMD, { ...CLAUDE_CODE_DOCUMENT, token_endpoint_auth_method: 'private_key_jwt' }), CimdError);
+  });
+
+  await asyncTest('isSharedCallbackRedirectUri flags allowed multi-tenant platform callbacks only', () => {
+    for (const uri of [
+      'https://bedrock-agentcore.eu-west-1.amazonaws.com/identities/oauth2/callback/3f2b8c1e-9d4a-4e7b-a1c2-5d6e7f8a9b0c',
+      'https://global.consent.azure-apim.net/redirect/cr7a4-5fmcp',
+      'https://www.perplexity.ai/rest/connections/oauth_callback',
+      'https://vertexaisearch.cloud.google.com/oauth-redirect',
+    ]) assert.ok(isSharedCallbackRedirectUri(uri), `expected ${uri} to be shared`);
+    for (const uri of [
+      CLAUDE_CALLBACK,
+      'http://localhost:3118/callback',
+      'cursor://anysphere.cursor-mcp/oauth/callback',
+      'https://bedrock-agentcore.eu-west-1.amazonaws.com/other',
+      'https://global.consent.azure-apim.net/other',
+      'not a url',
+    ]) assert.ok(!isSharedCallbackRedirectUri(uri), `expected ${uri} not to be shared`);
   });
 
   // --- Loopback redirect matching (Claude Code publishes portless loopback URIs) ---

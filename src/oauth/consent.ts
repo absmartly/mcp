@@ -25,7 +25,7 @@ import {
 } from "./http.js";
 import { renderConsentPage, renderEndpointForm } from "./pages.js";
 import { hasRequiredPkce } from "./pkce.js";
-import { describeRedirectTarget, isAllowedRedirectUri, isLoopbackRedirectUri, isRegisteredRedirectUri } from "./redirect-policy.js";
+import { describeRedirectTarget, isAllowedRedirectUri, isLoopbackRedirectUri, isRegisteredRedirectUri, isSharedCallbackRedirectUri } from "./redirect-policy.js";
 
 const APPROVALS_STATE_KEY_PREFIX = "oauth:approvals:";
 const HTTP_STATUS_BAD_REQUEST = 400;
@@ -201,6 +201,7 @@ function consentPage<Req extends AuthorizationRequest>(client: OAuthClientInfo, 
     redirectTarget: describeRedirectTarget(authRequest.redirectUri),
     accountLabel: endpoint || undefined,
     loopbackRedirect: isLoopbackRedirectUri(authRequest.redirectUri),
+    sharedCallbackRedirect: isSharedCallbackRedirectUri(authRequest.redirectUri),
   }), setCookies);
 }
 

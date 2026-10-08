@@ -10,6 +10,10 @@ import {
 const LEGIT_REDIRECT = 'http://localhost:3118/callback';
 const CIMD_CLIENT = 'https://claude.ai/oauth/claude-code-client-metadata';
 const FORM_ACTION = '/auth/oauth/authorize';
+const AGENTCORE_CLIENT = 'agentcore-client';
+const AGENTCORE_REDIRECT = 'https://bedrock-agentcore.eu-west-1.amazonaws.com/identities/oauth2/callback/3f2b8c1e-9d4a-4e7b-a1c2-5d6e7f8a9b0c';
+const SHARED_HOST_WARNING = 'hosts agents and connectors for many organizations';
+const LOOPBACK_WARNING = 'an app running on this computer';
 
 function memoryStore(): OAuthStateStore & { data: Map<string, string> } {
   const data = new Map<string, string>();
@@ -25,9 +29,11 @@ function options(store: OAuthStateStore, extra: Partial<ConsentOptions> = {}): C
   return {
     store,
     formAction: FORM_ACTION,
-    lookupClient: async (id) => id === CIMD_CLIENT
-      ? { clientId: id, clientName: 'Claude Code', redirectUris: ['http://localhost/callback'] }
-      : null,
+    lookupClient: async (id) => {
+      if (id === CIMD_CLIENT) return { clientId: id, clientName: 'Claude Code', redirectUris: ['http://localhost/callback'] };
+      if (id === AGENTCORE_CLIENT) return { clientId: id, clientName: 'mcp-gateway-prod', redirectUris: [AGENTCORE_REDIRECT] };
+      return null;
+    },
     ...extra,
   };
 }
@@ -49,8 +55,8 @@ function cookiePair(setCookie: string): string {
   return setCookie.split(';')[0];
 }
 
-async function start(store: OAuthStateStore, extra: Partial<ConsentOptions> = {}) {
-  const outcome = await beginAuthorization({ authRequest: request(), endpoint: null, cookieHeader: null }, options(store, extra));
+async function start(store: OAuthStateStore, extra: Partial<ConsentOptions> = {}, authRequest: AuthorizationRequest = request()) {
+  const outcome = await beginAuthorization({ authRequest, endpoint: null, cookieHeader: null }, options(store, extra));
   assert.strictEqual(outcome.type, 'respond');
   if (outcome.type !== 'respond') throw new Error('unreachable');
   const body = outcome.response.body || '';
@@ -73,11 +79,19 @@ export default async function run() {
     if (outcome.type !== 'respond') return;
     assert.ok(body.includes('Authorize Access'));
     assert.ok(body.includes('Claude Code'));
-    assert.ok(body.includes('an app running on this computer'), 'loopback redirect must show the extra warning');
+    assert.ok(body.includes(LOOPBACK_WARNING), 'loopback redirect must show the extra warning');
+    assert.ok(!body.includes(SHARED_HOST_WARNING), 'loopback redirect is not a shared platform host');
     assert.ok(body.includes(`action="${FORM_ACTION}"`));
     assert.strictEqual(outcome.response.headers['X-Frame-Options'], 'DENY');
     assert.ok(transactionId);
     assert.ok(cookie.startsWith(`__Host-absmartly-oauth-consent-${transactionId}=`));
+  });
+
+  await asyncTest('shared agent platform callback shows the shared host warning', async () => {
+    const { body } = await start(memoryStore(), {}, request({ clientId: AGENTCORE_CLIENT, redirectUri: AGENTCORE_REDIRECT }));
+    assert.ok(body.includes('bedrock-agentcore.eu-west-1.amazonaws.com'));
+    assert.ok(body.includes(SHARED_HOST_WARNING), 'shared platform host must show the extra warning');
+    assert.ok(!body.includes(LOOPBACK_WARNING));
   });
 
   await asyncTest('approve returns the stored request, ignoring nothing from the form', async () => {

@@ -289,6 +289,16 @@ export default async function run() {
     'http://127.0.0.1:33418/',
     'claude://claude.ai/mcp-auth-callback/sdk',
     'https://integrations.productboard.com/oauth2/callback',
+    'https://claude.com/api/mcp/auth_callback',
+    'https://www.perplexity.ai/rest/connections/oauth_callback',
+    'https://enterprise.perplexity.ai/rest/connections/oauth_callback',
+    'https://vertexaisearch.cloud.google.com/oauth-redirect',
+    'https://bedrock-agentcore.eu-west-1.amazonaws.com/identities/oauth2/callback/3f2b8c1e-9d4a-4e7b-a1c2-5d6e7f8a9b0c',
+    'https://bedrock-agentcore.us-east-1.amazonaws.com/identities/oauth2/callback/3F2B8C1E-9D4A-4E7B-A1C2-5D6E7F8A9B0C',
+    'https://bedrock-agentcore.ap-southeast-2.amazonaws.com/identities/oauth2/callback/3f2b8c1e-9d4a-4e7b-a1c2-5d6e7f8a9b0c',
+    'https://bedrock-agentcore.us-gov-west-1.amazonaws.com/identities/oauth2/callback/3f2b8c1e-9d4a-4e7b-a1c2-5d6e7f8a9b0c',
+    'https://global.consent.azure-apim.net/redirect',
+    'https://global.consent.azure-apim.net/redirect/cr7a4-5fmcp-2dabsmartly-5f4b2e9c1d0a8f7e',
   ]) {
     test(`isAllowedRedirectUri allows ${uri}`, () => {
       assert.strictEqual(isAllowedRedirectUri(uri), true);
@@ -314,6 +324,23 @@ export default async function run() {
     'javascript:alert(1)',
     'data:text/html,hi',
     'not a url',
+    'https://bedrock-agentcore.eu-west-1.amazonaws.com/identities/oauth2/callback/{guid}',
+    'https://bedrock-agentcore.eu-west-1.amazonaws.com/identities/oauth2/callback/',
+    'https://bedrock-agentcore.eu-west-1.amazonaws.com/identities/oauth2/callback/3f2b8c1e-9d4a-4e7b-a1c2-5d6e7f8a9b0c/extra',
+    'https://bedrock-agentcore.eu-west-1.amazonaws.com/other/3f2b8c1e-9d4a-4e7b-a1c2-5d6e7f8a9b0c',
+    'https://bedrock-agentcore.eu-west-1.amazonaws.com:8443/identities/oauth2/callback/3f2b8c1e-9d4a-4e7b-a1c2-5d6e7f8a9b0c',
+    'https://bedrock-agentcore.attacker.com/identities/oauth2/callback/3f2b8c1e-9d4a-4e7b-a1c2-5d6e7f8a9b0c',
+    'https://bedrock-agentcore.eu-west-1.amazonaws.com.attacker.com/identities/oauth2/callback/3f2b8c1e-9d4a-4e7b-a1c2-5d6e7f8a9b0c',
+    'https://evil.bedrock-agentcore.eu-west-1.amazonaws.com/identities/oauth2/callback/3f2b8c1e-9d4a-4e7b-a1c2-5d6e7f8a9b0c',
+    'https://attacker.s3.eu-west-1.amazonaws.com/identities/oauth2/callback/3f2b8c1e-9d4a-4e7b-a1c2-5d6e7f8a9b0c',
+    'http://bedrock-agentcore.eu-west-1.amazonaws.com/identities/oauth2/callback/3f2b8c1e-9d4a-4e7b-a1c2-5d6e7f8a9b0c',
+    'https://global.consent.azure-apim.net/redirect/',
+    'https://global.consent.azure-apim.net/redirect/a/b',
+    'https://global.consent.azure-apim.net/other',
+    'https://attacker.consent.azure-apim.net/redirect/abc',
+    'https://www.perplexity.ai/rest/connections/oauth_callback/extra',
+    'https://bedrock-agentcore.eu-west-1.amazonaws.com/IDENTITIES/oauth2/callback/3f2b8c1e-9d4a-4e7b-a1c2-5d6e7f8a9b0c',
+    'https://global.consent.azure-apim.net/REDIRECT/abc',
   ]) {
     test(`isAllowedRedirectUri rejects ${uri}`, () => {
       assert.strictEqual(isAllowedRedirectUri(uri), false);

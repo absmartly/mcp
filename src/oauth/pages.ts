@@ -16,6 +16,9 @@ export type ConsentPageOptions = {
   accountLabel?: string;
   // Extra warning for loopback redirects: any local app can claim a loopback callback.
   loopbackRedirect?: boolean;
+  // Extra warning for multi-tenant agent platforms: any organization can set up a
+  // connector on the same host.
+  sharedCallbackRedirect?: boolean;
 };
 
 function describeScope(scope: string): string {
@@ -79,6 +82,9 @@ export function renderConsentPage(options: ConsentPageOptions): string {
   const loopbackWarning = options.loopbackRedirect
     ? `<p class="warning">The access will be delivered to an app running on this computer. Only continue if you just started this connection from your own MCP client.</p>`
     : "";
+  const sharedCallbackWarning = options.sharedCallbackRedirect
+    ? `<p class="warning">${escapeHtml(options.redirectTarget)} hosts agents and connectors for many organizations, so this address does not show whose connector will receive the access. Only continue if you or your team set up this connection and you started it just now.</p>`
+    : "";
   const formAction = escapeHtml(options.formAction);
   const transactionId = escapeHtml(options.transactionId);
   return `<!DOCTYPE html>
@@ -108,6 +114,7 @@ export function renderConsentPage(options: ConsentPageOptions): string {
     <p><span class="client-name">${escapeHtml(options.clientName)}</span> is requesting access to your ABsmartly account.</p>
     <p class="warning">After you approve, access to ${account} will be sent to <strong>${escapeHtml(options.redirectTarget)}</strong>. Only continue if you started this connection yourself and you trust that site.</p>
     ${loopbackWarning}
+    ${sharedCallbackWarning}
     <p>This application will be able to:</p>
     <ul>${scopeListHtml}</ul>
     <div class="actions">
