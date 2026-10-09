@@ -1,13 +1,13 @@
-import { ABsmartlyMCP } from "./index";
-import type { Env } from "./types";
-import { debug } from "./config";
+import { ABsmartlyMCP } from "./index.js";
+import type { Env } from "./types.js";
+import { debug } from "./config.js";
 import {
   ABsmartlyProps,
   CORS_HEADERS,
   DEFAULT_API_KEY_USER_EMAIL,
   DEFAULT_API_KEY_USER_NAME,
   detectApiKey,
-} from "./shared";
+} from "./shared.js";
 
 export class SessionProvider {
   private apiHandler: any;

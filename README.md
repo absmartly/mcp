@@ -649,11 +649,51 @@ Plus: `goaltags`, `metrictags`, `metriccategories`, `apikeys`, `permissions`, `a
 
 ---
 
+## Embedding in a Node server (`@absmartly/mcp` package)
+
+The package has separate entry points, so a Node host does not install or load the Cloudflare Worker stack:
+
+| Import | What it is | Formats |
+|---|---|---|
+| `@absmartly/mcp` (alias `@absmartly/mcp/node-http`) | `createStreamableHttpHandler`, `FetchHttpClient`, `registerServer`/`setupTools`, the command catalog, `ApiClientLike`, manifest types | ESM + CommonJS |
+| `@absmartly/mcp/oauth` | OAuth policy primitives (redirect policy, PKCE, registration, CIMD, consent) | ESM + CommonJS |
+| `@absmartly/mcp/endpoint-manifest.json` | Every backend endpoint each tool/command can call | JSON |
+| `@absmartly/mcp/worker` | The Cloudflare Worker (`default` fetch handler, `ABsmartlyMCP` Durable Object) | ESM |
+
+```ts
+import { APIClient } from "@absmartly/cli/api-client";
+import { createStreamableHttpHandler, FetchHttpClient } from "@absmartly/mcp";
+
+const mcp = createStreamableHttpHandler(async (req) => ({
+  apiClient: new APIClient(new FetchHttpClient(endpoint, { authToken, authType: "jwt" })),
+  endpoint,
+  authType: "JWT",
+}));
+app.post("/mcp", (req, res, next) => mcp.post(req, res, req.body).catch(next));
+```
+
+`FetchHttpClient` supports `authType` `"jwt"`, `"api-key"`, and `"service-key"` (with `impersonatedUserId`). It rejects absolute URLs to other origins and does not let request headers override the credential.
+
+**Dependencies.**
+- `@absmartly/cli` is a peer dependency (`>=1.7.0 <2`). The host's own copy is used, and `NodeMcpRequestContext.apiClient` is typed structurally (`ApiClientLike`), so an `APIClient` from any version in that range type-checks without a cast.
+- `hono`, `@cloudflare/workers-oauth-provider` and `agents` are optional peers that only `@absmartly/mcp/worker` needs.
+- The Node entries never import them. `hono` is still installed as a dependency of `@modelcontextprotocol/sdk`.
+
+**Migrating from 1.x.** 2.0.0 is a major release because the dependency and export surface changed:
+- `@absmartly/cli` moved from `dependencies` to `peerDependencies`, so the host must install it.
+- The Worker-only packages (`hono`, `@cloudflare/workers-oauth-provider`, `agents`) are no longer installed with the package.
+- `main` and `types` now point at the core entry.
+- `workers-mcp` and `dotenv` were removed.
+
+Existing `@absmartly/mcp`, `@absmartly/mcp/node-http` and `@absmartly/mcp/oauth` imports keep working. They now also resolve under `require`.
+
+**Contract testing.** `endpoint-manifest.json` is generated from the tool definitions and the `@absmartly/cli` build (`npm run manifest`). Its `endpoints` array lists `{ method, path }` pairs, such as `GET /v1/experiments/{id}` and `GET /auth/current-user`. Parameter names are not significant. A host can assert that each pair exists in its OpenAPI spec. `tools`, `resources` and `commands` break the list down per tool, per resource and per `execute_command` command.
+
 ## Development
 
 ### Prerequisites
 
-- Node.js 22+
+- Node.js 22.12.0+ (the CommonJS entries `require()` the ESM-only `@absmartly/cli`, which needs unflagged `require(esm)`)
 - Cloudflare account (for remote deployment)
 - ABsmartly account and API key
 
@@ -703,7 +743,10 @@ npm run build:dxt       # Build DXT extension
 
 ```
 src/
+├── core.ts               # Node/core package entry (@absmartly/mcp)
+├── worker.ts             # Worker package entry (@absmartly/mcp/worker)
 ├── index.ts              # Cloudflare Worker (OAuth, auth, resources, prompts)
+├── node-http-server.ts   # Node Streamable HTTP handler
 ├── local-server.ts       # Standalone stdio server
 ├── cli-catalog.ts        # 230+ commands mapped to CLI core functions
 ├── tools.ts              # Shared MCP tool setup (4 tools)

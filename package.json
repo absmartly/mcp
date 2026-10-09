@@ -1,37 +1,82 @@
 {
   "name": "@absmartly/mcp",
-  "version": "1.2.4",
+  "version": "2.0.0",
   "description": "MCP server for ABsmartly — experimentation platform API access for AI assistants",
-  "main": "./dist/node-http-server.js",
-  "types": "./dist/node-http-server.d.ts",
+  "main": "./dist/cjs/core.js",
+  "module": "./dist/core.js",
+  "types": "./dist/core.d.ts",
   "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "bin": {
     "absmartly-mcp": "bin/absmartly-mcp.mjs"
   },
   "exports": {
     ".": {
-      "types": "./dist/node-http-server.d.ts",
-      "import": "./dist/node-http-server.js"
+      "import": {
+        "types": "./dist/core.d.ts",
+        "default": "./dist/core.js"
+      },
+      "require": {
+        "types": "./dist/cjs/types/core.d.ts",
+        "default": "./dist/cjs/core.js"
+      },
+      "default": "./dist/core.js"
     },
     "./node-http": {
-      "types": "./dist/node-http-server.d.ts",
-      "import": "./dist/node-http-server.js"
+      "import": {
+        "types": "./dist/core.d.ts",
+        "default": "./dist/core.js"
+      },
+      "require": {
+        "types": "./dist/cjs/types/core.d.ts",
+        "default": "./dist/cjs/core.js"
+      },
+      "default": "./dist/core.js"
     },
     "./oauth": {
-      "types": "./dist/oauth/index.d.ts",
-      "import": "./dist/oauth/index.js",
+      "import": {
+        "types": "./dist/oauth/index.d.ts",
+        "default": "./dist/oauth/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/types/oauth/index.d.ts",
+        "default": "./dist/cjs/oauth.js"
+      },
       "default": "./dist/oauth/index.js"
+    },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "import": "./dist/worker.js",
+      "default": "./dist/worker.js"
+    },
+    "./endpoint-manifest.json": "./endpoint-manifest.json",
+    "./package.json": "./package.json"
+  },
+  "typesVersions": {
+    "*": {
+      "node-http": [
+        "./dist/core.d.ts"
+      ],
+      "oauth": [
+        "./dist/oauth/index.d.ts"
+      ],
+      "worker": [
+        "./dist/worker.d.ts"
+      ]
     }
   },
   "files": [
     "bin/",
     "dist/",
     "src/",
-    "public/docs/"
+    "public/docs/",
+    "endpoint-manifest.json"
   ],
   "scripts": {
     "prebuild": "node scripts/sync-version.js",
-    "build": "tsc",
+    "build": "tsc && node scripts/build-cjs.mjs && node scripts/build-cjs-types.mjs",
     "predev": "node scripts/sync-version.js",
     "dev": "wrangler dev",
     "predeploy": "node scripts/sync-version.js",
@@ -59,7 +104,10 @@
     "clean-whitespace": "find src -name '*.ts' -exec sed -i '' 's/^[[:space:]]*$//' {} +",
     "build:dxt": "mkdir -p public && dxt pack . public/absmartly-mcp.dxt",
     "upload:dxt": "./scripts/build-dxt.sh",
-    "install:dxt": "npm install -g @anthropic-ai/dxt"
+    "install:dxt": "npm install -g @anthropic-ai/dxt",
+    "manifest": "tsx scripts/endpoint-manifest.ts",
+    "manifest:check": "tsx scripts/endpoint-manifest.ts --check",
+    "check:cjs-consumer": "node scripts/check-cjs-consumer.mjs"
   },
   "keywords": [
     "mcp",
@@ -75,18 +123,35 @@
   "author": "ABsmartly",
   "license": "MIT",
   "dependencies": {
-    "@absmartly/cli": "^1.7.0",
-    "@cloudflare/workers-oauth-provider": "^0.10.3",
     "@modelcontextprotocol/sdk": "^1.27.1",
-    "agents": "^0.0.95",
-    "dotenv": "^17.0.0",
-    "hono": "^4.12.25",
-    "workers-mcp": "^0.0.13",
     "zod": "^3.25.67"
   },
+  "peerDependencies": {
+    "@absmartly/cli": ">=1.7.0 <2",
+    "@cloudflare/workers-oauth-provider": "^0.10.3",
+    "agents": "^0.0.95",
+    "hono": "^4.12.25"
+  },
+  "peerDependenciesMeta": {
+    "@cloudflare/workers-oauth-provider": {
+      "optional": true
+    },
+    "agents": {
+      "optional": true
+    },
+    "hono": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@absmartly/cli": "^1.14.0",
+    "@cloudflare/workers-oauth-provider": "^0.10.3",
     "@cloudflare/workers-types": "^4.20241106.0",
     "@types/node": "^20.11.0",
+    "agents": "^0.0.95",
+    "dotenv": "^17.0.0",
+    "esbuild": "0.27.3",
+    "hono": "^4.12.25",
     "jsonwebtoken": "^9.0.2",
     "tsx": "^4.21.0",
     "typescript": "^5.3.3",

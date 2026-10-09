@@ -1,16 +1,18 @@
 #!/usr/bin/env node
-import { execFileSync } from 'node:child_process';
+// Runs the compiled stdio server with the installed dependencies. dist/ is
+// built before every publish (see .github/workflows/npm-publish.yml), so no
+// TypeScript runner is needed or fetched at startup.
+import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const entrypoint = resolve(__dirname, '..', 'src', 'local-server.ts');
+const LOCAL_SERVER_ENTRY = ['..', 'dist', 'local-server.js'];
 
-try {
-    execFileSync('npx', ['tsx', entrypoint, ...process.argv.slice(2)], {
-        stdio: 'inherit',
-        env: process.env,
-    });
-} catch (e) {
-    process.exit(e.status || 1);
+const entrypoint = resolve(dirname(fileURLToPath(import.meta.url)), ...LOCAL_SERVER_ENTRY);
+
+if (!existsSync(entrypoint)) {
+    console.error(`absmartly-mcp: ${entrypoint} is missing; run \`npm run build\` first.`);
+    process.exit(1);
 }
+
+await import(pathToFileURL(entrypoint).href);

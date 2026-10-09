@@ -4,6 +4,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { APIClient, CustomSectionField } from "@absmartly/cli/api-client";
+import type { ApiClientLike } from "./api-client-like.js";
 import { parseExperimentMarkdown, buildPayloadFromTemplate } from "@absmartly/cli/api-client";
 import {
   CLI_GROUPS,
@@ -25,7 +26,7 @@ const USER_FIELD_TYPE = 'user';
 const ENTITY_DEPENDENT_COMMAND = 'createExperiment';
 
 export interface ToolContext {
-  apiClient: APIClient | null;
+  apiClient: ApiClientLike | null;
   endpoint: string;
   authType: string;
   email?: string;
@@ -356,7 +357,9 @@ To create experiments, use group "experiments", command "createExperimentFromTem
             if (commandParams.name) template.name = commandParams.name as string;
             if (commandParams.displayName) (template as any).display_name = commandParams.displayName as string;
             const { payload, warnings } = await buildPayloadFromTemplate(
-              ctx.apiClient,
+              // Structurally an APIClient (see ApiClientLike); the nominal type only
+              // differs by private fields when the host installs its own @absmartly/cli.
+              ctx.apiClient as APIClient,
               template,
               (commandParams.defaultType as string) || 'test',
             );

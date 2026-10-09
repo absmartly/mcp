@@ -2,7 +2,7 @@
 // Each entry stores a reference to the core function, its description, and param docs.
 // All core functions follow the signature: (client: APIClient, params: object) => Promise<CommandResult<T>>
 
-import type { APIClient } from "@absmartly/cli/api-client";
+import type { ApiClientLike } from "./api-client-like.js";
 
 // Static imports for all core modules — required for Cloudflare Workers bundling.
 import * as coreExperiments from "@absmartly/cli/core/experiments";
@@ -1373,7 +1373,7 @@ function normalizeCommandParams(
 }
 
 export async function executeCommand(
-  client: APIClient,
+  client: ApiClientLike,
   group: string,
   command: string,
   params: Record<string, unknown>,

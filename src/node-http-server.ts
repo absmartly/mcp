@@ -11,13 +11,14 @@ import type { APIClient } from "@absmartly/cli/api-client";
 import { createServerContextLoader } from "./server-context.js";
 import { registerServer } from "./register-server.js";
 import { MCP_VERSION } from "./version.js";
+import type { ApiClientLike } from "./api-client-like.js";
 
 // Bundled markdown docs (templates.md, examples.md), shipped in the package's
 // "files" as public/docs/. Resolves identically from src/ (tsx) and dist/.
 const DEFAULT_DOCS_DIR = fileURLToPath(new URL("../public/docs/api", import.meta.url));
 
 export interface NodeMcpRequestContext {
-  apiClient: APIClient;
+  apiClient: ApiClientLike;
   endpoint: string;
   authType: string;
   /** Override the bundled docs directory (defaults to DEFAULT_DOCS_DIR). */

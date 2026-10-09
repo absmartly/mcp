@@ -3,19 +3,19 @@ import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { completable } from "@modelcontextprotocol/sdk/server/completable.js";
 import { z } from "zod";
-import { ABsmartlyResources } from "./resources";
-import { ABsmartlyOAuthHandler } from "./absmartly-oauth-handler";
+import { ABsmartlyResources } from "./resources.js";
+import { ABsmartlyOAuthHandler } from "./absmartly-oauth-handler.js";
 import { SCOPE_MCP_ACCESS, SUPPORTED_SCOPES, validateClientRegistration } from "./oauth/index.js";
-import { checkBackendSessionOnRefresh, normalizeResourceParameter, protectedResourceMetadataUrl, rejectUntrustedCimdClient } from "./oauth-worker-guards";
-import { Env } from "./types";
-import { debug } from "./config";
-import { MCP_VERSION } from "./version";
-import { DXT_BUNDLE_BASE64, DXT_BUNDLE_SHA } from "./dxt-bundle";
+import { checkBackendSessionOnRefresh, normalizeResourceParameter, protectedResourceMetadataUrl, rejectUntrustedCimdClient } from "./oauth-worker-guards.js";
+import { Env } from "./types.js";
+import { debug } from "./config.js";
+import { MCP_VERSION } from "./version.js";
+import { DXT_BUNDLE_BASE64, DXT_BUNDLE_SHA } from "./dxt-bundle.js";
 import { APIClient } from "@absmartly/cli/api-client";
 import type { CustomSectionField } from "@absmartly/cli/api-client";
-import { FetchHttpClient } from "./fetch-adapter";
-import { setupTools } from "./tools";
-import type { ToolContext } from "./tools";
+import { FetchHttpClient } from "./fetch-adapter.js";
+import { setupTools } from "./tools.js";
+import type { ToolContext } from "./tools.js";
 import {
     ABsmartlyProps,
     DEFAULT_ABSMARTLY_ENDPOINT,
@@ -35,7 +35,7 @@ import {
     detectApiKey,
     safeKvPut,
     safeKvGet,
-} from "./shared";
+} from "./shared.js";
 
 const ENTITY_LIST_PAGE_SIZE = 100;
 const ENTITY_LIST_FIRST_PAGE = 1;
