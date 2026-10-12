@@ -54,7 +54,13 @@ export default async function runTests() {
     const handler = getDiscoverHandler();
     const res = await handler({ group: 'apps' });
     const text = res.content[0].text as string;
-    assert(text.includes('**Params:**'), 'small group still renders full command details');
+    const { getGroupCommands } = await import('../../src/cli-catalog');
+    const expected = getGroupCommands('apps');
+    const renderedFullEntries = (text.match(/\*\*Params:\*\*/g) || []).length;
+    const missing = expected.filter(e => !text.includes(`### ${e.group}.${e.command}\n`));
+    assert(expected.length > 1, 'apps fixture group has more than one command', `apps has ${expected.length} commands`);
+    assert(missing.length === 0, 'small group renders a heading for every command', `missing: ${missing.map(e => e.command).join(', ')}`);
+    assert(renderedFullEntries === expected.length, 'small group renders full details for every command', `rendered ${renderedFullEntries} of ${expected.length}`);
     assert(!/more|narrow/i.test(text), 'small group listing has no truncation notice');
   }
 

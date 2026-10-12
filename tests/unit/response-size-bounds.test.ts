@@ -302,7 +302,6 @@ unit_type: user_id
     assert(!text.includes('omitted'), 'small preview is not reduced');
   }
 
-  // Verify the huge-payload test still withholds confirm instruction (reduction path still works).
   {
     const hugeConfig = JSON.stringify({ payload: 'x'.repeat(MAX_RESPONSE_CHARS + 5000) });
     const template = `---
