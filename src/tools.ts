@@ -545,8 +545,7 @@ To create experiments, use group "experiments", command "createExperimentFromTem
               (commandParams.defaultType as string) || 'test',
             );
 
-            // Phase 1: Try the fully uncapped candidate (all warnings, unreduced payload, confirm instruction).
-            // If it fits, return it byte-identical to the original code's output.
+            // Return the full preview unchanged when it fits; only oversized previews are reduced.
             const uncappedWarningLines = warnings && warnings.length > 0
               ? ['', '**Warnings:**', ...warnings.map((w) => `- ${String(w)}`)]
               : [];
@@ -558,7 +557,6 @@ To create experiments, use group "experiments", command "createExperimentFromTem
               return { content: [{ type: "text" as const, text: uncappedFull }] };
             }
 
-            // Phase 2: Uncapped didn't fit — apply capping and structural reduction.
             const cappedWarningLines = warnings && warnings.length > 0
               ? ['', '**Warnings:**', ...capWarningLines(warnings)]
               : [];
@@ -594,7 +592,6 @@ To create experiments, use group "experiments", command "createExperimentFromTem
           );
         }
 
-        // Apply default items limit for list operations.
         if (params.command.startsWith('list') || params.command.startsWith('search')) {
           applyDefaultPagination(entry, commandParams, params.limit);
         }
@@ -628,7 +625,7 @@ To create experiments, use group "experiments", command "createExperimentFromTem
       } catch (error: any) {
         const errorMsg = error instanceof Error ? error.message : String(error);
 
-        // Phase 1: Build fully uncapped output (all errors, no clipping, no structural reduction).
+        // Return the full error unchanged when it fits; only oversized errors are clipped and reduced.
         const uncappedParts: string[] = [`Error executing ${params.group}.${params.command}: ${errorMsg}`];
         if (error.statusCode) {
           uncappedParts.push(`\nHTTP Status: ${error.statusCode}`);
@@ -656,13 +653,11 @@ To create experiments, use group "experiments", command "createExperimentFromTem
 
         const uncappedBody = uncappedParts.join('') + errorFooter;
 
-        // Phase 1: Try the fully uncapped output. If it fits, return it byte-identical.
         if (uncappedBody.length <= MAX_RESPONSE_CHARS) {
           ctx.log?.('error', uncappedParts[0]);
           return { content: [{ type: "text" as const, text: uncappedBody }] };
         }
 
-        // Phase 2: Uncapped didn't fit — rebuild with capping and structural reduction.
         const cappedParts: string[] = [`Error executing ${params.group}.${params.command}: ${clampText(errorMsg, MAX_ERROR_MESSAGE_CHARS)}`];
         if (error.statusCode) {
           cappedParts.push(`\nHTTP Status: ${error.statusCode}`);

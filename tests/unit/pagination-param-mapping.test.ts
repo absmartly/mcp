@@ -80,11 +80,8 @@ export default async function runTests() {
       'listEvents does not get a top-level page key injected onto its catch-all params', JSON.stringify(commandParams));
   }
 
-  // A command whose catalog entry says params: [] but whose CLI core function actually reads
-  // params.items/params.page directly (apps.listApps) DOES get the default injected end-to-end.
-  // This is the exact regression scenario the Critical final-review finding identified: Task 2's
-  // guard reads the catalog's declared params, and the catalog previously omitted items/page for
-  // this command even though the core function consumes them.
+  // apps.listApps reads params.items/params.page in the CLI core, so its catalog entry must declare
+  // them for the declared-params guard to inject the default end-to-end.
   {
     let capturedCall: any;
     const client = { listApplications: async (opts: any) => { capturedCall = opts; return []; } } as any;
