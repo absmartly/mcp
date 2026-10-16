@@ -847,9 +847,9 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
       updateUser: { description: 'Update a user', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated user' },
       archiveUser: { description: 'Archive a user', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }], returns: 'Archive result', dangerous: true },
       resetUserPassword: { description: 'Reset a user password', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }], returns: 'Reset result', dangerous: true },
-      listUserApiKeys: { description: 'List API keys for a user', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }], returns: 'Array of API keys' },
-      createUserApiKey: { description: 'Create an API key for a user', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }, { name: 'data', type: 'object', required: false, description: 'Key data' }], returns: 'Created API key' },
-      deleteUserApiKey: { description: 'Delete a user API key', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }, { name: 'keyId', type: 'number', required: true, description: 'API key ID' }], returns: 'Deletion result', dangerous: true },
+      listUserApiKeys: { description: 'List API keys for a user', params: [{ name: 'userId', type: 'string', required: true, description: 'User ID or email' }], returns: 'Array of API keys' },
+      createUserApiKey: { description: 'Create an API key for a user', params: [{ name: 'userId', type: 'string', required: true, description: 'User ID or email' }, { name: 'data', type: 'object', required: false, description: 'Key data' }], returns: 'Created API key' },
+      deleteUserApiKey: { description: 'Delete a user API key', params: [{ name: 'userId', type: 'string', required: true, description: 'User ID or email' }, { name: 'keyId', type: 'number', required: true, description: 'API key ID' }], returns: 'Deletion result', dangerous: true },
     },
   },
 
@@ -1226,7 +1226,11 @@ export function validateCommandParams(
   // it is reported as unknown.
   const bagParam = entry.params.find((p) => p.name === PARAMS_PARAM && p.deprecated);
   let checked = provided;
-  if (bagParam && provided[PARAMS_PARAM] !== undefined) {
+  // `params: null` means no filters, as it does at dispatch.
+  if (bagParam && provided[PARAMS_PARAM] === null) {
+    const { [PARAMS_PARAM]: _null, ...rest } = provided;
+    checked = rest;
+  } else if (bagParam && provided[PARAMS_PARAM] !== undefined) {
     const bag = provided[PARAMS_PARAM];
     if (!isRecord(bag)) {
       return [`Param "${PARAMS_PARAM}" for ${entry.group}.${entry.command} must be an object.`];
@@ -1248,7 +1252,7 @@ export function validateCommandParams(
     if (p.required && checked[p.name] === undefined) {
       errors.push(`Missing required param "${p.name}" (${p.type}) for ${entry.group}.${entry.command}: ${p.description}`);
     }
-    if (p.type === 'number' && ID_PARAM_NAME.test(p.name) && checked[p.name] !== undefined && !isPositiveIntegerId(checked[p.name])) {
+    if (p.type === 'number' && !p.deprecated && ID_PARAM_NAME.test(p.name) && checked[p.name] !== undefined && !isPositiveIntegerId(checked[p.name])) {
       errors.push(`Param "${p.name}" for ${entry.group}.${entry.command} must be a positive integer ID.`);
     }
   }
@@ -1438,6 +1442,10 @@ function rename(params: Record<string, unknown>, from: string, to: string): Reco
 /** Spreads a nested object param into the top level. Top-level keys win. */
 function flatten(params: Record<string, unknown>, key: string): Record<string, unknown> {
   const nested = params[key];
+  if (nested === null) {
+    const { [key]: _null, ...rest } = params;
+    return rest;
+  }
   if (!isRecord(nested)) return params;
   const { [key]: _nested, ...rest } = params;
   return { ...nested, ...rest };
@@ -1491,8 +1499,10 @@ function configEntityAdapters(entityIdParam: string, commands: {
   return out;
 }
 
-function toNumberIfNumeric(value: unknown): unknown {
-  return typeof value === 'string' && value.trim() !== '' && !Number.isNaN(Number(value)) ? Number(value) : value;
+/** A positive integer, from a number or a plain digit string ("12"); otherwise undefined. */
+function toPositiveInteger(value: unknown): number | undefined {
+  const n = typeof value === 'number' ? value : typeof value === 'string' && POSITIVE_INTEGER.test(value) ? Number(value) : NaN;
+  return Number.isSafeInteger(n) && n > 0 ? n : undefined;
 }
 
 /** users.*ApiKey core functions resolve a user by `userRef` (an ID string or an email). */
@@ -1687,7 +1697,10 @@ function bulkRunner(command: typeof BULK_COMMANDS[number]): CommandRunner {
     if (required !== undefined && params[required] === undefined) {
       throw new Error(`experiments.${command} requires "${required}"`);
     }
-    const ids = Array.isArray(params.ids) ? params.ids.map(toNumberIfNumeric) : [];
+    const ids = Array.isArray(params.ids) ? params.ids.map(toPositiveInteger) : [];
+    if (ids.some((id) => id === undefined)) {
+      throw new Error(`experiments.${command}: "ids" must be positive integer experiment IDs`);
+    }
     const extra = BULK_EXTRA_ARGS[command].map((name) => params[name]);
     return experimentsCore[command](client, ids, new Map(), ...extra);
   };
@@ -1715,8 +1728,11 @@ async function listAllAssetRoles(client: ApiClientLike): Promise<Array<{ id: num
 
 /** Resolves an asset role given by ID or by name. */
 async function resolveAssetRoleId(client: ApiClientLike, role: unknown): Promise<unknown> {
-  const numeric = toNumberIfNumeric(role);
-  if (typeof numeric === 'number') return numeric;
+  const id = toPositiveInteger(role);
+  if (id !== undefined) return id;
+  if (typeof role !== 'string' || role.trim() === '') {
+    throw new Error(`Asset role must be a positive integer ID or a role name: ${JSON.stringify(role)}`);
+  }
   const data = await listAllAssetRoles(client);
   const wanted = String(role).toLowerCase();
   const match = data.find((r) => r.name?.toLowerCase() === wanted);
@@ -1768,8 +1784,11 @@ function datasourceRunner(command: string): CommandRunner {
 
 /** Resolves a platform config given by numeric ID or by its name (e.g. "experiment_form_team_visibility"). */
 async function resolvePlatformConfigId(client: ApiClientLike, configKey: unknown): Promise<unknown> {
-  const numeric = toNumberIfNumeric(configKey);
-  if (typeof numeric === 'number') return numeric;
+  const id = toPositiveInteger(configKey);
+  if (id !== undefined) return id;
+  if (typeof configKey !== 'string' || configKey.trim() === '') {
+    throw new Error(`Platform config must be a positive integer ID or a config name: ${JSON.stringify(configKey)}`);
+  }
   const { data } = await CORE_MODULES.platformconfig.listPlatformConfigs(client) as { data: Array<{ id: number; name?: string }> };
   const match = data.find((c) => c.name === configKey);
   if (!match) throw new Error(`Platform config "${String(configKey)}" not found`);
@@ -1787,7 +1806,7 @@ const EXPERIMENT_RUNNERS: Record<string, CommandRunner> = {
     experimentsCore.createExperiment(client, isRecord(params.data) ? params.data : {}),
   // core cloneExperiment(client, payload, sourceId) expects a payload built by buildClonePayload.
   cloneExperiment: async (client, params) => {
-    const experimentId = toNumberIfNumeric(params.experimentId);
+    const experimentId = toPositiveInteger(params.experimentId);
     const { payload, warnings } = await experimentsCore.buildClonePayload(client, {
       ...params,
       experimentId,

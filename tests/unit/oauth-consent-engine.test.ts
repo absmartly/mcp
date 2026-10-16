@@ -207,6 +207,29 @@ export default async function run() {
     assert.strictEqual(seen.length, 2, 'onApprove must be called again on retry');
   });
 
+  await asyncTest('an invalid endpoint entering consent is rejected with 400 "Invalid ABsmartly endpoint"', async () => {
+    const store = memoryStore();
+    const extra: Partial<ConsentOptions> = { requireEndpoint: true };
+    for (const endpoint of ['https://acme.absmartly.com/v2', 'ftp://acme.absmartly.com', 'https://u:p@acme.absmartly.com', 'https://acme.absmartly.com/?x=1']) {
+      const begin = await beginAuthorization({ authRequest: request(), endpoint, cookieHeader: null }, options(store, extra));
+      assert.ok(begin.type === 'respond' && begin.response.status === 400 && begin.response.body === 'Invalid ABsmartly endpoint', `begin: ${endpoint}`);
+    }
+    const { transactionId, cookie } = await start(store, extra);
+    const set = await submitConsent({ form: { action: 'set_endpoint', transactionId, endpoint: 'https://acme.absmartly.com/v3' }, cookieHeader: cookie }, options(store, extra));
+    assert.ok(set.type === 'respond' && set.response.status === 400 && set.response.body === 'Invalid ABsmartly endpoint', 'set_endpoint rejects an invalid endpoint');
+    const empty = await submitConsent({ form: { action: 'set_endpoint', transactionId, endpoint: '  ' }, cookieHeader: cookie }, options(store, extra));
+    assert.ok(empty.type === 'respond' && empty.response.status === 400 && empty.response.body === 'ABsmartly endpoint is required', 'an empty endpoint is still "required"');
+  });
+
+  await asyncTest('a valid endpoint entering consent is stored in canonical form', async () => {
+    const store = memoryStore();
+    const extra: Partial<ConsentOptions> = { requireEndpoint: true };
+    const { transactionId, cookie } = await start(store, extra);
+    await submitConsent({ form: { action: 'set_endpoint', transactionId, endpoint: ' acme.absmartly.com/v1/ ' }, cookieHeader: cookie }, options(store, extra));
+    const stored = JSON.parse(store.data.get(`oauth:consent:${transactionId}`) ?? [...store.data.values()].find((v) => v.includes('absmartlyEndpoint')) ?? '{}');
+    assert.strictEqual(stored.absmartlyEndpoint, 'https://acme.absmartly.com');
+  });
+
   return {
     success: failed === 0,
     message: `${passed} passed, ${failed} failed`,

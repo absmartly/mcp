@@ -17,6 +17,8 @@ import {
   type ConsentOptions,
   type ConsentOutcome,
   type OAuthStateStore,
+  MESSAGE_INVALID_ENDPOINT,
+  parseAbsmartlyEndpoint,
 } from './oauth/index.js';
 
 type OAuthBindings = Env & { OAUTH_PROVIDER: OAuthHelpers };
@@ -197,7 +199,13 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
         debug('No absmartlyEndpoint in stored state');
         return c.text('Missing ABsmartly endpoint in OAuth state', 400);
       }
-      const cleanEndpoint = absmartlyEndpoint.replace(/\/+$/, '');
+      let parsedEndpoint;
+      try {
+        parsedEndpoint = parseAbsmartlyEndpoint(absmartlyEndpoint);
+      } catch {
+        return c.text(MESSAGE_INVALID_ENDPOINT, HTTP_STATUS_BAD_REQUEST);
+      }
+      const cleanEndpoint = parsedEndpoint.baseUrl;
       const tokenUrl = `${cleanEndpoint}/auth/oauth/token`;
       const tokenBody = new URLSearchParams({
         grant_type: 'authorization_code',
@@ -271,7 +279,7 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
 
       debug('Extracted user details:', { email: finalEmail, name: finalName, userId: finalUserId });
 
-      const apiEndpoint = cleanEndpoint.endsWith('/v1') ? cleanEndpoint : `${cleanEndpoint}/v1`;
+      const apiEndpoint = parsedEndpoint.apiUrl;
 
       let result;
       try {
@@ -305,7 +313,7 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
 
     debug(`ABsmartly endpoint for OAuth redirect: ${absmartlyEndpoint}`);
 
-    const cleanEndpoint = absmartlyEndpoint.replace(/\/+$/, '');
+    const cleanEndpoint = parseAbsmartlyEndpoint(absmartlyEndpoint).baseUrl;
     const { codeVerifier, codeChallenge } = await generatePkcePair();
     const stateToken = crypto.randomUUID();
     const browserBinding = crypto.randomUUID();

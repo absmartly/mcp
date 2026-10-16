@@ -25,6 +25,7 @@ import {
 } from "./http.js";
 import { renderConsentPage, renderEndpointForm } from "./pages.js";
 import { hasRequiredPkce } from "./pkce.js";
+import { isValidAbsmartlyEndpoint, MESSAGE_INVALID_ENDPOINT, parseAbsmartlyEndpoint } from "./endpoint.js";
 import { describeRedirectTarget, isAllowedRedirectUri, isLoopbackRedirectUri, isRegisteredRedirectUri, isSharedCallbackRedirectUri } from "./redirect-policy.js";
 
 const APPROVALS_STATE_KEY_PREFIX = "oauth:approvals:";
@@ -33,8 +34,6 @@ const HTTP_STATUS_SERVICE_UNAVAILABLE = 503;
 const ACTION_APPROVE = "approve";
 const ACTION_CANCEL = "cancel";
 const ACTION_SET_ENDPOINT = "set_endpoint";
-const HTTP_SCHEME = "http://";
-const HTTPS_SCHEME = "https://";
 
 export type AuthorizationRequest = {
   responseType: string;
@@ -102,12 +101,12 @@ function respond<Req extends AuthorizationRequest>(response: OAuthHttpResult): C
   return { type: "respond", response };
 }
 
+/**
+ * The canonical form of an ABsmartly endpoint (origin + base path, no API
+ * version), or "" when it is empty or invalid. See parseAbsmartlyEndpoint.
+ */
 export function normalizeEndpoint(raw: string): string {
-  let endpoint = raw.trim().replace(/\/+$/, "");
-  if (endpoint && !endpoint.startsWith(HTTP_SCHEME) && !endpoint.startsWith(HTTPS_SCHEME)) {
-    endpoint = HTTPS_SCHEME + endpoint;
-  }
-  return endpoint;
+  return isValidAbsmartlyEndpoint(raw) ? parseAbsmartlyEndpoint(raw).baseUrl : "";
 }
 
 // Checks an authorization request against its client. The provider libraries only check
@@ -211,7 +210,13 @@ export async function beginAuthorization<Req extends AuthorizationRequest>(
   params: { authRequest: Req; endpoint: string | null; cookieHeader: string | null | undefined },
   options: ConsentOptions,
 ): Promise<ConsentOutcome<Req>> {
-  const { authRequest, endpoint, cookieHeader } = params;
+  const { authRequest, cookieHeader } = params;
+  // An endpoint from the request or a stored client mapping is validated here,
+  // where it enters consent, and kept in its canonical form.
+  if (params.endpoint && !isValidAbsmartlyEndpoint(params.endpoint)) {
+    return respond(textResult(HTTP_STATUS_BAD_REQUEST, MESSAGE_INVALID_ENDPOINT));
+  }
+  const endpoint = params.endpoint ? normalizeEndpoint(params.endpoint) : null;
   const client = await options.lookupClient(authRequest.clientId);
   const invalid = validateAuthorizationRequest(authRequest, client);
   if (invalid || !client) return respond(invalid ?? textResult(HTTP_STATUS_BAD_REQUEST, MESSAGE_CLIENT_NOT_FOUND));
@@ -271,8 +276,9 @@ export async function submitConsent<Req extends AuthorizationRequest>(
   }
 
   if (form.action === ACTION_SET_ENDPOINT) {
+    if (!(form.endpoint || "").trim()) return respond(textResult(HTTP_STATUS_BAD_REQUEST, MESSAGE_ENDPOINT_REQUIRED));
     const endpoint = normalizeEndpoint(form.endpoint || "");
-    if (!endpoint) return respond(textResult(HTTP_STATUS_BAD_REQUEST, MESSAGE_ENDPOINT_REQUIRED));
+    if (!endpoint) return respond(textResult(HTTP_STATUS_BAD_REQUEST, MESSAGE_INVALID_ENDPOINT));
     transaction.absmartlyEndpoint = endpoint;
     try {
       await options.store.put(`${CONSENT_STATE_KEY_PREFIX}${transactionId}`, JSON.stringify(transaction), CONSENT_TTL_SECONDS);

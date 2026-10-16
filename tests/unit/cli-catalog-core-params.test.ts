@@ -160,6 +160,49 @@ const CASES: Case[] = [
     select: (requests) => requests.map(({ method, url }) => ({ method, url })),
     expectedErrorPrefix: 'Asset role "Missing" not found',
     expected: [{ method: 'GET', url: '/asset_roles' }, { method: 'GET', url: '/asset_roles' }] },
+  { name: 'listUserApiKeys resolves an email userId', group: 'users', command: 'listUserApiKeys', params: { userId: 'jane@example.com' },
+    respond: (config) => (config.url === '/users' ? { users: [{ id: 42, email: 'jane@example.com' }] } : { user_api_keys: [] }),
+    select: (requests) => requests.filter((r) => r.url.includes('/api_keys')).map(({ method, url }) => ({ method, url })),
+    expected: [{ method: 'GET', url: '/users/42/api_keys' }] },
+  { name: 'listEvents treats params: null as no filters', group: 'events', command: 'listEvents', params: { params: null },
+    // take: 100 is the core's default page size (@absmartly/cli >= 1.16).
+    expected: [{ method: 'POST', url: '/events', data: { take: 100 } }] },
+  { name: 'grantExperimentAccessUser does not put role 1.5 into a path', group: 'experiments', command: 'grantExperimentAccessUser',
+    params: { experimentId: 3, userId: 2, role: '1.5' },
+    respond: (config) => (config.url === '/asset_roles' ? { asset_roles: [{ id: 5, name: 'Editor' }] } : {}),
+    select: (requests) => requests.filter((r) => r.method !== 'GET'),
+    expectedErrorPrefix: 'Asset role "1.5" not found', expected: [] },
+  { name: 'grantExperimentAccessUser does not put role -3 into a path', group: 'experiments', command: 'grantExperimentAccessUser',
+    params: { experimentId: 3, userId: 2, role: '-3' },
+    respond: (config) => (config.url === '/asset_roles' ? { asset_roles: [{ id: 5, name: 'Editor' }] } : {}),
+    select: (requests) => requests.filter((r) => r.method !== 'GET'),
+    expectedErrorPrefix: 'Asset role "-3" not found', expected: [] },
+  { name: 'grantExperimentAccessUser does not put role Infinity into a path', group: 'experiments', command: 'grantExperimentAccessUser',
+    params: { experimentId: 3, userId: 2, role: 'Infinity' },
+    respond: (config) => (config.url === '/asset_roles' ? { asset_roles: [{ id: 5, name: 'Editor' }] } : {}),
+    select: (requests) => requests.filter((r) => r.method !== 'GET'),
+    expectedErrorPrefix: 'Asset role "Infinity" not found', expected: [] },
+  { name: 'grantExperimentAccessUser does not put role 1e3 into a path', group: 'experiments', command: 'grantExperimentAccessUser',
+    params: { experimentId: 3, userId: 2, role: '1e3' },
+    respond: (config) => (config.url === '/asset_roles' ? { asset_roles: [{ id: 5, name: 'Editor' }] } : {}),
+    select: (requests) => requests.filter((r) => r.method !== 'GET'),
+    expectedErrorPrefix: 'Asset role "1e3" not found', expected: [] },
+  { name: 'grantExperimentAccessUser does not put role 0x10 into a path', group: 'experiments', command: 'grantExperimentAccessUser',
+    params: { experimentId: 3, userId: 2, role: '0x10' },
+    respond: (config) => (config.url === '/asset_roles' ? { asset_roles: [{ id: 5, name: 'Editor' }] } : {}),
+    select: (requests) => requests.filter((r) => r.method !== 'GET'),
+    expectedErrorPrefix: 'Asset role "0x10" not found', expected: [] },
+  { name: 'grantExperimentAccessUser does not put role 0 into a path', group: 'experiments', command: 'grantExperimentAccessUser',
+    params: { experimentId: 3, userId: 2, role: '0' },
+    respond: (config) => (config.url === '/asset_roles' ? { asset_roles: [{ id: 5, name: 'Editor' }] } : {}),
+    select: (requests) => requests.filter((r) => r.method !== 'GET'),
+    expectedErrorPrefix: 'Asset role "0" not found', expected: [] },
+  { name: 'getPlatformConfig resolves a non-integer configKey by name, never as an ID', group: 'platformconfig', command: 'getPlatformConfig',
+    params: { configKey: '1e3' },
+    respond: (config) => (config.url === '/configs' ? { configs: [{ id: 1000, name: 'other' }] } : { config: {} }),
+    expectedError: 'Platform config "1e3" not found', expected: [{ method: 'GET', url: '/configs' }] },
+  { name: 'bulkStart rejects non-integer ids before any request', group: 'experiments', command: 'bulkStart', params: { ids: [1, '2.5'] },
+    expectedError: 'experiments.bulkStart: "ids" must be positive integer experiment IDs', expected: [] },
   { name: 'grantExperimentAccessUser without role fails before any request', group: 'experiments', command: 'grantExperimentAccessUser',
     params: { experimentId: 3, userId: 2 },
     expectedError: 'experiments.grantExperimentAccessUser requires "role" (an asset role ID or name)', expected: [] },
@@ -563,6 +606,26 @@ export default async function runTests() {
       validateCommandParams(getCommandEntry('experiments', 'diffExperimentsCore')!, { experimentId1: 1, experimentId2: '../2' }),
       ['Param "experimentId2" for experiments.diffExperimentsCore must be a positive integer ID.'],
       'numbered ID params are checked too',
+    );
+  }
+
+  // userId on the user API-key commands is a ref (ID or email); deprecated
+  // "Ignored" params are not checked as IDs either.
+  {
+    for (const command of ['listUserApiKeys', 'createUserApiKey', 'deleteUserApiKey']) {
+      const params: Record<string, unknown> = { userId: 'jane@example.com' };
+      if (command === 'deleteUserApiKey') params.keyId = 3;
+      assertEquals(validateCommandParams(getCommandEntry('users', command)!, params), [], `users.${command}: userId accepts an email`);
+    }
+    assertEquals(
+      validateCommandParams(getCommandEntry('experiments', 'dismissAlert')!, { alertId: 4, experimentId: 'legacy' }),
+      [],
+      'a deprecated experimentId is not checked as an ID',
+    );
+    assertEquals(
+      validateCommandParams(getCommandEntry('events', 'listEvents')!, { params: null }),
+      [],
+      'params: null is accepted for legacy-bag commands',
     );
   }
 

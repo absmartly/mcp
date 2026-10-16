@@ -7,6 +7,7 @@ export * from "./pkce.js";
 export * from "./registration.js";
 export * from "./cimd.js";
 export * from "./consent.js";
+export * from "./endpoint.js";
 export * from "./pages.js";
 export * from "./http.js";
 export { escapeHtml, HTML_ESCAPE_MAP } from "./html.js";

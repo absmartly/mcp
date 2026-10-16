@@ -357,6 +357,52 @@ export default async function runTests() {
     restoreFetch();
   });
 
+  await asyncTest('Base path with "@": root auth calls still work (userinfo is checked on the parsed URL)', async () => {
+    const http = new FetchHttpClient('https://h.example/@team', { authToken: 'tok', authType: 'jwt' });
+    const urls: string[] = [];
+    mockFetch(async (url) => { urls.push(String(url)); return new Response(JSON.stringify({ user: { id: 1 }, user_api_key: { id: 1 }, user_api_keys: [] }), { headers: { 'content-type': 'application/json' } }); });
+    const api = new APIClient(http);
+    await api.getCurrentUser();
+    await api.getUserApiKey(7 as any);
+    await http.request({ method: 'GET', url: '/experiments' });
+    assertEquals(urls, [
+      'https://h.example/@team/auth/current-user',
+      'https://h.example/@team/auth/current-user/api_keys/7',
+      'https://h.example/@team/v1/experiments',
+    ], 'Base path with "@": root auth and /v1 requests keep the base path');
+    let threw = false;
+    try { await http.request({ method: 'GET', url: 'https://x@h.example/@team/auth/current-user' }); } catch { threw = true; }
+    ok(threw, 'Base path with "@": an absolute URL with real userinfo is still rejected');
+    restoreFetch();
+  });
+
+  await asyncTest('Query: a literal "#" in a decoded value is kept; "\\" and control characters are rejected', async () => {
+    const client = new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'jwt' });
+    const urls: string[] = [];
+    mockFetch(async (url) => { urls.push(String(url)); return new Response('{}', { headers: { 'content-type': 'application/json' } }); });
+    await client.request({ method: 'GET', url: '/experiments?search=#1' });
+    await new APIClient(client).rawRequest('/experiments?search=%231');
+    assertEquals(urls, [
+      'https://example.com/v1/experiments?search=%231',
+      'https://example.com/v1/experiments?search=%231',
+    ], 'Query: "#" round-trips as %23');
+    for (const bad of ['/experiments?x=a\\b', '/experiments?x=a\u0000b', '/experiments?x=a\nb']) {
+      let threw = false;
+      try { await client.request({ method: 'GET', url: bad }); } catch { threw = true; }
+      ok(threw, `Query: ${JSON.stringify(bad)} rejected`);
+    }
+    restoreFetch();
+  });
+
+  await asyncTest('Malformed absolute URLs give "Invalid API path", not a URL TypeError', async () => {
+    const client = new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'jwt' });
+    for (const bad of ['https://', 'https://:80/auth/current-user', 'https://[::1/auth/current-user']) {
+      let message = '';
+      try { await client.request({ method: 'GET', url: bad }); } catch (e: any) { message = e.message; }
+      ok(message.startsWith('Invalid API path'), `Malformed absolute ${JSON.stringify(bad)} gives Invalid API path`, message);
+    }
+  });
+
   await asyncTest('Base URL: parsed first; /v1 stripped; scheme defaults to https', async () => {
     for (const [input, expected] of [
       ['https://example.com/v1', 'https://example.com/v1'],

@@ -123,6 +123,16 @@ export default async function run() {
     });
   });
 
+  await asyncTest('a stored endpoint that no longer parses fails with a clear invalid-endpoint grant error', async () => {
+    await withFetch(200, async (calls) => {
+      await assert.rejects(
+        checkBackendSessionOnRefresh(refreshOptions({ props: { oauth_jwt: 'backend-jwt', absmartly_endpoint: 'https://demo.absmartly.com/v2' } }), OAuthError as any),
+        (e: any) => e instanceof OAuthError && e.code === 'invalid_grant' && /Invalid ABsmartly endpoint/.test(e.description ?? e.message),
+      );
+      assert.deepStrictEqual(calls, [], 'no request is made to an invalid endpoint');
+    });
+  });
+
   await asyncTest('backend 5xx or network failure is temporary, not invalid_grant', async () => {
     for (const status of [502, 'throw'] as const) {
       await withFetch(status, async () => {

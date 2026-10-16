@@ -42,9 +42,8 @@ export type ABsmartlyProps = {
   user_id: string;
 };
 
-export function normalizeBaseUrl(endpoint: string): string {
-  return endpoint.replace(/\/$/, '').replace(/\/v1$/, '');
-}
+export const HTTP_STATUS_BAD_REQUEST = 400;
+export const VERIFY_ERROR_INVALID_ENDPOINT = 'invalid_endpoint';
 
 export function buildAuthHeader(authToken: string, isApiKey: boolean): Record<string, string> {
   const authType = isApiKey ? 'Api-Key' : 'JWT';
