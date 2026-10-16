@@ -516,6 +516,17 @@ export default async function runTests() {
       'insights: a legacy params bag missing filters still fails validation',
     );
     assertEquals(
+      validateCommandParams(insights, { params: { from: '2026-01-01', to: '2026-02-01', aggregation: 'week', tems: 'Growth' } })
+        .some((e) => e.startsWith('Unknown param "tems"') && e.includes('Did you mean "teams"?')),
+      true,
+      'insights: a typo inside the legacy params bag is reported as unknown',
+    );
+    assertEquals(
+      validateCommandParams(getCommandEntry('events', 'listEvents')!, { params: { take: 10 }, skip: 5 }),
+      [],
+      'events: legacy bag and top-level filters can be mixed',
+    );
+    assertEquals(
       getCommandEntry('experiments', 'restartExperiment')!.params.some((p) => p.name === 'defaultType'),
       false,
       'restartExperiment does not document defaultType, which the core never reads',

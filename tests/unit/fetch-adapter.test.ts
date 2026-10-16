@@ -229,14 +229,12 @@ export default async function runTests() {
   const ESCAPING_PATHS = [
     '/../auth/current-user',
     '/experiments/../../auth/current-user',
-    '/./experiments',
     '/%2e%2e/auth/current-user',
     '/%2E%2E/auth/current-user',
     '/.%2e/auth/current-user',
     '/%2e./auth/current-user',
     '/%252e%252e/auth/current-user',
     '/%25252e%25252e/auth/current-user',
-    '/experiments/%2e',
     '/..\\auth/current-user',
     '/\\..\\auth/current-user',
     '/experiments%2f..%2f..%2fauth',
@@ -247,6 +245,21 @@ export default async function runTests() {
     'experiments',
     '/experiments\u0000',
     '/experiments#frag',
+    '/experiments#',
+    '/.. /auth/current-user',
+    '/experiments/.. /..%20/auth/current-user',
+    '/%2e%2e%ff/auth/current-user',
+    '/%ff%2e%2e/auth/current-user',
+    '/x%EF%BC%8F..%EF%BC%8F..%EF%BC%8Fauth',
+    '/x\uFF0F..\uFF0F..\uFF0Fauth',
+    '/x%EF%BC%BC..%EF%BC%BCauth',
+    '/..%3f/auth/current-user',
+    '/..%23/auth/current-user',
+    '/experiments;jsessionid=1',
+    '/goals/50%25off',
+    '/goals/50%off',
+    '/experiments/%41%42%3B',
+    '/experiments\t/../../auth',
     '/experiments/..;/auth/current-user',
     '/experiments/%2e%2e;x/admin',
     '/\uFF0E\uFF0E/auth/current-user',
@@ -268,7 +281,6 @@ export default async function runTests() {
   }
 
   const ESCAPING_ABSOLUTE_URLS = [
-    'https://example.com/v1/../auth/current-user/api_keys',
     'https://example.com/v1/%2e%2e/admin',
     'https://example.com/admin',
     'https://example.com/auth/other',
@@ -278,6 +290,10 @@ export default async function runTests() {
     'https://example.com/v1/%2e%2e%2fadmin',
     'https://example.com/v1/x?y=1#frag',
     'https://user:pw@example.com/v1/x',
+    'https://example.com/v1/x#',
+    'https://example.com/auth/current-user/other',
+    'https://example.com/auth/current-user/api_keys/abc',
+    'https://example.com/v1/../../admin',
     'https://example.com/v1/..;/admin',
   ];
   for (const url of ESCAPING_ABSOLUTE_URLS) {
@@ -298,19 +314,81 @@ export default async function runTests() {
     mockFetch(async (url) => { urls.push(String(url)); return new Response('{}', { headers: { 'content-type': 'application/json' } }); });
     await client.request({ method: 'GET', url: '/experiments/42', params: { q: '../x' } });
     await client.request({ method: 'GET', url: '/experiments/' });
-    await client.request({ method: 'GET', url: '/goals/50%25off' });
-    await client.request({ method: 'GET', url: '/goals/50%off' });
     await client.request({ method: 'GET', url: '/experiments?state=running', params: { items: 5 } });
     await client.request({ method: 'GET', url: 'https://example.com/base/auth/current-user/api_keys/7' });
     assertEquals(urls, [
       'https://example.com/base/v1/experiments/42?q=..%2Fx',
       'https://example.com/base/v1/experiments/',
-      'https://example.com/base/v1/goals/50%25off',
-      'https://example.com/base/v1/goals/50%off',
       'https://example.com/base/v1/experiments?state=running&items=5',
       'https://example.com/base/auth/current-user/api_keys/7',
     ], 'Path hardening: allowed URLs are unchanged');
     restoreFetch();
+  });
+
+  await asyncTest('Path hardening: dot segments that resolve inside /v1 stay inside /v1', async () => {
+    const client = new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'jwt' });
+    const urls: string[] = [];
+    mockFetch(async (url) => { urls.push(String(url)); return new Response('{}', { headers: { 'content-type': 'application/json' } }); });
+    for (const path of ['/./experiments', '/experiments/%2e', '/experiments/x/../1']) {
+      await client.request({ method: 'GET', url: path });
+    }
+    assertEquals(urls, [
+      'https://example.com/v1/experiments',
+      'https://example.com/v1/experiments/',
+      'https://example.com/v1/experiments/1',
+    ], 'Path hardening: in-prefix dot segments resolve within /v1');
+    restoreFetch();
+  });
+
+  await asyncTest('Base URL: /v1, /V2 and trailing slashes are stripped; query, fragment and userinfo rejected', async () => {
+    for (const [input, expected] of [
+      ['https://example.com/v1', 'https://example.com/v1'],
+      ['https://example.com/V2/', 'https://example.com/v1'],
+      ['  https://example.com/tenant/v1/  ', 'https://example.com/tenant/v1'],
+      ['https://example.com/tenant', 'https://example.com/tenant/v1'],
+    ]) {
+      assertEquals(new FetchHttpClient(input, { authToken: 't', authType: 'jwt' }).getBaseUrl(), expected, `Base URL: ${input}`);
+    }
+    for (const bad of ['https://example.com/?x=1', 'https://example.com/#f', 'https://u:p@example.com', 'ftp://example.com', 'https://example.com/a;b']) {
+      let threw = false;
+      try { new FetchHttpClient(bad, { authToken: 't', authType: 'jwt' }); } catch { threw = true; }
+      ok(threw, `Base URL: ${bad} rejected`);
+    }
+  });
+
+  // Property test: strings over the dangerous alphabet must either be rejected
+  // before fetch, or be fetched at a same-origin URL under the allowed prefix.
+  await asyncTest('Path hardening: random dangerous strings never leave the allowed prefix', async () => {
+    const ALPHABET = ['.', '..', '/', '\\', '%', '%2e', '%2E', '%2f', '%2F', '%5c', '%25', '%3f', '%23', '%3b', '%00', '%ff', '%EF%BC%8E',
+      ';', '?', '#', ' ', '\t', '\n', '@', ':', 'a', 'v1', 'auth', 'current-user', 'api_keys', '1', '\uFF0E', '\uFF0F', '\uFF3C', '\u2024', '~', '-', '_'];
+    let seed = 0x5eed;
+    const rand = (n: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+    const bases = ['https://example.com', 'https://example.com/tenant'];
+    let leaks: string[] = [];
+    let fetchedCount = 0;
+    for (let i = 0; i < 6000; i++) {
+      const base = bases[i % 2];
+      const prefix = new URL(base).pathname.replace(/\/$/, '');
+      const body = Array.from({ length: 1 + rand(10) }, () => ALPHABET[rand(ALPHABET.length)]).join('');
+      const candidates = [`/${body}`, `${base}/${body}`, `${base}/v1/${body}`, `${base}/auth/current-user/${body}`, `/experiments/${body}`];
+      for (const requested of candidates) {
+        const client = new FetchHttpClient(base, { authToken: 't', authType: 'jwt' });
+        let fetched = '';
+        mockFetch(async (url) => { fetched = String(url); return new Response('{}', { headers: { 'content-type': 'application/json' } }); });
+        try { await client.request({ method: 'GET', url: requested }); } catch { /* rejected */ }
+        if (!fetched) continue;
+        fetchedCount++;
+        const u = new URL(fetched);
+        const auth = `${prefix}/auth/current-user`;
+        const ok = u.origin === 'https://example.com' && !u.username && !u.password && !u.hash
+          && (u.pathname.startsWith(`${prefix}/v1/`) || u.pathname === auth || /^\/api_keys(\/[0-9]+)?$/.test(u.pathname.slice(auth.length)) && u.pathname.startsWith(`${auth}/`))
+          && u.pathname.split('/').every((seg) => !/^(\.|\.\.|%2e|%2e%2e|\.%2e|%2e\.)$/i.test(seg) && /^[A-Za-z0-9._~%-]*$/.test(seg));
+        if (!ok) leaks.push(`${requested} -> ${fetched}`);
+      }
+    }
+    restoreFetch();
+    ok(leaks.length === 0, 'Path hardening: no random string leaves the allowed prefix', leaks.slice(0, 5).join(' | '));
+    ok(fetchedCount > 100, `Path hardening: the property test exercised accepted URLs too (${fetchedCount})`);
   });
 
   await asyncTest('Path hardening: APIClient.rawRequest cannot escape /v1 through the MCP client', async () => {

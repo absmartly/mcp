@@ -1210,23 +1210,21 @@ export function validateCommandParams(
   const validNames = documentedParams(entry).map((p) => p.name);
   const validSet = new Set(entry.params.map((p) => p.name));
 
-  for (const key of Object.keys(provided)) {
+  // A deprecated object param (the legacy `params` filter bag) is flattened by
+  // the executor, so validate the same flattened params it will dispatch: the
+  // bag's fields then count as supplied, and a typo inside it is unknown.
+  const usesLegacyBag = entry.params.some((p) => p.deprecated && p.type === 'object' && isRecord(provided[p.name]));
+  const checked = usesLegacyBag ? normalizeCommandParams(entry.group, entry.command, provided) : provided;
+
+  for (const key of Object.keys(checked)) {
     if (validSet.has(key)) continue;
     const guess = suggestParam(key, validNames);
     const baseMsg = `Unknown param "${key}" for ${entry.group}.${entry.command}. Valid params: ${validNames.length > 0 ? validNames.join(', ') : '(none)'}.`;
     errors.push(guess ? `${baseMsg} Did you mean "${guess}"?` : baseMsg);
   }
 
-  // A deprecated object param (the legacy `params` filter bag) still carries
-  // the fields it was replaced by, so its fields count as supplied.
-  const legacyFields = entry.params
-    .filter((p) => p.deprecated && p.type === 'object' && isRecord(provided[p.name]))
-    .map((p) => provided[p.name] as Record<string, unknown>);
-  const supplied = (name: string) =>
-    provided[name] !== undefined || legacyFields.some((fields) => fields[name] !== undefined);
-
   for (const p of entry.params) {
-    if (p.required && !supplied(p.name)) {
+    if (p.required && checked[p.name] === undefined) {
       errors.push(`Missing required param "${p.name}" (${p.type}) for ${entry.group}.${entry.command}: ${p.description}`);
     }
   }
@@ -1799,7 +1797,6 @@ const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
   goals: Object.fromEntries(GOAL_ACCESS_COMMANDS.map((c) => [c, accessRunner('goals', c, 'goalId', 'id')])),
   datasources: Object.fromEntries(['testDatasource', 'introspectDatasource', 'validateDatasourceQuery'].map((c) => [c, datasourceRunner(c)])),
   storageconfigs: {
-    // Like datasources: the backend merges the stored secret key when given storage_config_id.
     // The backend merges only the stored secret key (by storage_config_id); the
     // exporter needs type and properties in the body, so read those first.
     testStorageConfig: async (client, params) => {

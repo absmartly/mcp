@@ -4,58 +4,36 @@ import { MCP_VERSION, CLI_CORE_VERSION } from './version.js';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
 const API_VERSION_PREFIX = '/v1';
+const API_VERSION_SUFFIX = /\/v\d+$/i;
 const ABSOLUTE_URL_PATTERN = /^https?:\/\//i;
 const FETCH_REDIRECT_MODE = 'manual';
 // APIClient.getRootUrl() requests (getCurrentUser, the auth API-key methods)
-// are the only ones outside /v1. Every other path must stay under /v1.
+// are the only ones outside /v1, and they use exactly these paths.
 const ROOT_AUTH_PATH = '/auth/current-user';
-// Percent-decoding passes applied when looking for hidden dot segments; covers
-// double and triple encoding (%252e, %25252e).
-const MAX_DECODE_PASSES = 3;
-// A path segment that URL parsing, or a server behind it, treats as "." or
-// "..": also with a ";param" suffix (Tomcat-style "..;"), and after NFKC
-// normalisation (fullwidth "．", one-dot leader "․").
-const DOT_SEGMENT = /^\.{1,2}(;.*)?$/;
-const ENCODED_SEPARATOR = /%(2f|5c)/i;
-const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
-// A run of percent-escapes, decoded together so multi-byte UTF-8 (e.g. a
-// fullwidth "．" as %EF%BC%8E) is seen as its character. A run that is not
-// valid UTF-8, and a literal "%" (e.g. "50%off"), stay as text instead of
-// failing the whole path.
-const PERCENT_ESCAPE_RUN = /(?:%[0-9a-f]{2})+/gi;
-
-function decodeOnce(text: string): string {
-  return text.replace(PERCENT_ESCAPE_RUN, (run) => {
-    try {
-      return decodeURIComponent(run);
-    } catch {
-      return run;
-    }
-  });
-}
+const ROOT_AUTH_SUBPATHS = [/^$/, /^\/api_keys$/, /^\/api_keys\/[0-9]+$/];
+// Printable ASCII only: WHATWG URL silently strips tabs, newlines and
+// surrounding spaces, and percent-encodes non-ASCII, so none may reach it.
+const RAW_URL_CHARACTERS = /^[\x21-\x7e]+$/;
+// Characters WHATWG URL reinterprets ("\\" as "/") or that start a fragment.
+const RAW_URL_FORBIDDEN = /[\\#]/;
+// A path segment: unreserved characters (RFC 3986), or percent-escapes of them.
+const PATH_SEGMENT = /^(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2})+$/;
+const UNRESERVED_CHARACTER = /^[A-Za-z0-9._~-]$/;
+const DOT_SEGMENT = /^\.{1,2}$/;
 
 /**
- * Rejects a request path that URL parsing could move outside the prefix it
- * was built under: dot segments (also percent-encoded, %2e/%2E, at any depth),
- * backslashes (WHATWG URL treats them as "/"), encoded separators (%2f, %5c),
- * empty segments and control characters. Runs before the URL is built, so
- * fetch never gets the chance to normalise the path.
+ * True when every segment of `path` (a parsed, percent-encoded pathname
+ * suffix starting with "/") is unreserved characters only, escaped or not,
+ * and not "." or "..". A trailing "/" is allowed; empty middle segments are not.
  */
-export function assertSafeRequestPath(path: string): void {
-  let decoded = path;
-  for (let pass = 0; pass <= MAX_DECODE_PASSES; pass++) {
-    if (decoded.includes('\\') || CONTROL_CHARACTER.test(decoded) || ENCODED_SEPARATOR.test(decoded)) {
-      throw new Error(`Invalid API path: backslashes, encoded separators and control characters are not allowed: ${path}`);
-    }
-    const segments = decoded.split('/').slice(1);
-    if (segments.some((segment, i) => DOT_SEGMENT.test(segment.normalize('NFKC')) || (segment === '' && i < segments.length - 1))) {
-      throw new Error(`Invalid API path: dot segments and empty segments are not allowed: ${path}`);
-    }
-    const next = decodeOnce(decoded);
-    if (next === decoded) return;
-    decoded = next;
-  }
-  throw new Error(`Invalid API path: too many levels of percent-encoding: ${path}`);
+function isAllowedPathSuffix(path: string): boolean {
+  const segments = path.split('/').slice(1);
+  return segments.every((segment, i) => {
+    if (segment === '') return i === segments.length - 1 && i > 0;
+    if (!PATH_SEGMENT.test(segment)) return false;
+    const decoded = segment.replace(/%([0-9A-Fa-f]{2})/g, (_m, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+    return [...decoded].every((c) => UNRESERVED_CHARACTER.test(c)) && !DOT_SEGMENT.test(decoded);
+  });
 }
 
 export type FetchHttpClientOptions =
@@ -81,13 +59,20 @@ export class FetchHttpClient implements HttpClient {
   private timeout: number;
 
   constructor(baseUrl: string, options: FetchHttpClientOptions) {
-    this.baseUrl = baseUrl.replace(/\/$/, '');
-    if (this.baseUrl.endsWith(API_VERSION_PREFIX)) {
-      this.baseUrl = this.baseUrl.substring(0, this.baseUrl.length - API_VERSION_PREFIX.length);
+    const base = new URL(baseUrl.trim());
+    if (!['http:', 'https:'].includes(base.protocol)) {
+      throw new Error(`Invalid API base URL: must be http(s): ${baseUrl}`);
     }
-    const base = new URL(this.baseUrl);
-    const basePath = base.pathname.replace(/\/$/, '');
+    if (base.username || base.password || base.search || base.hash) {
+      throw new Error(`Invalid API base URL: credentials, query and fragment are not allowed: ${baseUrl}`);
+    }
+    if (!isAllowedPathSuffix(base.pathname) && base.pathname !== '/') {
+      throw new Error(`Invalid API base URL path: ${baseUrl}`);
+    }
+    // Accept the base with or without its API version (".../v1", ".../V2/").
+    const basePath = base.pathname.replace(/\/+$/, '').replace(API_VERSION_SUFFIX, '');
     this.origin = base.origin;
+    this.baseUrl = `${base.origin}${basePath}`;
     this.apiPrefix = `${basePath}${API_VERSION_PREFIX}`;
     this.authPrefix = `${basePath}${ROOT_AUTH_PATH}`;
     this.credentialHeaders = credentialHeaders(options);
@@ -98,54 +83,36 @@ export class FetchHttpClient implements HttpClient {
     return `${this.baseUrl}${API_VERSION_PREFIX}`;
   }
 
-  /** Under <base>/v1/, or one of the root auth paths APIClient.getRootUrl() builds. */
-  private isAllowedPath(path: string): boolean {
-    return path === this.authPrefix || path.startsWith(`${this.authPrefix}/`) || path.startsWith(`${this.apiPrefix}/`);
-  }
-
   /**
-   * Builds the request URL, allowing only paths under the configured base's
-   * /v1, plus the same-origin root auth paths. A cross-origin absolute URL is
-   * rejected: accepting one would send the attached credential to an
-   * arbitrary host.
+   * Builds the request URL and checks it after parsing, so the check sees
+   * exactly what fetch will request. A relative path must land under
+   * <base>/v1/; an absolute URL (only APIClient.getRootUrl() builds them) may
+   * also be one of the root auth paths. Every path segment past the prefix
+   * must be unreserved characters. Anything else is rejected before fetch,
+   * including cross-origin URLs, which would carry the credential elsewhere.
    */
   private resolveUrl(requested: string): URL {
-    // WHATWG URL treats "\\" as "/" in http(s) URLs, anywhere in the string, so
-    // reject it before any parsing or slicing.
-    if (requested.includes('\\') || CONTROL_CHARACTER.test(requested)) {
-      throw new Error(`Invalid API path: backslashes and control characters are not allowed: ${requested}`);
+    if (!RAW_URL_CHARACTERS.test(requested) || RAW_URL_FORBIDDEN.test(requested)) {
+      throw new Error(`Invalid API path: only printable ASCII without "\\" or "#" is allowed: ${JSON.stringify(requested)}`);
     }
-    if (requested.includes('#')) {
-      throw new Error(`Invalid API path: fragments are not allowed: ${requested}`);
+    const absolute = ABSOLUTE_URL_PATTERN.test(requested);
+    if (!absolute && (!requested.startsWith('/') || requested.startsWith('//'))) {
+      throw new Error(`Invalid API path: must be a single "/"-prefixed path relative to ${API_VERSION_PREFIX}: ${requested}`);
     }
+    const url = new URL(absolute ? requested : `${this.origin}${this.apiPrefix}${requested}`);
 
-    let url: URL;
-    if (ABSOLUTE_URL_PATTERN.test(requested)) {
-      url = new URL(requested);
-      if (url.origin !== this.origin) {
-        throw new Error(`Absolute URLs to other origins are not permitted: ${requested}`);
-      }
-      if (url.username || url.password) {
-        throw new Error(`Absolute URLs with credentials are not permitted: ${requested}`);
-      }
-      // Check the path both as written (URL parsing already resolved any "..")
-      // and as parsed. With "\\" rejected above, the written path starts at
-      // the first "/" after the authority.
-      const authorityEnd = requested.indexOf('/', requested.indexOf('//') + 2);
-      const writtenPath = authorityEnd === -1 ? '/' : requested.slice(authorityEnd).split('?')[0];
-      assertSafeRequestPath(writtenPath);
-      assertSafeRequestPath(url.pathname);
-    } else {
-      if (!requested.startsWith('/') || requested.startsWith('//')) {
-        throw new Error(`Invalid API path: must be a single "/"-prefixed path relative to ${API_VERSION_PREFIX}: ${requested}`);
-      }
-      const [relativePath] = requested.split('?');
-      assertSafeRequestPath(relativePath);
-      url = new URL(`${this.origin}${this.apiPrefix}${requested}`);
+    if (url.origin !== this.origin) {
+      throw new Error(`Absolute URLs to other origins are not permitted: ${requested}`);
     }
-
-    if (!this.isAllowedPath(url.pathname)) {
-      throw new Error(`Request path is outside the API base: ${requested}`);
+    if (url.username || url.password || url.hash) {
+      throw new Error(`Invalid API path: credentials and fragments are not permitted: ${requested}`);
+    }
+    const { pathname } = url;
+    const underApi = pathname.startsWith(`${this.apiPrefix}/`) && isAllowedPathSuffix(pathname.slice(this.apiPrefix.length));
+    const rootAuth = absolute && (pathname === this.authPrefix || pathname.startsWith(`${this.authPrefix}/`))
+      && ROOT_AUTH_SUBPATHS.some((p) => p.test(pathname.slice(this.authPrefix.length)));
+    if (!underApi && !rootAuth) {
+      throw new Error(`Invalid API path: outside the API base or not an allowed path: ${requested}`);
     }
     return url;
   }
