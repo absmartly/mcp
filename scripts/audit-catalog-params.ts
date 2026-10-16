@@ -129,7 +129,9 @@ export function auditCatalogParams(): CatalogParamFinding[] {
       const dropped: string[] = [];
       const dataParam = entry.params.find((p) => p.name === DATA_PARAM);
       entry.params.forEach((p, i) => {
-        if (injected.has(p.name) || p === dataParam) return;
+        // Deprecated params are accepted for backward compatibility and are not
+        // documented, so they may be ignored or superseded by documented ones.
+        if (injected.has(p.name) || p === dataParam || p.deprecated) return;
         const changed = { ...sample, [p.name]: sampleValue(p.type, SAMPLE_BASE + 2 * i + 1) };
         if (readView(translate(changed), core) !== baseline) return;
         dropped.push(p.name === FILTER_BAG_PARAM

@@ -12,6 +12,7 @@ import {
   getGroupCommands,
   getCommandEntry,
   searchCommands,
+  documentedParams,
   executeCommand,
   getTotalCommandCount,
   validateCommandParams,
@@ -49,8 +50,9 @@ export interface ToolContext {
 
 function formatCommandList(entries: CommandEntry[]): string {
   return entries.map(m => {
-    const paramList = m.params.length > 0
-      ? m.params.map(p => `  - \`${p.name}\` (${p.type}${p.required ? ', required' : ''}): ${p.description}`).join('\n')
+    const params = documentedParams(m);
+    const paramList = params.length > 0
+      ? params.map(p => `  - \`${p.name}\` (${p.type}${p.required ? ', required' : ''}): ${p.description}`).join('\n')
       : '  (no parameters)';
     return `### ${m.group}.${m.command}\n${m.description}\n${m.dangerous ? '**WARNING: Destructive operation**\n' : ''}**Params:**\n${paramList}\n**Returns:** ${m.returns}`;
   }).join('\n\n---\n\n');
@@ -104,10 +106,11 @@ function buildCommandDoc(entry: CommandEntry, customFields: readonly any[]): str
   }
   doc += `**Returns:** ${entry.returns}\n\n`;
 
-  if (entry.params.length > 0) {
+  const params = documentedParams(entry);
+  if (params.length > 0) {
     doc += '## Parameters\n\n';
     doc += '| Name | Type | Required | Description |\n|------|------|----------|-------------|\n';
-    for (const p of entry.params) {
+    for (const p of params) {
       doc += `| ${p.name} | ${p.type} | ${p.required ? 'Yes' : 'No'} | ${p.description} |\n`;
     }
   } else {
@@ -119,7 +122,7 @@ function buildCommandDoc(entry: CommandEntry, customFields: readonly any[]): str
   }
 
   doc += `\n## Usage with execute_command\n\n\`\`\`json\n{\n  "group": "${entry.group}",\n  "command": "${entry.command}",\n  "params": ${JSON.stringify(
-    Object.fromEntries(entry.params.filter(p => p.required).map(p => [p.name, p.type === 'number' ? 1 : p.type === 'boolean' ? true : p.type === 'object' ? {} : p.type === 'array' ? [] : 'value'])),
+    Object.fromEntries(params.filter(p => p.required).map(p => [p.name, p.type === 'number' ? 1 : p.type === 'boolean' ? true : p.type === 'object' ? {} : p.type === 'array' ? [] : 'value'])),
     null, 2
   )}\n}\n\`\`\``;
 

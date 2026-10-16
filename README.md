@@ -561,6 +561,15 @@ Execute any ABsmartly command. Common commands are listed in the tool descriptio
 - `raw` (optional) — return full CommandResult with rows/detail/warnings/pagination
 - `limit` (optional) — max items for list operations (default: 20)
 
+**Parameter shape.** Each command documents its params with `get_command_docs`. IDs are named after the entity (`experimentId`, `goalId`, `keyId`, ...), and create/update fields go in a `data` object using the API's field names (e.g. `{ "data": { "first_name": "Ada" } }`). The server translates these to what each `@absmartly/cli` core function reads. Some notable shapes:
+
+- Access commands (`grant/revoke…AccessUser/Team` on experiments, goals and metrics) take a `role`: an asset role ID or name (e.g. `"Editor"`). Metrics use `assetRoleId`.
+- Datasource `testDatasource` / `introspectDatasource` / `validateDatasourceQuery` and `storageconfigs.testStorageConfig` take the saved config's ID. The backend uses the stored secrets, so they never pass through MCP. `testDatasource` also accepts unsaved edits in `config`.
+- Insights, `activity.listActivity` and `events.listEvents*` take their filters as top-level params. A `params` object holding the same fields is still accepted but deprecated.
+- `platformconfig.get/updatePlatformConfig` take `configKey`: the config's ID or name.
+
+Deprecated params (still accepted, not shown in docs) are kept for callers written against 2.0.x.
+
 **Destructive actions** (start, stop, archive, delete) require confirmation. The server returns a confirmation prompt; only after the user has explicitly confirmed should you call again with `confirmed: true` to proceed.
 
 **Experiment creation from templates** also requires confirmation. The first call to `createExperimentFromTemplate` returns a *preview* — the resolved API payload (with names mapped to IDs) plus any warnings — without creating the experiment. Show the preview to the user, and only after they have explicitly confirmed should you call again with `confirmed: true` to actually create.
@@ -717,7 +726,10 @@ npx @absmartly/mcp              # Run stdio server
 ```bash
 npm run test:unit     # Unit tests
 npm run typecheck     # TypeScript type checking
+npx tsx scripts/audit-catalog-params.ts   # Compare every catalog command's params with its CLI core function
 ```
+
+`tests/unit/cli-catalog-core-params.test.ts` runs catalog commands through the real `@absmartly/cli` core over a fake HTTP client, and fails if the audit finds any catalog/core param mismatch.
 
 Integration tests (require credentials):
 ```bash

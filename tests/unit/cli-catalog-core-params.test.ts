@@ -2,7 +2,7 @@
 // HttpClient, and guards the whole catalog with scripts/audit-catalog-params.ts.
 import { APIClient } from '@absmartly/cli/api-client';
 import type { HttpClient, HttpRequestConfig, HttpResponse } from '@absmartly/cli/api-client';
-import { executeCommand, getCommandEntry, validateCommandParams } from '../../src/cli-catalog';
+import { documentedParams, executeCommand, getCommandEntry, validateCommandParams } from '../../src/cli-catalog';
 import { auditCatalogParams } from '../../scripts/audit-catalog-params';
 
 const BASE_URL = 'https://api.test/v1';
@@ -336,42 +336,86 @@ const CASES: Case[] = [
       { method: 'GET', url: '/configs/12' },
       { method: 'PUT', url: '/configs/12', data: { data: { name: 'flag', value: 'true' } } },
     ] },
+
+  // ── 2.1.0 contract additions ──────────────────────────────────────────────
+  { name: 'revokeExperimentAccessUser resolves role into the URL', group: 'experiments', command: 'revokeExperimentAccessUser',
+    params: { experimentId: 3, userId: 2, role: 'Editor' }, respond: (config) => (config.url === '/asset_roles' ? { asset_roles: [{ id: 1, name: 'Viewer' }, { id: 5, name: 'Editor' }] } : {}),
+    expected: [{ method: 'GET', url: '/asset_roles', params: { items: '100', page: '1' } }, { method: 'DELETE', url: '/experiments/3/asset_role_users/2/5' }] },
+  { name: 'revokeExperimentAccessTeam takes a numeric role', group: 'experiments', command: 'revokeExperimentAccessTeam',
+    params: { experimentId: 3, teamId: 4, role: 5 },
+    expected: [{ method: 'DELETE', url: '/experiments/3/asset_role_teams/4/5' }] },
+  { name: 'grantGoalAccessUser maps goalId and role', group: 'goals', command: 'grantGoalAccessUser',
+    params: { goalId: 12, userId: 2, role: 5 },
+    expected: [{ method: 'POST', url: '/goals/12/asset_role_users', data: { user_id: 2, asset_role_id: 5 } }] },
+  { name: 'revokeGoalAccessTeam maps goalId and resolves a role name', group: 'goals', command: 'revokeGoalAccessTeam',
+    params: { goalId: 12, teamId: 4, role: 'viewer' }, respond: (config) => (config.url === '/asset_roles' ? { asset_roles: [{ id: 1, name: 'Viewer' }, { id: 5, name: 'Editor' }] } : {}),
+    expected: [{ method: 'GET', url: '/asset_roles', params: { items: '100', page: '1' } }, { method: 'DELETE', url: '/goals/12/asset_role_teams/4/1' }] },
+  { name: 'revokeGoalAccessUser without role fails before any request', group: 'goals', command: 'revokeGoalAccessUser',
+    params: { goalId: 12, userId: 2 },
+    expectedError: 'goals.revokeGoalAccessUser requires "role" (an asset role ID or name)', expected: [] },
+  { name: 'restartExperiment passes state and reshuffle', group: 'experiments', command: 'restartExperiment',
+    params: { experimentId: 3, reason: 'testing', state: 'development', reshuffle: true },
+    select: (requests) => requests.map(({ method, url, data }) => {
+      const { reason, state, reshuffle } = (data ?? {}) as Record<string, unknown>;
+      return data === undefined ? { method, url } : { method, url, data: { reason, state, reshuffle } };
+    }),
+    expected: [
+      { method: 'GET', url: '/experiments/3' },
+      { method: 'PUT', url: '/experiments/3/restart', data: { reason: 'testing', state: 'development', reshuffle: true } },
+    ] },
+  { name: 'estimateParticipants resolves unitType and applications', group: 'experiments', command: 'estimateParticipants',
+    params: { unitType: 'user_id', application: ['www'], from: '1700000000000' },
+    respond: (config) => {
+      if (config.url === '/unit_types') return { unit_types: [{ id: 7, name: 'user_id' }] };
+      if (config.url === '/applications') return { applications: [{ id: 2, name: 'www' }] };
+      return { columnNames: ['unit_count'], rows: [[42]] };
+    },
+    select: (requests) => requests.filter((r) => r.method === 'POST'),
+    expected: [{ method: 'POST', url: '/experiments/estimate/max_participants', data: { from: 1700000000000, unit_type_id: 7, applications: [2] } }] },
+  { name: 'generateTemplate makes no API request', group: 'experiments', command: 'generateTemplate',
+    params: { name: 'Checkout', type: 'feature' }, select: (requests) => requests.filter((r) => r.method !== 'GET'), expected: [] },
+  { name: 'listCustomFields defaults type to test', group: 'experiments', command: 'listCustomFields', params: {},
+    expected: [{ method: 'GET', url: '/experiment_custom_section_fields', params: { items: '100', page: '1' } }] },
+  { name: 'resetMyPassword sends old and new password', group: 'auth', command: 'resetMyPassword',
+    params: { oldPassword: 'old-pw', newPassword: 'new-pw' },
+    expected: [{ method: 'PUT', url: `${ROOT_URL}/auth/current-user`, data: { data: { old_password: 'old-pw', new_password: 'new-pw' } } }] },
+  { name: 'getVelocityInsights takes documented top-level filters', group: 'insights', command: 'getVelocityInsights',
+    params: { from: '2026-01-01T00:00:00Z', to: '2026-02-01T00:00:00Z', aggregation: 'week' },
+    select: (requests) => requests.filter((r) => r.url.startsWith('/insights')),
+    expected: [{ method: 'GET', url: '/insights/summary', params: { from: '1767225600', to: '1769904000', aggregation: 'week' } }] },
+  { name: 'getVelocityInsights still accepts the deprecated params bag', group: 'insights', command: 'getVelocityInsights',
+    params: { params: { from: '2026-01-01T00:00:00Z', to: '2026-02-01T00:00:00Z', aggregation: 'week' } },
+    select: (requests) => requests.filter((r) => r.url.startsWith('/insights')),
+    expected: [{ method: 'GET', url: '/insights/summary', params: { from: '1767225600', to: '1769904000', aggregation: 'week' } }] },
+  { name: 'listEvents takes documented top-level filters', group: 'events', command: 'listEvents', params: { eventTypes: ['goal'], take: 10 },
+    expected: [{ method: 'POST', url: '/events', data: { filters: { event_types: ['goal'] }, take: 10 } }] },
+  { name: 'testDatasource tests the stored datasource by id', group: 'datasources', command: 'testDatasource', params: { datasourceId: 2 },
+    expected: [{ method: 'POST', url: '/datasources/test', data: { datasource_id: 2 } }] },
+  { name: 'testDatasource merges unsaved edits but keeps the id', group: 'datasources', command: 'testDatasource',
+    params: { datasourceId: 2, config: { type: 'clickhouse', properties: { host: 'ch.test' }, datasource_id: 99 } },
+    expected: [{ method: 'POST', url: '/datasources/test', data: { datasource_id: 2, type: 'clickhouse', properties: { host: 'ch.test' } } }] },
+  { name: 'introspectDatasource introspects the stored datasource by id', group: 'datasources', command: 'introspectDatasource', params: { datasourceId: 2 },
+    expected: [{ method: 'POST', url: '/datasources/introspect', data: { datasource_id: 2 } }] },
+  { name: 'validateDatasourceQuery sends the id and query', group: 'datasources', command: 'validateDatasourceQuery',
+    params: { datasourceId: 2, query: 'select 1' },
+    expected: [{ method: 'POST', url: '/datasources/validate_query', data: { datasource_id: 2, query: 'select 1' } }] },
+  { name: 'testStorageConfig tests the stored config by id', group: 'storageconfigs', command: 'testStorageConfig', params: { configId: 5 },
+    respond: (config) => (config.method === 'GET'
+      ? { storage_config: { id: 5, name: 's3', type: 'S3', properties: { bucket: 'b', accessKey: 'AK' } } }
+      : { ok: true, test: {} }),
+    expected: [
+      { method: 'GET', url: '/storage_configs/5' },
+      { method: 'POST', url: '/storage_configs/test', data: { name: 's3', type: 'S3', properties: { bucket: 'b', accessKey: 'AK' }, storage_config_id: 5 } },
+    ] },
 ];
 
 // Catalog/core mismatches the translation layer cannot fix without changing
 // the documented catalog contract. Each is reported in the PR for a follow-up;
 // keep this list exact so a new mismatch, or a fixed one, fails the test.
-export const KNOWN_CATALOG_GAPS: Record<string, { dropped: string[]; missingRequired: string[] }> = {
-  'experiments.searchExperiments': { dropped: ['show', 'exclude'], missingRequired: [] },
-  'experiments.restartExperiment': { dropped: [], missingRequired: ['defaultType'] },
-  'experiments.exportExperiment': { dropped: ['format'], missingRequired: [] },
-  'experiments.generateTemplate': { dropped: ['experimentId'], missingRequired: ['name', 'type'] },
-  'experiments.estimateParticipants': { dropped: ['experimentId'], missingRequired: ['unitType'] },
-  'experiments.confirmMetricImpact': { dropped: ['impact'], missingRequired: [] },
-  'experiments.dismissAlert': { dropped: ['experimentId'], missingRequired: [] },
-  'experiments.dismissRecommendedAction': { dropped: ['experimentId'], missingRequired: [] },
-  'experiments.revokeExperimentAccessUser': { dropped: [], missingRequired: ['roleId'] },
-  'experiments.revokeExperimentAccessTeam': { dropped: [], missingRequired: ['roleId'] },
-  'experiments.archiveAnnotation': { dropped: ['experimentId'], missingRequired: [] },
-  'experiments.listCustomFields': { dropped: [], missingRequired: ['type'] },
-  'experiments.refreshFields': { dropped: [], missingRequired: ['profile'] },
-  'goals.grantGoalAccessUser': { dropped: [], missingRequired: ['roleId'] },
-  'goals.revokeGoalAccessUser': { dropped: [], missingRequired: ['roleId'] },
-  'goals.grantGoalAccessTeam': { dropped: [], missingRequired: ['roleId'] },
-  'goals.revokeGoalAccessTeam': { dropped: [], missingRequired: ['roleId'] },
-  'auth.resetMyPassword': { dropped: [], missingRequired: ['oldPassword', 'newPassword'] },
-  'insights.getVelocityInsights': { dropped: ['params (core reads undocumented fields: from, to, aggregation, unitTypes, teams, owners)'], missingRequired: ['from', 'to', 'aggregation'] },
-  'insights.getVelocityInsightsDetail': { dropped: ['params (core reads undocumented fields: from, to, aggregation, teams, applications)'], missingRequired: ['from', 'to', 'aggregation'] },
-  'insights.getDecisionInsights': { dropped: ['params (core reads undocumented fields: from, to, aggregation, unitTypes, teams, owners)'], missingRequired: ['from', 'to', 'aggregation'] },
-  'insights.getDecisionInsightsHistory': { dropped: ['params (core reads undocumented fields: from, to, aggregation, teams, applications)'], missingRequired: ['from', 'to', 'aggregation'] },
-  'datasources.testDatasource': { dropped: ['datasourceId'], missingRequired: ['config'] },
-  'datasources.introspectDatasource': { dropped: ['datasourceId'], missingRequired: ['config'] },
-  'datasources.validateDatasourceQuery': { dropped: ['datasourceId', 'query'], missingRequired: ['config'] },
-  'activity.listActivity': { dropped: ['params (core reads undocumented fields: experiments, limit, since, state, search, sort, includeNotes)'], missingRequired: [] },
-  'events.listEvents': { dropped: ['params (core reads undocumented fields: from, to, applications, unitTypes, eventTypes, eventNames, unitUids, environmentTypes, validExposures, take, skip)'], missingRequired: [] },
-  'events.listEventsHistory': { dropped: ['params (core reads undocumented fields: from, to, applications, unitTypes, eventTypes, eventNames, unitUids, environmentTypes, period, tzOffset)'], missingRequired: [] },
-  'storageconfigs.testStorageConfig': { dropped: ['configId'], missingRequired: ['config'] },
-};
+// Catalog/core mismatches the translation layer does not fix. Keep it empty:
+// the guard below fails on any new mismatch, so a catalog change must ship
+// with its translation (or a documented reason to list it here).
+export const KNOWN_CATALOG_GAPS: Record<string, { dropped: string[]; missingRequired: string[] }> = {};
 
 export default async function runTests() {
   let passed = 0;
@@ -453,6 +497,19 @@ export default async function runTests() {
     ['grantExperimentAccessUser', { experimentId: 3, userId: 2, role: 'Editor' }],
   ] as const) {
     assertEquals(validateCommandParams(getCommandEntry('experiments', command)!, params), [], `experiments.${command}: runner params pass catalog validation`);
+  }
+
+  // Deprecated params stay accepted (old callers keep working) but are not documented.
+  {
+    const search = getCommandEntry('experiments', 'searchExperiments')!;
+    assertEquals(validateCommandParams(search, { search: 'x', show: ['audience'] }), [], 'deprecated params are still accepted');
+    assertEquals(documentedParams(search).map((p) => p.name), ['search', 'items'], 'deprecated params are hidden from docs');
+    assertEquals(
+      validateCommandParams(search, { serch: 'x' }).some((e) => e.includes('Valid params: search, items.')),
+      true,
+      'unknown-param errors list only documented params',
+    );
+    assertEquals(getCommandEntry('experiments', 'refreshFields'), undefined, 'refreshFields is not in the MCP catalog');
   }
 
   // Broad guard: every catalog command, after translation, supplies the
