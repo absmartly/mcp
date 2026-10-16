@@ -125,8 +125,22 @@ const CASES: Case[] = [
     params: { experimentId: 3, userId: 2, role: 'editor' },
     respond: (config) => (config.url === '/asset_roles' ? { asset_roles: [{ id: 1, name: 'Viewer' }, { id: 5, name: 'Editor' }] } : {}),
     expected: [
-      { method: 'GET', url: '/asset_roles' },
+      { method: 'GET', url: '/asset_roles', params: { items: '100', page: '1' } },
       { method: 'POST', url: '/experiments/3/asset_role_users', data: { user_id: 2, asset_role_id: 5 } },
+    ] },
+  { name: 'grantExperimentAccessUser finds a role name past the first page', group: 'experiments', command: 'grantExperimentAccessUser',
+    params: { experimentId: 3, userId: 2, role: 'Late' },
+    respond: (config) => {
+      if (config.url !== '/asset_roles') return {};
+      const page = Number(config.params?.page);
+      const roles = page === 1 ? Array.from({ length: 100 }, (_, i) => ({ id: i + 1, name: `Role ${i + 1}` })) : [{ id: 777, name: 'Late' }];
+      return { asset_roles: roles };
+    },
+    select: (requests) => requests.map(({ method, url, params, data }) => ({ method, url, ...(params ? { params } : {}), ...(data ? { data } : {}) })),
+    expected: [
+      { method: 'GET', url: '/asset_roles', params: { items: '100', page: '1' } },
+      { method: 'GET', url: '/asset_roles', params: { items: '100', page: '2' } },
+      { method: 'POST', url: '/experiments/3/asset_role_users', data: { user_id: 2, asset_role_id: 777 } },
     ] },
   { name: 'grantExperimentAccessUser without role fails before any request', group: 'experiments', command: 'grantExperimentAccessUser',
     params: { experimentId: 3, userId: 2 },
@@ -244,6 +258,8 @@ const CASES: Case[] = [
     expected: [{ method: 'PUT', url: '/favorites/experiment', params: { id: '3', favorite: 'true' } }] },
   { name: 'removeFavorite maps entityType/entityId', group: 'favorites', command: 'removeFavorite', params: { entityType: 'metric', entityId: 4 },
     expected: [{ method: 'PUT', url: '/favorites/metric', params: { id: '4', favorite: 'false' } }] },
+  { name: 'addFavorite rejects goal, which the core does not support', group: 'favorites', command: 'addFavorite', params: { entityType: 'goal', entityId: 3 },
+    expectedError: 'Invalid type "goal". Must be "experiment" or "metric".', expected: [] },
   { name: 'listEvents flattens params', group: 'events', command: 'listEvents', params: { params: { eventTypes: ['goal'], take: 10 } },
     expected: [{ method: 'POST', url: '/events', data: { filters: { event_types: ['goal'] }, take: 10 } }] },
   { name: 'listEventsHistory flattens params', group: 'events', command: 'listEventsHistory', params: { params: { period: 'day', tzOffset: 60 } },
@@ -399,6 +415,12 @@ export default async function runTests() {
       { firstRequest: { method: 'GET', url: '/experiments/3' }, posts: [{ url: '/experiments', name: 'copy', state: 'created' }], sourceId: 3, surfacesPayloadWarnings: true },
       'experiments.cloneExperiment: builds the payload from the source, posts the clone and surfaces payload warnings',
     );
+  }
+
+  // Documented enum values must be ones the core accepts.
+  for (const command of ['addFavorite', 'removeFavorite']) {
+    const doc = getCommandEntry('favorites', command)!.params.find((p) => p.name === 'entityType')!.description;
+    assertEquals(/\bgoal\b/.test(doc), false, `favorites.${command}: does not advertise goal favorites`);
   }
 
   // Every param a runner requires must also pass execute_command's catalog

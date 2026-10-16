@@ -1002,8 +1002,8 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   favorites: {
     description: 'Favorite and follow management',
     commands: {
-      addFavorite: { description: 'Add an entity to favorites', params: [{ name: 'entityType', type: 'string', required: true, description: 'Entity type (experiment, metric, goal)' }, { name: 'entityId', type: 'number', required: true, description: 'Entity ID' }], returns: 'Favorite result' },
-      removeFavorite: { description: 'Remove an entity from favorites', params: [{ name: 'entityType', type: 'string', required: true, description: 'Entity type' }, { name: 'entityId', type: 'number', required: true, description: 'Entity ID' }], returns: 'Removal result' },
+      addFavorite: { description: 'Add an entity to favorites', params: [{ name: 'entityType', type: 'string', required: true, description: 'Entity type: experiment or metric' }, { name: 'entityId', type: 'number', required: true, description: 'Entity ID' }], returns: 'Favorite result' },
+      removeFavorite: { description: 'Remove an entity from favorites', params: [{ name: 'entityType', type: 'string', required: true, description: 'Entity type: experiment or metric' }, { name: 'entityId', type: 'number', required: true, description: 'Entity ID' }], returns: 'Removal result' },
     },
   },
 
@@ -1279,6 +1279,7 @@ const METRIC_ACCESS_ROLE_COMMANDS = new Set([
 
 const METRIC_FIELD_ALIASES: Record<string, string> = {
   goal_id: 'goalId',
+  datasource_id: 'datasourceId',
   format_str: 'formatStr',
   mean_format_str: 'meanFormatStr',
   mean_scale: 'meanScale',
@@ -1642,11 +1643,25 @@ function bulkRunner(command: typeof BULK_COMMANDS[number]): CommandRunner {
   };
 }
 
+const ASSET_ROLE_PAGE_SIZE = 100;
+const MAX_ASSET_ROLE_PAGES = 20;
+
+/** Every asset role. @absmartly/cli >= 1.16 pages listAssetRoles; older versions ignore the paging params. */
+async function listAllAssetRoles(client: ApiClientLike): Promise<Array<{ id: number; name?: string }>> {
+  const roles: Array<{ id: number; name?: string }> = [];
+  for (let page = 1; page <= MAX_ASSET_ROLE_PAGES; page++) {
+    const { data } = await CORE_MODULES.assetroles.listAssetRoles(client, { items: ASSET_ROLE_PAGE_SIZE, page }) as { data: Array<{ id: number; name?: string }> };
+    roles.push(...data);
+    if (data.length < ASSET_ROLE_PAGE_SIZE) break;
+  }
+  return roles;
+}
+
 /** Resolves an asset role given by ID or by name. */
 async function resolveAssetRoleId(client: ApiClientLike, role: unknown): Promise<unknown> {
   const numeric = toNumberIfNumeric(role);
   if (typeof numeric === 'number') return numeric;
-  const { data } = await CORE_MODULES.assetroles.listAssetRoles(client) as { data: Array<{ id: number; name?: string }> };
+  const data = await listAllAssetRoles(client);
   const wanted = String(role).toLowerCase();
   const match = data.find((r) => r.name?.toLowerCase() === wanted);
   if (!match) {

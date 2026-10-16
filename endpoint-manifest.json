@@ -1,7 +1,7 @@
 {
   "manifestVersion": 1,
   "generatedFrom": {
-    "@absmartly/cli": "1.14.0"
+    "@absmartly/cli": "1.16.2"
   },
   "endpoints": [
     {
@@ -570,11 +570,11 @@
     },
     {
       "method": "GET",
-      "path": "/v1/insights/velocity/summary"
+      "path": "/v1/insights/summary"
     },
     {
       "method": "GET",
-      "path": "/v1/insights/velocity/summary/detail"
+      "path": "/v1/insights/summary/detail"
     },
     {
       "method": "GET",
@@ -1561,11 +1561,11 @@
         },
         {
           "method": "GET",
-          "path": "/v1/insights/velocity/summary"
+          "path": "/v1/insights/summary"
         },
         {
           "method": "GET",
-          "path": "/v1/insights/velocity/summary/detail"
+          "path": "/v1/insights/summary/detail"
         },
         {
           "method": "GET",
@@ -4532,7 +4532,7 @@
       "endpoints": [
         {
           "method": "GET",
-          "path": "/v1/insights/velocity/summary"
+          "path": "/v1/insights/summary"
         },
         {
           "method": "GET",
@@ -4561,7 +4561,7 @@
         },
         {
           "method": "GET",
-          "path": "/v1/insights/velocity/summary/detail"
+          "path": "/v1/insights/summary/detail"
         },
         {
           "method": "GET",
