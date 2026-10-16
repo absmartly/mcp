@@ -2,7 +2,7 @@
 // HttpClient, and guards the whole catalog with scripts/audit-catalog-params.ts.
 import { APIClient } from '@absmartly/cli/api-client';
 import type { HttpClient, HttpRequestConfig, HttpResponse } from '@absmartly/cli/api-client';
-import { documentedParams, executeCommand, getCommandEntry, validateCommandParams } from '../../src/cli-catalog';
+import { CLI_GROUPS, documentedParams, executeCommand, getCommandEntry, getGroupCommands, validateCommandParams } from '../../src/cli-catalog';
 import { auditCatalogParams } from '../../scripts/audit-catalog-params';
 
 const BASE_URL = 'https://api.test/v1';
@@ -511,6 +511,12 @@ export default async function runTests() {
     );
     assertEquals(getCommandEntry('experiments', 'refreshFields'), undefined, 'refreshFields is not in the MCP catalog');
   }
+
+  // A param documented twice would render twice in docs and validation errors.
+  const duplicated = CLI_GROUPS.flatMap((g) => getGroupCommands(g))
+    .filter((e) => new Set(e.params.map((p) => p.name)).size !== e.params.length)
+    .map((e) => `${e.group}.${e.command}`);
+  assertEquals(duplicated, [], 'no command documents a param twice');
 
   // Broad guard: every catalog command, after translation, supplies the
   // params its core function reads (see scripts/audit-catalog-params.ts).
