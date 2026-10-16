@@ -4,36 +4,75 @@ import { MCP_VERSION, CLI_CORE_VERSION } from './version.js';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
 const API_VERSION_PREFIX = '/v1';
-const API_VERSION_SUFFIX = /\/v\d+$/i;
+// A base given with its API version (".../v1", ".../V1/") is accepted.
+const API_VERSION_SUFFIX = /\/v1$/i;
+const OTHER_API_VERSION_SUFFIX = /\/v\d+$/i;
+const ALLOWED_PROTOCOLS = ['http:', 'https:'];
+const DEFAULT_SCHEME = 'https://';
+const URL_SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:\/\//i;
 const ABSOLUTE_URL_PATTERN = /^https?:\/\//i;
 const FETCH_REDIRECT_MODE = 'manual';
 // APIClient.getRootUrl() requests (getCurrentUser, the auth API-key methods)
 // are the only ones outside /v1, and they use exactly these paths.
 const ROOT_AUTH_PATH = '/auth/current-user';
-const ROOT_AUTH_SUBPATHS = [/^$/, /^\/api_keys$/, /^\/api_keys\/[0-9]+$/];
-// Printable ASCII only: WHATWG URL silently strips tabs, newlines and
-// surrounding spaces, and percent-encodes non-ASCII, so none may reach it.
-const RAW_URL_CHARACTERS = /^[\x21-\x7e]+$/;
+const ROOT_AUTH_SUBPATH = /^(?:\/api_keys(?:\/[0-9]+)?)?$/;
+// Printable ASCII only in the path: WHATWG URL silently strips tabs, newlines
+// and surrounding spaces, and percent-encodes non-ASCII.
+const PRINTABLE_ASCII = /^[\x21-\x7e]*$/;
 // Characters WHATWG URL reinterprets ("\\" as "/") or that start a fragment.
 const RAW_URL_FORBIDDEN = /[\\#]/;
-// A path segment: unreserved characters (RFC 3986), or percent-escapes of them.
+// A path segment: RFC 3986 unreserved characters, or percent-escapes of them.
 const PATH_SEGMENT = /^(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2})+$/;
-const UNRESERVED_CHARACTER = /^[A-Za-z0-9._~-]$/;
+const UNRESERVED = /^[A-Za-z0-9._~-]+$/;
 const DOT_SEGMENT = /^\.{1,2}$/;
 
+/** Thrown for a malformed API base URL, so callers can tell it from an auth failure. */
+export class InvalidEndpointError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidEndpointError';
+  }
+}
+
+function decodeSegment(segment: string): string | null {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
+}
+
 /**
- * True when every segment of `path` (a parsed, percent-encoded pathname
- * suffix starting with "/") is unreserved characters only, escaped or not,
- * and not "." or "..". A trailing "/" is allowed; empty middle segments are not.
+ * True when every segment of `path` (starting with "/") is unreserved
+ * characters only, raw or percent-escaped, and none is "." or ".." in any
+ * encoding. A trailing "/" is allowed; empty middle segments are not.
  */
 function isAllowedPathSuffix(path: string): boolean {
   const segments = path.split('/').slice(1);
   return segments.every((segment, i) => {
     if (segment === '') return i === segments.length - 1 && i > 0;
-    if (!PATH_SEGMENT.test(segment)) return false;
-    const decoded = segment.replace(/%([0-9A-Fa-f]{2})/g, (_m, hex: string) => String.fromCharCode(parseInt(hex, 16)));
-    return [...decoded].every((c) => UNRESERVED_CHARACTER.test(c)) && !DOT_SEGMENT.test(decoded);
+    const decoded = PATH_SEGMENT.test(segment) ? decodeSegment(segment) : null;
+    return decoded !== null && UNRESERVED.test(decoded) && !DOT_SEGMENT.test(decoded);
   });
+}
+
+/** Parses an API base URL; a scheme-less endpoint ("sandbox.absmartly.com") means https. */
+function parseBaseUrl(raw: string): URL {
+  const trimmed = raw.trim();
+  const withScheme = URL_SCHEME_PATTERN.test(trimmed) ? trimmed : `${DEFAULT_SCHEME}${trimmed}`;
+  let base: URL;
+  try {
+    base = new URL(withScheme);
+  } catch {
+    throw new InvalidEndpointError(`Invalid ABsmartly endpoint: ${raw}`);
+  }
+  if (!ALLOWED_PROTOCOLS.includes(base.protocol)) {
+    throw new InvalidEndpointError(`Invalid ABsmartly endpoint: must be http(s): ${raw}`);
+  }
+  if (base.username || base.password || base.search || base.hash) {
+    throw new InvalidEndpointError(`Invalid ABsmartly endpoint: credentials, query and fragment are not allowed: ${raw}`);
+  }
+  return base;
 }
 
 export type FetchHttpClientOptions =
@@ -59,18 +98,13 @@ export class FetchHttpClient implements HttpClient {
   private timeout: number;
 
   constructor(baseUrl: string, options: FetchHttpClientOptions) {
-    const base = new URL(baseUrl.trim());
-    if (!['http:', 'https:'].includes(base.protocol)) {
-      throw new Error(`Invalid API base URL: must be http(s): ${baseUrl}`);
+    const base = parseBaseUrl(baseUrl);
+    // The operator controls the base path, so only collapse empty segments.
+    let basePath = base.pathname.replace(/\/{2,}/g, '/').replace(/\/+$/, '').replace(API_VERSION_SUFFIX, '');
+    if (OTHER_API_VERSION_SUFFIX.test(basePath)) {
+      throw new InvalidEndpointError(`Invalid ABsmartly endpoint: only API ${API_VERSION_PREFIX} is supported: ${baseUrl}`);
     }
-    if (base.username || base.password || base.search || base.hash) {
-      throw new Error(`Invalid API base URL: credentials, query and fragment are not allowed: ${baseUrl}`);
-    }
-    if (!isAllowedPathSuffix(base.pathname) && base.pathname !== '/') {
-      throw new Error(`Invalid API base URL path: ${baseUrl}`);
-    }
-    // Accept the base with or without its API version (".../v1", ".../V2/").
-    const basePath = base.pathname.replace(/\/+$/, '').replace(API_VERSION_SUFFIX, '');
+    basePath = basePath.replace(/\/+$/, '');
     this.origin = base.origin;
     this.baseUrl = `${base.origin}${basePath}`;
     this.apiPrefix = `${basePath}${API_VERSION_PREFIX}`;
@@ -84,35 +118,51 @@ export class FetchHttpClient implements HttpClient {
   }
 
   /**
-   * Builds the request URL and checks it after parsing, so the check sees
-   * exactly what fetch will request. A relative path must land under
-   * <base>/v1/; an absolute URL (only APIClient.getRootUrl() builds them) may
-   * also be one of the root auth paths. Every path segment past the prefix
-   * must be unreserved characters. Anything else is rejected before fetch,
-   * including cross-origin URLs, which would carry the credential elsewhere.
+   * Builds the request URL and checks the result, so the check sees what fetch
+   * will request.
+   * - The path (before "?") must be printable ASCII with no "\\" or "#", and
+   *   every segment unreserved characters, never "." or ".." in any encoding.
+   *   Dot segments are rejected even when they would resolve inside /v1: a
+   *   typed command must not reach a different resource.
+   * - A relative path lands under <base>/v1/; an absolute URL (only
+   *   APIClient.getRootUrl() builds them) may also be a root auth path.
+   * - Same origin, no userinfo. The query is re-encoded through URLSearchParams,
+   *   so a decoded query (rawRequest decodes before calling here) still works.
    */
   private resolveUrl(requested: string): URL {
-    if (!RAW_URL_CHARACTERS.test(requested) || RAW_URL_FORBIDDEN.test(requested)) {
+    const queryStart = requested.indexOf('?');
+    const rawPath = queryStart === -1 ? requested : requested.slice(0, queryStart);
+    const rawQuery = queryStart === -1 ? '' : requested.slice(queryStart + 1);
+    if (!PRINTABLE_ASCII.test(rawPath) || RAW_URL_FORBIDDEN.test(requested)) {
       throw new Error(`Invalid API path: only printable ASCII without "\\" or "#" is allowed: ${JSON.stringify(requested)}`);
     }
-    const absolute = ABSOLUTE_URL_PATTERN.test(requested);
-    if (!absolute && (!requested.startsWith('/') || requested.startsWith('//'))) {
-      throw new Error(`Invalid API path: must be a single "/"-prefixed path relative to ${API_VERSION_PREFIX}: ${requested}`);
-    }
-    const url = new URL(absolute ? requested : `${this.origin}${this.apiPrefix}${requested}`);
 
-    if (url.origin !== this.origin) {
-      throw new Error(`Absolute URLs to other origins are not permitted: ${requested}`);
+    let url: URL;
+    if (ABSOLUTE_URL_PATTERN.test(rawPath)) {
+      // Only APIClient.getRootUrl() builds absolute URLs, and only for the root
+      // auth paths, so require one of those exactly as written (case-folded
+      // scheme and host aside): nothing for URL parsing to normalise.
+      url = new URL(rawPath);
+      if (url.origin !== this.origin) {
+        throw new Error(`Absolute URLs to other origins are not permitted: ${requested}`);
+      }
+      const written = rawPath.slice(rawPath.indexOf('//') + 2);
+      const writtenPath = written.slice(written.indexOf('/') >>> 0);
+      if (written.includes('@') || url.pathname !== writtenPath || !url.pathname.startsWith(this.authPrefix)
+        || !ROOT_AUTH_SUBPATH.test(url.pathname.slice(this.authPrefix.length))) {
+        throw new Error(`Invalid API path: absolute URLs may only be the root auth paths: ${requested}`);
+      }
+    } else {
+      if (!rawPath.startsWith('/') || rawPath.startsWith('//') || !isAllowedPathSuffix(rawPath)) {
+        throw new Error(`Invalid API path: must be "/"-prefixed segments of unreserved characters, without "." or "..": ${requested}`);
+      }
+      url = new URL(`${this.origin}${this.apiPrefix}${rawPath}`);
+      if (!url.pathname.startsWith(`${this.apiPrefix}/`)) {
+        throw new Error(`Invalid API path: outside the API base: ${requested}`);
+      }
     }
-    if (url.username || url.password || url.hash) {
-      throw new Error(`Invalid API path: credentials and fragments are not permitted: ${requested}`);
-    }
-    const { pathname } = url;
-    const underApi = pathname.startsWith(`${this.apiPrefix}/`) && isAllowedPathSuffix(pathname.slice(this.apiPrefix.length));
-    const rootAuth = absolute && (pathname === this.authPrefix || pathname.startsWith(`${this.authPrefix}/`))
-      && ROOT_AUTH_SUBPATHS.some((p) => p.test(pathname.slice(this.authPrefix.length)));
-    if (!underApi && !rootAuth) {
-      throw new Error(`Invalid API path: outside the API base or not an allowed path: ${requested}`);
+    for (const [key, value] of new URLSearchParams(rawQuery)) {
+      url.searchParams.append(key, value);
     }
     return url;
   }

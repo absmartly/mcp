@@ -1202,6 +1202,17 @@ export function documentedParams(entry: CommandEntry): CommandParam[] {
   return entry.params.filter((p) => !p.deprecated);
 }
 
+// Entity IDs are interpolated into request paths, so they must be plain
+// positive integers (a numeric string is accepted): "../users/5" must never
+// reach a path template.
+const ID_PARAM_NAME = /Id\d*$/;
+const POSITIVE_INTEGER = /^[1-9][0-9]*$/;
+
+function isPositiveIntegerId(value: unknown): boolean {
+  return (typeof value === 'number' && Number.isSafeInteger(value) && value > 0)
+    || (typeof value === 'string' && POSITIVE_INTEGER.test(value) && Number.isSafeInteger(Number(value)));
+}
+
 export function validateCommandParams(
   entry: CommandEntry,
   provided: Record<string, unknown>
@@ -1210,11 +1221,21 @@ export function validateCommandParams(
   const validNames = documentedParams(entry).map((p) => p.name);
   const validSet = new Set(entry.params.map((p) => p.name));
 
-  // A deprecated object param (the legacy `params` filter bag) is flattened by
-  // the executor, so validate the same flattened params it will dispatch: the
-  // bag's fields then count as supplied, and a typo inside it is unknown.
-  const usesLegacyBag = entry.params.some((p) => p.deprecated && p.type === 'object' && isRecord(provided[p.name]));
-  const checked = usesLegacyBag ? normalizeCommandParams(entry.group, entry.command, provided) : provided;
+  // The deprecated `params` filter bag is flattened before dispatch, so check
+  // its fields as top-level params: they count as supplied, and a typo inside
+  // it is reported as unknown.
+  const bagParam = entry.params.find((p) => p.name === PARAMS_PARAM && p.deprecated);
+  let checked = provided;
+  if (bagParam && provided[PARAMS_PARAM] !== undefined) {
+    const bag = provided[PARAMS_PARAM];
+    if (!isRecord(bag)) {
+      return [`Param "${PARAMS_PARAM}" for ${entry.group}.${entry.command} must be an object.`];
+    }
+    if (PARAMS_PARAM in bag) {
+      return [`Param "${PARAMS_PARAM}" for ${entry.group}.${entry.command} must not contain a nested "${PARAMS_PARAM}".`];
+    }
+    checked = flatten(provided, PARAMS_PARAM);
+  }
 
   for (const key of Object.keys(checked)) {
     if (validSet.has(key)) continue;
@@ -1226,6 +1247,9 @@ export function validateCommandParams(
   for (const p of entry.params) {
     if (p.required && checked[p.name] === undefined) {
       errors.push(`Missing required param "${p.name}" (${p.type}) for ${entry.group}.${entry.command}: ${p.description}`);
+    }
+    if (p.type === 'number' && ID_PARAM_NAME.test(p.name) && checked[p.name] !== undefined && !isPositiveIntegerId(checked[p.name])) {
+      errors.push(`Param "${p.name}" for ${entry.group}.${entry.command} must be a positive integer ID.`);
     }
   }
 

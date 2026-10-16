@@ -325,34 +325,55 @@ export default async function runTests() {
     restoreFetch();
   });
 
-  await asyncTest('Path hardening: dot segments that resolve inside /v1 stay inside /v1', async () => {
+  // Dot segments that would resolve INSIDE /v1 still reach a different
+  // resource than the one a typed command names, so they are rejected too.
+  for (const path of ['/./experiments', '/experiments/%2e', '/experiments/x/../1', '/segments/../users/5', '/goals/..%2Fusers', '/goals/%2E%2E/users/5']) {
+    await asyncTest(`Path hardening: in-prefix dot segment ${JSON.stringify(path)} rejected`, async () => {
+      const client = new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'jwt' });
+      let fetched = false;
+      mockFetch(async () => { fetched = true; return new Response('{}'); });
+      let threw = false;
+      try { await client.request({ method: 'DELETE', url: path }); } catch { threw = true; }
+      ok(threw && !fetched, `Path hardening: in-prefix dot segment ${JSON.stringify(path)} rejected before fetch`);
+      restoreFetch();
+    });
+  }
+
+  await asyncTest('Path hardening: a decoded query (from rawRequest) is re-encoded, not rejected', async () => {
     const client = new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'jwt' });
     const urls: string[] = [];
     mockFetch(async (url) => { urls.push(String(url)); return new Response('{}', { headers: { 'content-type': 'application/json' } }); });
-    for (const path of ['/./experiments', '/experiments/%2e', '/experiments/x/../1']) {
-      await client.request({ method: 'GET', url: path });
-    }
+    await client.request({ method: 'GET', url: '/experiments?search=a b' });
+    await client.request({ method: 'GET', url: '/experiments?search=café&x=1' });
+    const api = new APIClient(client);
+    await api.rawRequest('/experiments?search=a%20b');
+    await api.rawRequest('/experiments?search=caf%C3%A9');
     assertEquals(urls, [
-      'https://example.com/v1/experiments',
-      'https://example.com/v1/experiments/',
-      'https://example.com/v1/experiments/1',
-    ], 'Path hardening: in-prefix dot segments resolve within /v1');
+      'https://example.com/v1/experiments?search=a+b',
+      'https://example.com/v1/experiments?search=caf%C3%A9&x=1',
+      'https://example.com/v1/experiments?search=a+b',
+      'https://example.com/v1/experiments?search=caf%C3%A9',
+    ], 'Path hardening: queries with spaces and non-ASCII are re-encoded');
     restoreFetch();
   });
 
-  await asyncTest('Base URL: /v1, /V2 and trailing slashes are stripped; query, fragment and userinfo rejected', async () => {
+  await asyncTest('Base URL: parsed first; /v1 stripped; scheme defaults to https', async () => {
     for (const [input, expected] of [
       ['https://example.com/v1', 'https://example.com/v1'],
-      ['https://example.com/V2/', 'https://example.com/v1'],
+      ['https://example.com/V1/', 'https://example.com/v1'],
       ['  https://example.com/tenant/v1/  ', 'https://example.com/tenant/v1'],
       ['https://example.com/tenant', 'https://example.com/tenant/v1'],
+      ['sandbox.absmartly.com', 'https://sandbox.absmartly.com/v1'],
+      ['sandbox.absmartly.com/v1', 'https://sandbox.absmartly.com/v1'],
+      ['https://example.com//tenant//', 'https://example.com/tenant/v1'],
+      ['https://example.com/a;b/%7Eops', 'https://example.com/a;b/%7Eops/v1'],
     ]) {
       assertEquals(new FetchHttpClient(input, { authToken: 't', authType: 'jwt' }).getBaseUrl(), expected, `Base URL: ${input}`);
     }
-    for (const bad of ['https://example.com/?x=1', 'https://example.com/#f', 'https://u:p@example.com', 'ftp://example.com', 'https://example.com/a;b']) {
-      let threw = false;
-      try { new FetchHttpClient(bad, { authToken: 't', authType: 'jwt' }); } catch { threw = true; }
-      ok(threw, `Base URL: ${bad} rejected`);
+    for (const bad of ['https://example.com/?x=1', 'https://example.com/#f', 'https://u:p@example.com', 'ftp://example.com', 'https://example.com/v2', 'https://example.com/V3/', 'https://']) {
+      let error: any;
+      try { new FetchHttpClient(bad, { authToken: 't', authType: 'jwt' }); } catch (e) { error = e; }
+      ok(error?.name === 'InvalidEndpointError', `Base URL: ${bad} rejected with InvalidEndpointError`, String(error));
     }
   });
 
@@ -383,7 +404,10 @@ export default async function runTests() {
         const ok = u.origin === 'https://example.com' && !u.username && !u.password && !u.hash
           && (u.pathname.startsWith(`${prefix}/v1/`) || u.pathname === auth || /^\/api_keys(\/[0-9]+)?$/.test(u.pathname.slice(auth.length)) && u.pathname.startsWith(`${auth}/`))
           && u.pathname.split('/').every((seg) => !/^(\.|\.\.|%2e|%2e%2e|\.%2e|%2e\.)$/i.test(seg) && /^[A-Za-z0-9._~%-]*$/.test(seg));
-        if (!ok) leaks.push(`${requested} -> ${fetched}`);
+        // A path with a dot segment, in any encoding, never reaches fetch, even one
+        // that would resolve inside the prefix.
+        const hasDotSegment = requested.split('?')[0].split('/').some((seg) => /^(?:\.|%2e){1,2}$/i.test(seg));
+        if (!ok || hasDotSegment) leaks.push(`${requested} -> ${fetched}`);
       }
     }
     restoreFetch();

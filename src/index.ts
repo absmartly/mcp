@@ -13,7 +13,7 @@ import { MCP_VERSION } from "./version.js";
 import { DXT_BUNDLE_BASE64, DXT_BUNDLE_SHA } from "./dxt-bundle.js";
 import { APIClient } from "@absmartly/cli/api-client";
 import type { CustomSectionField } from "@absmartly/cli/api-client";
-import { FetchHttpClient } from "./fetch-adapter.js";
+import { FetchHttpClient, InvalidEndpointError } from "./fetch-adapter.js";
 import { setupTools } from "./tools.js";
 import type { ToolContext } from "./tools.js";
 import {
@@ -550,6 +550,7 @@ async function verifyApiKey(apiKey: string, endpoint: string): Promise<{ ok: boo
     } catch (error: any) {
         const msg = error.message || String(error);
         console.error('API key verification error:', msg);
+        if (error instanceof InvalidEndpointError) return { ok: false, error: 'invalid_endpoint' };
         if (msg.includes('HTTP 5')) return { ok: false, error: 'server_error' };
         if (msg.includes('Network error') || msg.includes('timed out')) return { ok: false, error: 'network_error' };
         return { ok: false, error: 'unauthorized' };
@@ -631,6 +632,11 @@ async function handleMcpTransportRequest(
 
         try {
             const verifyResult = await verifyApiKey(apiKey, endpoint || DEFAULT_ABSMARTLY_ENDPOINT);
+
+            if (!verifyResult.ok && verifyResult.error === 'invalid_endpoint') {
+                console.error(`Failed to verify API key: invalid ABsmartly endpoint ${endpoint}`);
+                return new Response("Invalid ABsmartly endpoint", { status: 400, headers: CORS_HEADERS });
+            }
 
             if (!verifyResult.ok) {
                 const isTransient = verifyResult.error === 'server_error' || verifyResult.error === 'network_error';

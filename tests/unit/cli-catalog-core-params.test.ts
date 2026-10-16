@@ -527,9 +527,42 @@ export default async function runTests() {
       'events: legacy bag and top-level filters can be mixed',
     );
     assertEquals(
+      validateCommandParams(insights, { params: 'from=2026-01-01' }),
+      ['Param "params" for insights.getVelocityInsights must be an object.'],
+      'insights: a non-object params bag is rejected',
+    );
+    assertEquals(
+      validateCommandParams(insights, { params: { params: { from: 'x' } } }),
+      ['Param "params" for insights.getVelocityInsights must not contain a nested "params".'],
+      'insights: a nested params key inside the bag is rejected',
+    );
+    assertEquals(
       getCommandEntry('experiments', 'restartExperiment')!.params.some((p) => p.name === 'defaultType'),
       false,
       'restartExperiment does not document defaultType, which the core never reads',
+    );
+  }
+
+  // IDs are interpolated into request paths, so a "../users/5" ID must never
+  // pass validation (it would DELETE /v1/users/5 from deleteSegment).
+  {
+    const del = getCommandEntry('segments', 'deleteSegment')!;
+    const bad = 'Param "segmentId" for segments.deleteSegment must be a positive integer ID.';
+    assertEquals(validateCommandParams(del, { segmentId: '../users/5' }), [bad], 'segments.deleteSegment: a path in segmentId is rejected');
+    assertEquals(validateCommandParams(del, { segmentId: '5/../../users/5' }), [bad], 'segments.deleteSegment: a trailing path in segmentId is rejected');
+    assertEquals(validateCommandParams(del, { segmentId: 0 }), [bad], 'segments.deleteSegment: a zero ID is rejected');
+    assertEquals(validateCommandParams(del, { segmentId: 1.5 }), [bad], 'segments.deleteSegment: a fractional ID is rejected');
+    assertEquals(validateCommandParams(del, { segmentId: '7' }), [], 'segments.deleteSegment: a numeric-string ID is accepted');
+    assertEquals(validateCommandParams(del, { segmentId: 7 }), [], 'segments.deleteSegment: a number ID is accepted');
+    assertEquals(
+      validateCommandParams(getCommandEntry('goals', 'getGoal')!, { goalId: '..%2Fusers' }),
+      ['Param "goalId" for goals.getGoal must be a positive integer ID.'],
+      'goals.getGoal: an encoded traversal in goalId is rejected',
+    );
+    assertEquals(
+      validateCommandParams(getCommandEntry('experiments', 'diffExperimentsCore')!, { experimentId1: 1, experimentId2: '../2' }),
+      ['Param "experimentId2" for experiments.diffExperimentsCore must be a positive integer ID.'],
+      'numbered ID params are checked too',
     );
   }
 
