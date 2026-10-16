@@ -1646,15 +1646,21 @@ function bulkRunner(command: typeof BULK_COMMANDS[number]): CommandRunner {
 const ASSET_ROLE_PAGE_SIZE = 100;
 const MAX_ASSET_ROLE_PAGES = 20;
 
-/** Every asset role. @absmartly/cli >= 1.16 pages listAssetRoles; older versions ignore the paging params. */
+/**
+ * Every asset role. @absmartly/cli >= 1.16 pages listAssetRoles; older
+ * versions drop `{ items, page }` and return the whole list on every call.
+ * Paging stops at a short page, at a page larger than requested (paging was
+ * ignored), or at a page with no new IDs (the same list again).
+ */
 async function listAllAssetRoles(client: ApiClientLike): Promise<Array<{ id: number; name?: string }>> {
-  const roles: Array<{ id: number; name?: string }> = [];
+  const roles = new Map<number, { id: number; name?: string }>();
   for (let page = 1; page <= MAX_ASSET_ROLE_PAGES; page++) {
     const { data } = await CORE_MODULES.assetroles.listAssetRoles(client, { items: ASSET_ROLE_PAGE_SIZE, page }) as { data: Array<{ id: number; name?: string }> };
-    roles.push(...data);
-    if (data.length < ASSET_ROLE_PAGE_SIZE) break;
+    const before = roles.size;
+    for (const role of data) roles.set(role.id, role);
+    if (data.length !== ASSET_ROLE_PAGE_SIZE || roles.size === before) break;
   }
-  return roles;
+  return [...roles.values()];
 }
 
 /** Resolves an asset role given by ID or by name. */

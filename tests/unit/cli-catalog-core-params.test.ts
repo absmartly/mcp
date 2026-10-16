@@ -46,6 +46,8 @@ interface Case {
   respond?: (config: HttpRequestConfig) => unknown;
   /** The error executeCommand must throw, when the call is expected to fail. */
   expectedError?: string;
+  /** Like expectedError, for messages with a long variable tail. */
+  expectedErrorPrefix?: string;
   /** Narrows the recorded requests before comparing, for bodies with incidental fields. */
   select?: (requests: RecordedRequest[]) => RecordedRequest[];
 }
@@ -145,6 +147,22 @@ const CASES: Case[] = [
   { name: 'grantExperimentAccessTeam normalises a direct numeric-string roleId', group: 'experiments', command: 'grantExperimentAccessTeam',
     params: { experimentId: 3, teamId: 2, roleId: '6' },
     expected: [{ method: 'POST', url: '/experiments/3/asset_role_teams', data: { team_id: 2, asset_role_id: 6 } }] },
+  // Pre-1.16 cores drop { items, page } and return every role on each call
+  // (simulated by a server that ignores the paging params).
+  { name: 'role lookup makes one request when paging is ignored and the list exceeds a page', group: 'experiments', command: 'grantExperimentAccessUser',
+    params: { experimentId: 3, userId: 2, role: 'Role 150' },
+    respond: (config) => (config.url === '/asset_roles' ? { asset_roles: Array.from({ length: 150 }, (_, i) => ({ id: i + 1, name: `Role ${i + 1}` })) } : {}),
+    select: (requests) => requests.map(({ method, url, data }) => ({ method, url, ...(data ? { data } : {}) })),
+    expected: [
+      { method: 'GET', url: '/asset_roles' },
+      { method: 'POST', url: '/experiments/3/asset_role_users', data: { user_id: 2, asset_role_id: 150 } },
+    ] },
+  { name: 'role lookup stops on a repeated page when paging is ignored and the list is exactly one page', group: 'experiments', command: 'grantExperimentAccessUser',
+    params: { experimentId: 3, userId: 2, role: 'Missing' },
+    respond: (config) => (config.url === '/asset_roles' ? { asset_roles: Array.from({ length: 100 }, (_, i) => ({ id: i + 1, name: `Role ${i + 1}` })) } : {}),
+    select: (requests) => requests.map(({ method, url }) => ({ method, url })),
+    expectedErrorPrefix: 'Asset role "Missing" not found',
+    expected: [{ method: 'GET', url: '/asset_roles' }, { method: 'GET', url: '/asset_roles' }] },
   { name: 'grantExperimentAccessUser without role fails before any request', group: 'experiments', command: 'grantExperimentAccessUser',
     params: { experimentId: 3, userId: 2 },
     expectedError: 'experiments.grantExperimentAccessUser requires "role" (an asset role ID or name)', expected: [] },
@@ -381,7 +399,8 @@ export default async function runTests() {
       error = e?.message ?? String(e);
     }
     const requests = c.select ? c.select(http.requests) : http.requests;
-    assertEquals({ error, requests }, { error: c.expectedError, requests: c.expected }, `${c.group}.${c.command}: ${c.name}`);
+    const actualError = c.expectedErrorPrefix && error?.startsWith(c.expectedErrorPrefix) ? c.expectedErrorPrefix : error;
+    assertEquals({ error: actualError, requests }, { error: c.expectedError ?? c.expectedErrorPrefix, requests: c.expected }, `${c.group}.${c.command}: ${c.name}`);
   }
 
   // cloneExperiment builds its payload from the source experiment (many
