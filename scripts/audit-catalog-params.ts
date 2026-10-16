@@ -4,13 +4,20 @@
 // translation layer executeCommand uses), and compares the result with the
 // params type the core function declares in its .d.ts.
 //
-// A command is reported when, after translation:
-//   - a documented param reaches the core under a name the core never reads
-//     (it would be silently dropped), or
-//   - a param the core requires is missing and cannot come from a flattened
-//     `data`/`params` object.
-// Commands dispatched by a dedicated runner (positional core signatures) are
-// covered by the runner's own tests instead.
+// Each documented param is checked on its own by ablation: translate the full
+// sample, translate it again with that one param changed, and compare what the
+// core reads. If nothing it reads changes, the param is dropped. This covers
+// booleans and nested objects alike, whatever the sample values are.
+//
+// Object params get two extra checks:
+//   - `data`: every field the core reads is placed inside `data` under its API
+//     (snake_case) name; it must reach the core under the name the core reads.
+//   - `params`: an opaque filter bag. If the core reads named fields from it,
+//     the catalog must document them, so the bag is reported as undocumented.
+//
+// A command is also reported when a param the core requires is missing.
+// Commands dispatched by a runner (src/cli-catalog.ts COMMAND_RUNNERS) are
+// covered by the runner integration tests instead.
 //
 // tests/unit/cli-catalog-core-params.test.ts fails on any finding not listed in
 // KNOWN_CATALOG_GAPS. Usage: npx tsx scripts/audit-catalog-params.ts [--json]
@@ -22,8 +29,8 @@ import { CLI_GROUPS, getGroupCommands, normalizeCommandParams, hasCommandRunner 
 
 const require = createRequire(import.meta.url);
 
-// Probe placed inside object-typed params, to see where their contents land.
-const PROBE_KEY = "__auditProbe";
+const DATA_PARAM = "data";
+const FILTER_BAG_PARAM = "params";
 const SAMPLE_BASE = 9000;
 // Injected by the execute_command handler (src/tools.ts), not by the caller.
 const LIST_INJECTED_PARAMS = ["items", "page"];
@@ -78,30 +85,23 @@ function loadCoreShapes(): Map<string, Map<string, CoreProp> | null> {
   return shapes;
 }
 
-// Each documented param gets a distinct sample value, so the audit can trace
-// where it lands after translation.
-function sampleValue(type: string, index: number): unknown {
-  const n = SAMPLE_BASE + index;
+function sampleValue(type: string, seed: number): unknown {
   switch (type) {
-    case "number": return n;
-    case "boolean": return true;
-    case "array": return [n];
-    case "object": return { [PROBE_KEY]: n };
-    default: return `s${n}`;
+    case "number": return seed;
+    case "boolean": return seed % 2 === 0;
+    case "array": return [seed];
+    case "object": return { [`field${seed}`]: seed };
+    default: return `s${seed}`;
   }
 }
 
-function sampleToken(type: string, index: number): string {
-  const n = SAMPLE_BASE + index;
-  if (type === "boolean") return "true";
-  return type === "string" ? `s${n}` : String(n);
+function snakeCase(name: string): string {
+  return name.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 }
 
-/** True when `token` occurs anywhere inside `value` (after a number/string coercion). */
-function reaches(value: unknown, token: string): boolean {
-  if (Array.isArray(value)) return value.some((v) => reaches(v, token));
-  if (value && typeof value === "object") return Object.values(value).some((v) => reaches(v, token));
-  return String(value) === token;
+/** The slice of translated params the core reads, as a comparable string. */
+function readView(translated: Record<string, unknown>, core: Map<string, CoreProp>): string {
+  return JSON.stringify([...core.keys()].sort().map((name) => [name, translated[name]]));
 }
 
 export function auditCatalogParams(): CatalogParamFinding[] {
@@ -117,24 +117,45 @@ export function auditCatalogParams(): CatalogParamFinding[] {
         continue;
       }
 
-      const sample: Record<string, unknown> = {};
-      entry.params.forEach((p, i) => { sample[p.name] = sampleValue(p.type, i); });
-      const translated = normalizeCommandParams(group, entry.command, sample);
-
       const injected = new Set(ALWAYS_INJECTED_PARAMS);
       if (/^(list|search)/.test(entry.command)) LIST_INJECTED_PARAMS.forEach((p) => injected.add(p));
+      const translate = (params: Record<string, unknown>) =>
+        normalizeCommandParams(group, entry.command, structuredClone(params));
 
-      // What the core actually reads: its declared props, plus every top-level
-      // key when an object param was flattened (its fields are caller-chosen).
-      const flattened = PROBE_KEY in translated;
-      const read = Object.fromEntries(
-        Object.entries(translated).filter(([name]) => core.has(name) || name === PROBE_KEY),
-      );
-      const dropped = entry.params
-        .filter((p, i) => !injected.has(p.name) && !reaches(read, sampleToken(p.type, i)))
-        .map((p) => p.name);
+      const sample: Record<string, unknown> = {};
+      entry.params.forEach((p, i) => { sample[p.name] = sampleValue(p.type, SAMPLE_BASE + 2 * i); });
+      const baseline = readView(translate(sample), core);
+
+      const dropped: string[] = [];
+      const dataParam = entry.params.find((p) => p.name === DATA_PARAM);
+      entry.params.forEach((p, i) => {
+        if (injected.has(p.name) || p === dataParam) return;
+        const changed = { ...sample, [p.name]: sampleValue(p.type, SAMPLE_BASE + 2 * i + 1) };
+        if (readView(translate(changed), core) !== baseline) return;
+        dropped.push(p.name === FILTER_BAG_PARAM
+          ? `${FILTER_BAG_PARAM} (core reads undocumented fields: ${[...core.keys()].join(", ")})`
+          : p.name);
+      });
+
+      // `data`: forwarded whole (the core reads it as one field), or flattened,
+      // in which case each core field sent under its API name must arrive.
+      if (dataParam) {
+        const changed = { ...sample, [DATA_PARAM]: sampleValue("object", SAMPLE_BASE - 1) };
+        const forwardedWhole = readView(translate(changed), core) !== baseline;
+        const { [DATA_PARAM]: _data, ...withoutData } = sample;
+        const fromOtherParams = translate(withoutData);
+        for (const field of forwardedWhole ? [] : core.keys()) {
+          if (fromOtherParams[field] !== undefined) continue;
+          const apiName = snakeCase(field);
+          const probe = { ...sample, [DATA_PARAM]: { [apiName]: `v_${field}` } };
+          if (translate(probe)[field] !== `v_${field}`) dropped.push(`${DATA_PARAM}.${apiName}`);
+        }
+      }
+
+      const full = translate(sample);
+      const flattenedData = dataParam !== undefined && !(DATA_PARAM in full);
       const missingRequired = [...core.entries()]
-        .filter(([name, prop]) => !prop.optional && translated[name] === undefined && !injected.has(name) && !flattened)
+        .filter(([name, prop]) => !prop.optional && full[name] === undefined && !injected.has(name) && !flattenedData)
         .map(([name]) => name);
 
       if (dropped.length > 0 || missingRequired.length > 0) {

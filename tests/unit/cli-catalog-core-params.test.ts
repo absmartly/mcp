@@ -47,6 +47,8 @@ interface Case {
   params: Record<string, unknown>;
   expected: RecordedRequest[];
   respond?: (config: HttpRequestConfig) => unknown;
+  /** The error executeCommand must throw, when the call is expected to fail. */
+  expectedError?: string;
   /** Narrows the recorded requests before comparing, for bodies with incidental fields. */
   select?: (requests: RecordedRequest[]) => RecordedRequest[];
 }
@@ -63,12 +65,12 @@ const CASES: Case[] = [
     expected: [{ method: 'DELETE', url: `${ROOT_URL}/auth/current-user/api_keys/42` }] },
 
   // ── users (originally reported) ───────────────────────────────────────────
-  { name: 'createUser flattens data and joins first/last name', group: 'users', command: 'createUser',
-    params: { data: { email: 'ada@example.com', first_name: 'Ada', last_name: 'Lovelace' } },
-    expected: [{ method: 'POST', url: '/users', data: { email: 'ada@example.com', first_name: 'Ada', last_name: 'Lovelace' } }] },
-  { name: 'updateUser maps userId and flattens data', group: 'users', command: 'updateUser',
-    params: { userId: 7, data: { first_name: 'Grace', last_name: 'Hopper' } },
-    expected: [{ method: 'PUT', url: '/users/7', data: { data: { first_name: 'Grace', last_name: 'Hopper' } } }] },
+  { name: 'createUser sends data verbatim, keeping multi-word first names', group: 'users', command: 'createUser',
+    params: { data: { email: 'mj@example.com', first_name: 'Mary Jane', last_name: 'Watson', job_title: 'Editor' } },
+    expected: [{ method: 'POST', url: '/users', data: { email: 'mj@example.com', first_name: 'Mary Jane', last_name: 'Watson', job_title: 'Editor' } }] },
+  { name: 'updateUser maps userId and sends a partial update without touching the other name half', group: 'users', command: 'updateUser',
+    params: { userId: 7, data: { last_name: 'Hopper' } },
+    expected: [{ method: 'PUT', url: '/users/7', data: { data: { last_name: 'Hopper' } } }] },
   { name: 'getUser maps userId', group: 'users', command: 'getUser', params: { userId: 7 },
     expected: [{ method: 'GET', url: '/users/7' }] },
   { name: 'archiveUser maps userId', group: 'users', command: 'archiveUser', params: { userId: 7 },
@@ -122,12 +124,22 @@ const CASES: Case[] = [
   { name: 'grantExperimentAccessTeam maps a numeric role string to roleId', group: 'experiments', command: 'grantExperimentAccessTeam',
     params: { experimentId: 3, teamId: 2, role: '4' },
     expected: [{ method: 'POST', url: '/experiments/3/asset_role_teams', data: { team_id: 2, asset_role_id: 4 } }] },
-  { name: 'createAnnotation flattens data', group: 'experiments', command: 'createAnnotation',
-    params: { experimentId: 3, data: { type: 'deploy' } },
-    expected: [{ method: 'POST', url: '/experiment_annotations', data: { experiment_id: 3, type: 'deploy' } }] },
-  { name: 'updateAnnotation flattens data', group: 'experiments', command: 'updateAnnotation',
-    params: { experimentId: 3, annotationId: 4, data: { type: 'incident' } },
-    expected: [{ method: 'PUT', url: '/experiment_annotations/4', data: { data: { type: 'incident' } } }] },
+  { name: 'grantExperimentAccessUser resolves a role name to its asset role id', group: 'experiments', command: 'grantExperimentAccessUser',
+    params: { experimentId: 3, userId: 2, role: 'editor' },
+    respond: (config) => (config.url === '/asset_roles' ? { asset_roles: [{ id: 1, name: 'Viewer' }, { id: 5, name: 'Editor' }] } : {}),
+    expected: [
+      { method: 'GET', url: '/asset_roles' },
+      { method: 'POST', url: '/experiments/3/asset_role_users', data: { user_id: 2, asset_role_id: 5 } },
+    ] },
+  { name: 'grantExperimentAccessUser without role fails before any request', group: 'experiments', command: 'grantExperimentAccessUser',
+    params: { experimentId: 3, userId: 2 },
+    expectedError: 'experiments.grantExperimentAccessUser requires "role" (an asset role ID or name)', expected: [] },
+  { name: 'createAnnotation sends the whole annotation data', group: 'experiments', command: 'createAnnotation',
+    params: { experimentId: 3, data: { type: 'deploy', text: 'Shipped v2' } },
+    expected: [{ method: 'POST', url: '/experiment_annotations', data: { type: 'deploy', text: 'Shipped v2', experiment_id: 3 } }] },
+  { name: 'updateAnnotation sends the whole annotation data', group: 'experiments', command: 'updateAnnotation',
+    params: { experimentId: 3, annotationId: 4, data: { text: 'Rolled back' } },
+    expected: [{ method: 'PUT', url: '/experiment_annotations/4', data: { data: { text: 'Rolled back' } } }] },
   { name: 'getCustomField maps fieldId', group: 'experiments', command: 'getCustomField', params: { fieldId: 11 },
     expected: [{ method: 'GET', url: '/experiment_custom_section_fields/11' }] },
   { name: 'createCustomField flattens data and maps default_value', group: 'experiments', command: 'createCustomField',
@@ -138,18 +150,20 @@ const CASES: Case[] = [
     expected: [{ method: 'PUT', url: '/experiment_custom_section_fields/11', data: { name: 'Team' } }] },
   { name: 'archiveCustomField maps fieldId', group: 'experiments', command: 'archiveCustomField', params: { fieldId: 11 },
     expected: [{ method: 'PUT', url: '/experiment_custom_section_fields/11/archive', data: { archive: true } }] },
-  { name: 'bulkStart passes ids positionally', group: 'experiments', command: 'bulkStart', params: { ids: [1, '2'] },
+  { name: 'bulkStart passes ids positionally without per-experiment lookups', group: 'experiments', command: 'bulkStart', params: { ids: [1, '2'] },
     expected: [
-      { method: 'GET', url: '/experiments/1' },
-      { method: 'GET', url: '/experiments/2' },
       { method: 'PUT', url: '/experiments/1/start', data: {} },
       { method: 'PUT', url: '/experiments/2/start', data: {} },
     ] },
   { name: 'bulkArchive passes ids positionally', group: 'experiments', command: 'bulkArchive', params: { ids: [5] },
-    expected: [
-      { method: 'GET', url: '/experiments/5' },
-      { method: 'PUT', url: '/experiments/5/archive', data: { archive: true } },
-    ] },
+    expected: [{ method: 'PUT', url: '/experiments/5/archive', data: { archive: true } }] },
+  { name: 'bulkStop passes reason and note positionally', group: 'experiments', command: 'bulkStop',
+    params: { ids: [5], reason: 'testing', note: 'done' },
+    expected: [{ method: 'PUT', url: '/experiments/5/stop', data: { reason: 'testing', note: 'done' } }] },
+  { name: 'bulkFullOn passes variant positionally', group: 'experiments', command: 'bulkFullOn', params: { ids: [5], variant: 1 },
+    expected: [{ method: 'PUT', url: '/experiments/5/full_on', data: { full_on_variant: 1, note: 'Bulk full-on via CLI' } }] },
+  { name: 'bulkStop without reason fails before any request', group: 'experiments', command: 'bulkStop', params: { ids: [5] },
+    expectedError: 'experiments.bulkStop requires "reason"', expected: [] },
 
   // ── goals ─────────────────────────────────────────────────────────────────
   { name: 'getGoal maps goalId', group: 'goals', command: 'getGoal', params: { goalId: 12 },
@@ -273,8 +287,14 @@ const CASES: Case[] = [
     expected: [{ method: 'PUT', url: '/experiment_custom_sections/2', data: { data: { name: 'Details' } } }] },
   { name: 'reorderCustomSections turns ids into order_index rows', group: 'customsections', command: 'reorderCustomSections', params: { ids: [9, 7] },
     expected: [{ method: 'PUT', url: '/experiment_custom_sections/order', data: { experiment_custom_sections: [{ id: 9, order_index: 0 }, { id: 7, order_index: 1 }] } }] },
-  { name: 'getPlatformConfig maps configKey', group: 'platformconfig', command: 'getPlatformConfig', params: { configKey: 12 },
+  { name: 'getPlatformConfig maps a numeric configKey to the id', group: 'platformconfig', command: 'getPlatformConfig', params: { configKey: 12 },
     expected: [{ method: 'GET', url: '/configs/12' }] },
+  { name: 'getPlatformConfig resolves a config name to its id', group: 'platformconfig', command: 'getPlatformConfig',
+    params: { configKey: 'experiment_form_team_visibility' },
+    respond: (config) => (config.url === '/configs'
+      ? { configs: [{ id: 3, name: 'other' }, { id: 12, name: 'experiment_form_team_visibility' }] }
+      : { config: { id: 12, name: 'experiment_form_team_visibility', value: 'optional' } }),
+    expected: [{ method: 'GET', url: '/configs' }, { method: 'GET', url: '/configs/12' }] },
   { name: 'updatePlatformConfig maps configKey and data.value', group: 'platformconfig', command: 'updatePlatformConfig',
     params: { configKey: 12, data: { value: 'true' } },
     respond: () => ({ config: { id: 12, name: 'flag', value: 'false' } }),
@@ -298,7 +318,6 @@ export const KNOWN_CATALOG_GAPS: Record<string, { dropped: string[]; missingRequ
   'experiments.dismissRecommendedAction': { dropped: ['experimentId'], missingRequired: [] },
   'experiments.revokeExperimentAccessUser': { dropped: [], missingRequired: ['roleId'] },
   'experiments.revokeExperimentAccessTeam': { dropped: [], missingRequired: ['roleId'] },
-  'experiments.updateAnnotation': { dropped: ['experimentId'], missingRequired: [] },
   'experiments.archiveAnnotation': { dropped: ['experimentId'], missingRequired: [] },
   'experiments.listCustomFields': { dropped: [], missingRequired: ['type'] },
   'experiments.refreshFields': { dropped: [], missingRequired: ['profile'] },
@@ -307,9 +326,16 @@ export const KNOWN_CATALOG_GAPS: Record<string, { dropped: string[]; missingRequ
   'goals.grantGoalAccessTeam': { dropped: [], missingRequired: ['roleId'] },
   'goals.revokeGoalAccessTeam': { dropped: [], missingRequired: ['roleId'] },
   'auth.resetMyPassword': { dropped: [], missingRequired: ['oldPassword', 'newPassword'] },
+  'insights.getVelocityInsights': { dropped: ['params (core reads undocumented fields: from, to, aggregation, unitTypes, teams, owners)'], missingRequired: ['from', 'to', 'aggregation'] },
+  'insights.getVelocityInsightsDetail': { dropped: ['params (core reads undocumented fields: from, to, aggregation, teams, applications)'], missingRequired: ['from', 'to', 'aggregation'] },
+  'insights.getDecisionInsights': { dropped: ['params (core reads undocumented fields: from, to, aggregation, unitTypes, teams, owners)'], missingRequired: ['from', 'to', 'aggregation'] },
+  'insights.getDecisionInsightsHistory': { dropped: ['params (core reads undocumented fields: from, to, aggregation, teams, applications)'], missingRequired: ['from', 'to', 'aggregation'] },
   'datasources.testDatasource': { dropped: ['datasourceId'], missingRequired: ['config'] },
   'datasources.introspectDatasource': { dropped: ['datasourceId'], missingRequired: ['config'] },
   'datasources.validateDatasourceQuery': { dropped: ['datasourceId', 'query'], missingRequired: ['config'] },
+  'activity.listActivity': { dropped: ['params (core reads undocumented fields: experiments, limit, since, state, search, sort, includeNotes)'], missingRequired: [] },
+  'events.listEvents': { dropped: ['params (core reads undocumented fields: from, to, applications, unitTypes, eventTypes, eventNames, unitUids, environmentTypes, validExposures, take, skip)'], missingRequired: [] },
+  'events.listEventsHistory': { dropped: ['params (core reads undocumented fields: from, to, applications, unitTypes, eventTypes, eventNames, unitUids, environmentTypes, period, tzOffset)'], missingRequired: [] },
   'storageconfigs.testStorageConfig': { dropped: ['configId'], missingRequired: ['config'] },
 };
 
@@ -339,27 +365,42 @@ export default async function runTests() {
       error = e?.message ?? String(e);
     }
     const requests = c.select ? c.select(http.requests) : http.requests;
-    assertEquals(error ? { error, requests } : requests, c.expected, `${c.group}.${c.command}: ${c.name}`);
+    assertEquals({ error, requests }, { error: c.expectedError, requests: c.expected }, `${c.group}.${c.command}: ${c.name}`);
   }
 
   // cloneExperiment builds its payload from the source experiment (many
   // lookups), so pin only that it reads the source and posts one new experiment.
+  // The source carries a custom field value with no matching field definition,
+  // which makes buildClonePayload return a warning the runner must surface.
   {
-    const http = new FakeHttpClient((config) =>
-      config.method === 'GET' && config.url === '/experiments/3'
-        ? { experiment: { id: 3, name: 'src', type: 'test', state: 'running', variants: [{ variant: 0, name: 'a', config: '{}' }, { variant: 1, name: 'b', config: '{}' }], percentages: '50/50' } }
-        : permissiveBody());
+    const source = {
+      id: 3, name: 'src', type: 'test', state: 'running', percentages: '50/50',
+      variants: [{ variant: 0, name: 'a', config: '{}' }, { variant: 1, name: 'b', config: '{}' }],
+      custom_section_field_values: [{ value: 'x', custom_section_field: { title: 'Orphan', type: 'text', custom_section: { title: 'S', type: 'test' } } }],
+    };
+    const http = new FakeHttpClient((config) => {
+      if (config.method === 'GET' && config.url === '/experiments/3') return { experiment: source };
+      if (config.url === '/experiment_custom_section_fields') return { experiment_custom_section_fields: [] };
+      return permissiveBody();
+    });
     let error: string | undefined;
+    let result: any;
     try {
-      await executeCommand(new APIClient(http) as any, 'experiments', 'cloneExperiment', { experimentId: 3, name: 'copy', apiEndpoint: BASE_URL });
+      result = await executeCommand(new APIClient(http) as any, 'experiments', 'cloneExperiment', { experimentId: '3', name: 'copy', apiEndpoint: BASE_URL });
     } catch (e: any) {
       error = e?.message ?? String(e);
     }
     const posts = http.requests.filter((r) => r.method === 'POST');
     assertEquals(
-      { error, firstRequest: http.requests[0], posts: posts.map((r) => ({ url: r.url, name: (r.data as any)?.name, state: (r.data as any)?.state })) },
-      { firstRequest: { method: 'GET', url: '/experiments/3' }, posts: [{ url: '/experiments', name: 'copy', state: 'created' }] },
-      'experiments.cloneExperiment: builds the payload from the source and posts the clone',
+      {
+        error,
+        firstRequest: http.requests[0],
+        posts: posts.map((r) => ({ url: r.url, name: (r.data as any)?.name, state: (r.data as any)?.state })),
+        sourceId: result?.data?.sourceId,
+        surfacesPayloadWarnings: Array.isArray(result?.warnings) && result.warnings.length > 0,
+      },
+      { firstRequest: { method: 'GET', url: '/experiments/3' }, posts: [{ url: '/experiments', name: 'copy', state: 'created' }], sourceId: 3, surfacesPayloadWarnings: true },
+      'experiments.cloneExperiment: builds the payload from the source, posts the clone and surfaces payload warnings',
     );
   }
 

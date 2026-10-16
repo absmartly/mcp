@@ -207,12 +207,12 @@ export function buildEndpointManifest(): EndpointManifest {
 
   const commands: EndpointManifest["commands"] = {};
   for (const { group, commands: names } of getGroupSummary()) {
-    const moduleFile = coreModuleFile(group);
     for (const command of names) {
       const called = new Set<string>();
-      for (const fn of [command, ...(RUNNER_EXTRA_CORE_FUNCTIONS[`${group}.${command}`] ?? [])]) {
-        const target = resolveExport(moduleFile, fn);
-        if (!target) throw new Error(`Core function ${group}.${fn} not found in ${moduleFile}`);
+      for (const ref of [command, ...(RUNNER_EXTRA_CORE_FUNCTIONS[`${group}.${command}`] ?? [])]) {
+        const [fnGroup, fn] = ref.includes(".") ? ref.split(".") : [group, ref];
+        const target = resolveExport(coreModuleFile(fnGroup), fn);
+        if (!target) throw new Error(`Core function ${fnGroup}.${fn} not found`);
         collectApiMethods(target.file, target.body, apiMethodNames, new Set(), called);
       }
       const sorted = [...called].sort();

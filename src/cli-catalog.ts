@@ -1449,13 +1449,6 @@ const userRefFromUserId: ParamAdapter = (p) => {
   return { ...rest, userRef: String(userId) };
 };
 
-/** createUser/updateUser core functions read a single `name` and split it into first/last. */
-const userName: ParamAdapter = (p) => {
-  if (p.name !== undefined || (p.first_name === undefined && p.last_name === undefined)) return p;
-  const { first_name, last_name, ...rest } = p;
-  return { ...rest, name: [first_name, last_name].filter((part) => part !== undefined && part !== '').join(' ') };
-};
-
 /** addExperimentMetrics documents `[{ metric_id, type }]`; the core sends `metricIds`. */
 const metricIdsFromMetrics: ParamAdapter = (p) => {
   if (!Array.isArray(p.metrics) || p.metricIds !== undefined) return p;
@@ -1480,20 +1473,6 @@ const sectionOrder: ParamAdapter = (p) => {
   return { ...rest, sections: ids.map((id, index) => ({ id, order_index: index })) };
 };
 
-/** updatePlatformConfig documents the new value as `data`; the core reads `value`. */
-const platformConfigValue: ParamAdapter = (p) => {
-  if (p.data === undefined || p.value !== undefined) return p;
-  const { data, ...rest } = p;
-  return { ...rest, value: isRecord(data) && 'value' in data ? data.value : data };
-};
-
-/** Experiment access commands document an optional `role`; the core sends `roleId` as asset_role_id. */
-const experimentAccessRole: ParamAdapter = (p) => {
-  if (p.role === undefined || p.roleId !== undefined) return p;
-  const { role, ...rest } = p;
-  return { ...rest, roleId: toNumberIfNumeric(role) };
-};
-
 /** searchExperiments documents `search` and `items`; the core reads `query` and `limit`. */
 const searchQuery: ParamAdapter = compose(renameTo('search', 'query'), renameTo('items', 'limit'));
 
@@ -1502,7 +1481,6 @@ const FAVORITE_TARGET = compose(renameTo('entityType', 'type'), renameTo('entity
 
 const PARAM_ADAPTERS: Record<string, Record<string, ParamAdapter>> = {
   experiments: {
-    createExperiment: (p) => p, // dispatched by EXPERIMENT_RUNNERS, which sends `data` as the body
     searchExperiments: searchQuery,
     restartExperiment: renameTo('type', 'asType'),
     createExperimentNote: NOTE_TEXT,
@@ -1510,10 +1488,6 @@ const PARAM_ADAPTERS: Record<string, Record<string, ParamAdapter>> = {
     replyToExperimentNote: NOTE_TEXT,
     addExperimentMetrics: metricIdsFromMetrics,
     createScheduledAction: renameTo('scheduledAt', 'at'),
-    grantExperimentAccessUser: experimentAccessRole,
-    grantExperimentAccessTeam: experimentAccessRole,
-    createAnnotation: flattenData,
-    updateAnnotation: flattenData,
     ...entityAdapters('fieldId', {
       byId: ['getCustomField', 'archiveCustomField'],
       create: ['createCustomField'],
@@ -1544,8 +1518,6 @@ const PARAM_ADAPTERS: Record<string, Record<string, ParamAdapter>> = {
     ...entityAdapters('userId', {
       byId: ['getUser', 'archiveUser', 'resetUserPassword'],
     }),
-    createUser: compose(flattenData, userName),
-    updateUser: compose(idFrom('userId'), flattenData, userName),
     listUserApiKeys: userRefFromUserId,
     createUserApiKey: compose(userRefFromUserId, flattenData),
     deleteUserApiKey: userRefFromUserId,
@@ -1610,10 +1582,6 @@ const PARAM_ADAPTERS: Record<string, Record<string, ParamAdapter>> = {
     }),
     reorderCustomSections: sectionOrder,
   },
-  platformconfig: {
-    getPlatformConfig: idFrom('configKey'),
-    updatePlatformConfig: compose(idFrom('configKey'), platformConfigValue),
-  },
   activity: { listActivity: flattenParams },
   statistics: { getPowerMatrix: renameTo(PARAMS_PARAM, CONFIG_PARAM) },
   events: { listEvents: flattenParams, listEventsHistory: flattenParams },
@@ -1629,49 +1597,149 @@ const PARAM_ADAPTERS: Record<string, Record<string, ParamAdapter>> = {
   }),
 };
 
-// A few experiment core functions do not take `(client, params)`: they take a
-// payload or an ID list positionally, so they need a runner, not an adapter.
+// Some commands cannot be expressed as a param rename, so they get a runner:
+// - experiment cores that take a payload or an ID list positionally;
+// - cores that would lose documented fields (createUser/updateUser re-split a
+//   joined name on the first space; create/updateAnnotation keep only `type`);
+// - params that must be resolved to an ID first (asset role names, platform
+//   config keys).
 type CommandRunner = (client: ApiClientLike, params: Record<string, unknown>) => Promise<unknown>;
 
 const BULK_COMMANDS = ['bulkStart', 'bulkStop', 'bulkArchive', 'bulkDevelopment', 'bulkFullOn'] as const;
+// Positional arguments after `names`, per @absmartly/cli core/experiments/bulk.js.
+const BULK_EXTRA_ARGS: Record<typeof BULK_COMMANDS[number], string[]> = {
+  bulkStart: ['note'],
+  bulkStop: ['reason', 'note'],
+  bulkArchive: ['note'],
+  bulkDevelopment: ['note'],
+  bulkFullOn: ['variant', 'note'],
+};
+// Arguments the backend rejects when absent; failing here beats sending `undefined`.
+const BULK_REQUIRED_ARGS: Partial<Record<typeof BULK_COMMANDS[number], string>> = {
+  bulkStop: 'reason',
+  bulkFullOn: 'variant',
+};
 
-/** core bulk*(client, ids, names, ...) take the ID list and a name lookup positionally. */
+const experimentsCore = CORE_MODULES.experiments;
+
+/**
+ * core bulk*(client, ids, names, ...args) take the ID list positionally. The
+ * names map only labels results, so it is passed empty rather than costing a
+ * GET per experiment (and aborting the batch on one transient failure).
+ */
 function bulkRunner(command: typeof BULK_COMMANDS[number]): CommandRunner {
   return async (client, params) => {
+    const required = BULK_REQUIRED_ARGS[command];
+    if (required !== undefined && params[required] === undefined) {
+      throw new Error(`experiments.${command} requires "${required}"`);
+    }
     const ids = Array.isArray(params.ids) ? params.ids.map(toNumberIfNumeric) : [];
-    const exp = coreExperiments as unknown as Record<string, Function>;
-    const names = await exp.fetchBulkNames(client, ids);
-    return exp[command](client, ids, names);
+    const extra = BULK_EXTRA_ARGS[command].map((name) => params[name]);
+    return experimentsCore[command](client, ids, new Map(), ...extra);
   };
+}
+
+/** Resolves an asset role given by ID or by name. */
+async function resolveAssetRoleId(client: ApiClientLike, role: unknown): Promise<unknown> {
+  const numeric = toNumberIfNumeric(role);
+  if (typeof numeric === 'number') return numeric;
+  const { data } = await CORE_MODULES.assetroles.listAssetRoles(client) as { data: Array<{ id: number; name?: string }> };
+  const wanted = String(role).toLowerCase();
+  const match = data.find((r) => r.name?.toLowerCase() === wanted);
+  if (!match) {
+    throw new Error(`Asset role "${String(role)}" not found. Available: ${data.map((r) => r.name).join(', ')}`);
+  }
+  return match.id;
+}
+
+function experimentAccessRunner(command: 'grantExperimentAccessUser' | 'grantExperimentAccessTeam'): CommandRunner {
+  return async (client, params) => {
+    const { role, ...rest } = params;
+    if (role === undefined && rest.roleId === undefined) {
+      throw new Error(`experiments.${command} requires "role" (an asset role ID or name)`);
+    }
+    const roleId = rest.roleId ?? await resolveAssetRoleId(client, role);
+    return experimentsCore[command](client, { ...rest, roleId });
+  };
+}
+
+/** Resolves a platform config given by numeric ID or by its name (e.g. "experiment_form_team_visibility"). */
+async function resolvePlatformConfigId(client: ApiClientLike, configKey: unknown): Promise<unknown> {
+  const numeric = toNumberIfNumeric(configKey);
+  if (typeof numeric === 'number') return numeric;
+  const { data } = await CORE_MODULES.platformconfig.listPlatformConfigs(client) as { data: Array<{ id: number; name?: string }> };
+  const match = data.find((c) => c.name === configKey);
+  if (!match) throw new Error(`Platform config "${String(configKey)}" not found`);
+  return match.id;
+}
+
+/** User data documents API names; send first_name/last_name verbatim instead of the core's name split. */
+function userFields(data: unknown): Record<string, unknown> {
+  return isRecord(data) ? data : {};
 }
 
 const EXPERIMENT_RUNNERS: Record<string, CommandRunner> = {
   // core createExperiment(client, body) posts its second argument as the body.
   createExperiment: (client, params) =>
-    (coreExperiments.createExperiment as unknown as Function)(client, isRecord(params.data) ? params.data : {}),
+    experimentsCore.createExperiment(client, isRecord(params.data) ? params.data : {}),
   // core cloneExperiment(client, payload, sourceId) expects a payload built by buildClonePayload.
   cloneExperiment: async (client, params) => {
-    const exp = coreExperiments as unknown as Record<string, Function>;
-    const { payload } = await exp.buildClonePayload(client, {
+    const experimentId = toNumberIfNumeric(params.experimentId);
+    const { payload, warnings } = await experimentsCore.buildClonePayload(client, {
       ...params,
+      experimentId,
       defaultType: params.defaultType ?? DEFAULT_EXPERIMENT_TYPE,
     });
-    return exp.cloneExperiment(client, payload, params.experimentId);
+    const result = await experimentsCore.cloneExperiment(client, payload, experimentId);
+    return warnings?.length ? { ...result, warnings: [...(result.warnings ?? []), ...warnings] } : result;
   },
   ...Object.fromEntries(BULK_COMMANDS.map((c) => [c, bulkRunner(c)])),
+  grantExperimentAccessUser: experimentAccessRunner('grantExperimentAccessUser'),
+  grantExperimentAccessTeam: experimentAccessRunner('grantExperimentAccessTeam'),
+  // core createAnnotation/updateAnnotation forward only `type`; the API takes the whole annotation.
+  createAnnotation: async (client, params) => ({
+    data: await client.createAnnotation({ ...userFields(params.data), experiment_id: params.experimentId } as any),
+  }),
+  updateAnnotation: async (client, params) => ({
+    data: await client.updateAnnotation(params.annotationId as any, userFields(params.data) as any),
+  }),
 };
 
 const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
   experiments: EXPERIMENT_RUNNERS,
+  users: {
+    createUser: async (client, params) => ({ data: await client.createUser(userFields(params.data) as any) }),
+    updateUser: async (client, params) => {
+      const data = userFields(params.data);
+      if (Object.keys(data).length === 0) throw new Error('At least one update field is required');
+      await client.updateUser(params.userId as any, data as any);
+      return { data: { id: params.userId } };
+    },
+  },
+  platformconfig: {
+    getPlatformConfig: async (client, params) =>
+      CORE_MODULES.platformconfig.getPlatformConfig(client, { id: await resolvePlatformConfigId(client, params.configKey) }),
+    updatePlatformConfig: async (client, params) => {
+      const { data } = params;
+      return CORE_MODULES.platformconfig.updatePlatformConfig(client, {
+        id: await resolvePlatformConfigId(client, params.configKey),
+        value: isRecord(data) && 'value' in data ? data.value : data,
+      });
+    },
+  },
 };
 
 /**
- * Core functions a runner calls besides the one named after the command.
- * scripts/endpoint-manifest.ts walks these too, so the manifest stays complete.
+ * Core functions a runner calls besides the one named after the command, as
+ * `fn` (same group) or `group.fn`. scripts/endpoint-manifest.ts walks these
+ * too, so the manifest stays complete.
  */
 export const RUNNER_EXTRA_CORE_FUNCTIONS: Record<string, string[]> = {
   'experiments.cloneExperiment': ['buildClonePayload'],
-  ...Object.fromEntries(BULK_COMMANDS.map((c) => [`experiments.${c}`, ['fetchBulkNames']])),
+  'experiments.grantExperimentAccessUser': ['assetroles.listAssetRoles'],
+  'experiments.grantExperimentAccessTeam': ['assetroles.listAssetRoles'],
+  'platformconfig.getPlatformConfig': ['listPlatformConfigs'],
+  'platformconfig.updatePlatformConfig': ['listPlatformConfigs'],
 };
 
 /** True when a command is dispatched by a runner instead of a `(client, params)` core call. */

@@ -2853,9 +2853,14 @@
     },
     "experiments.grantExperimentAccessUser": {
       "apiMethods": [
-        "grantExperimentAccessUser"
+        "grantExperimentAccessUser",
+        "listAssetRoles"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/asset_roles"
+        },
         {
           "method": "POST",
           "path": "/v1/experiments/{id}/asset_role_users"
@@ -2886,9 +2891,14 @@
     },
     "experiments.grantExperimentAccessTeam": {
       "apiMethods": [
-        "grantExperimentAccessTeam"
+        "grantExperimentAccessTeam",
+        "listAssetRoles"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/asset_roles"
+        },
         {
           "method": "POST",
           "path": "/v1/experiments/{id}/asset_role_teams"
@@ -2952,14 +2962,9 @@
     },
     "experiments.bulkStart": {
       "apiMethods": [
-        "getExperiment",
         "startExperiment"
       ],
       "endpoints": [
-        {
-          "method": "GET",
-          "path": "/v1/experiments/{id}"
-        },
         {
           "method": "PUT",
           "path": "/v1/experiments/{id}/start"
@@ -2968,14 +2973,9 @@
     },
     "experiments.bulkStop": {
       "apiMethods": [
-        "getExperiment",
         "stopExperiment"
       ],
       "endpoints": [
-        {
-          "method": "GET",
-          "path": "/v1/experiments/{id}"
-        },
         {
           "method": "PUT",
           "path": "/v1/experiments/{id}/stop"
@@ -2984,14 +2984,9 @@
     },
     "experiments.bulkArchive": {
       "apiMethods": [
-        "archiveExperiment",
-        "getExperiment"
+        "archiveExperiment"
       ],
       "endpoints": [
-        {
-          "method": "GET",
-          "path": "/v1/experiments/{id}"
-        },
         {
           "method": "PUT",
           "path": "/v1/experiments/{id}/archive"
@@ -3000,14 +2995,9 @@
     },
     "experiments.bulkDevelopment": {
       "apiMethods": [
-        "developmentExperiment",
-        "getExperiment"
+        "developmentExperiment"
       ],
       "endpoints": [
-        {
-          "method": "GET",
-          "path": "/v1/experiments/{id}"
-        },
         {
           "method": "PUT",
           "path": "/v1/experiments/{id}/development"
@@ -3016,14 +3006,9 @@
     },
     "experiments.bulkFullOn": {
       "apiMethods": [
-        "fullOnExperiment",
-        "getExperiment"
+        "fullOnExperiment"
       ],
       "endpoints": [
-        {
-          "method": "GET",
-          "path": "/v1/experiments/{id}"
-        },
         {
           "method": "PUT",
           "path": "/v1/experiments/{id}/full_on"
@@ -4974,9 +4959,14 @@
     },
     "platformconfig.getPlatformConfig": {
       "apiMethods": [
-        "getPlatformConfig"
+        "getPlatformConfig",
+        "listPlatformConfigs"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/configs"
+        },
         {
           "method": "GET",
           "path": "/v1/configs/{id}"
@@ -4986,9 +4976,14 @@
     "platformconfig.updatePlatformConfig": {
       "apiMethods": [
         "getPlatformConfig",
+        "listPlatformConfigs",
         "updatePlatformConfig"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/configs"
+        },
         {
           "method": "GET",
           "path": "/v1/configs/{id}"
