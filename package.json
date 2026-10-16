@@ -1,6 +1,6 @@
 {
   "name": "@absmartly/mcp",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "MCP server for ABsmartly — experimentation platform API access for AI assistants",
   "main": "./dist/cjs/core.js",
   "module": "./dist/core.js",
@@ -144,7 +144,7 @@
     }
   },
   "devDependencies": {
-    "@absmartly/cli": "^1.14.0",
+    "@absmartly/cli": "^1.16.2",
     "@cloudflare/workers-oauth-provider": "^0.10.3",
     "@cloudflare/workers-types": "^4.20241106.0",
     "@types/node": "^20.11.0",

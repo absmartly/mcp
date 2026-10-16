@@ -540,6 +540,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         description: 'Start multiple experiments at once',
         params: [
           { name: 'ids', type: 'array', required: true, description: 'Array of experiment IDs' },
+          { name: 'note', type: 'string', required: false, description: 'Note recorded on each experiment' },
         ],
         returns: 'Bulk operation results',
         dangerous: true,
@@ -548,6 +549,8 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         description: 'Stop multiple experiments at once',
         params: [
           { name: 'ids', type: 'array', required: true, description: 'Array of experiment IDs' },
+          { name: 'reason', type: 'string', required: true, description: 'Stop reason, same enum as stopExperiment' },
+          { name: 'note', type: 'string', required: false, description: 'Note recorded on each experiment' },
         ],
         returns: 'Bulk operation results',
         dangerous: true,
@@ -556,6 +559,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         description: 'Archive multiple experiments at once',
         params: [
           { name: 'ids', type: 'array', required: true, description: 'Array of experiment IDs' },
+          { name: 'note', type: 'string', required: false, description: 'Note recorded on each experiment' },
         ],
         returns: 'Bulk operation results',
         dangerous: true,
@@ -564,6 +568,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         description: 'Put multiple experiments into development mode',
         params: [
           { name: 'ids', type: 'array', required: true, description: 'Array of experiment IDs' },
+          { name: 'note', type: 'string', required: false, description: 'Note recorded on each experiment' },
         ],
         returns: 'Bulk operation results',
         dangerous: true,
@@ -572,6 +577,8 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         description: 'Set multiple experiments to full-on mode',
         params: [
           { name: 'ids', type: 'array', required: true, description: 'Array of experiment IDs' },
+          { name: 'variant', type: 'number', required: true, description: 'Variant index to roll out to 100%' },
+          { name: 'note', type: 'string', required: false, description: 'Note recorded on each experiment' },
         ],
         returns: 'Bulk operation results',
         dangerous: true,
@@ -995,8 +1002,8 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   favorites: {
     description: 'Favorite and follow management',
     commands: {
-      addFavorite: { description: 'Add an entity to favorites', params: [{ name: 'entityType', type: 'string', required: true, description: 'Entity type (experiment, metric, goal)' }, { name: 'entityId', type: 'number', required: true, description: 'Entity ID' }], returns: 'Favorite result' },
-      removeFavorite: { description: 'Remove an entity from favorites', params: [{ name: 'entityType', type: 'string', required: true, description: 'Entity type' }, { name: 'entityId', type: 'number', required: true, description: 'Entity ID' }], returns: 'Removal result' },
+      addFavorite: { description: 'Add an entity to favorites', params: [{ name: 'entityType', type: 'string', required: true, description: 'Entity type: experiment or metric' }, { name: 'entityId', type: 'number', required: true, description: 'Entity ID' }], returns: 'Favorite result' },
+      removeFavorite: { description: 'Remove an entity from favorites', params: [{ name: 'entityType', type: 'string', required: true, description: 'Entity type: experiment or metric' }, { name: 'entityId', type: 'number', required: true, description: 'Entity ID' }], returns: 'Removal result' },
     },
   },
 
@@ -1272,6 +1279,7 @@ const METRIC_ACCESS_ROLE_COMMANDS = new Set([
 
 const METRIC_FIELD_ALIASES: Record<string, string> = {
   goal_id: 'goalId',
+  datasource_id: 'datasourceId',
   format_str: 'formatStr',
   mean_format_str: 'meanFormatStr',
   mean_scale: 'meanScale',
@@ -1361,7 +1369,413 @@ export function normalizeMetricCommandParams(command: string, params: Record<str
   return normalizeMetricFields(normalized);
 }
 
-function normalizeCommandParams(
+// ─── Catalog → core param translation (non-metric groups) ──────────────────
+// The catalog documents the public MCP shape: `<entity>Id` for the target,
+// and a nested `data` object for create/update fields, mostly in API
+// snake_case. Each core function reads its own shape (`id`, top-level
+// camelCase fields, `config` for raw API bodies). The adapters below
+// translate one into the other, keyed by `group.command`.
+
+type ParamAdapter = (params: Record<string, unknown>) => Record<string, unknown>;
+
+const DATA_PARAM = 'data';
+const PARAMS_PARAM = 'params';
+const CONFIG_PARAM = 'config';
+const ID_PARAM = 'id';
+const DEFAULT_EXPERIMENT_TYPE = 'test';
+
+/** Moves `from` to `to` when `to` is not already set. */
+function rename(params: Record<string, unknown>, from: string, to: string): Record<string, unknown> {
+  if (params[from] === undefined || params[to] !== undefined) return params;
+  const { [from]: value, ...rest } = params;
+  return { ...rest, [to]: value };
+}
+
+/** Spreads a nested object param into the top level. Top-level keys win. */
+function flatten(params: Record<string, unknown>, key: string): Record<string, unknown> {
+  const nested = params[key];
+  if (!isRecord(nested)) return params;
+  const { [key]: _nested, ...rest } = params;
+  return { ...nested, ...rest };
+}
+
+/** Renames snake_case API field names to the camelCase names a core function reads. */
+function aliasFields(params: Record<string, unknown>, aliases: Record<string, string>): Record<string, unknown> {
+  let result = params;
+  for (const [from, to] of Object.entries(aliases)) result = rename(result, from, to);
+  return result;
+}
+
+function compose(...adapters: ParamAdapter[]): ParamAdapter {
+  return (params) => adapters.reduce((acc, adapt) => adapt(acc), params);
+}
+
+const renameTo = (from: string, to: string): ParamAdapter => (p) => rename(p, from, to);
+const idFrom = (from: string): ParamAdapter => renameTo(from, ID_PARAM);
+const flattenData: ParamAdapter = (p) => flatten(p, DATA_PARAM);
+const flattenParams: ParamAdapter = (p) => flatten(p, PARAMS_PARAM);
+const aliases = (map: Record<string, string>): ParamAdapter => (p) => aliasFields(p, map);
+/** Core functions that forward a raw API body read it from `config`. */
+const dataAsConfig: ParamAdapter = renameTo(DATA_PARAM, CONFIG_PARAM);
+
+/** `<entity>Id` → `id`, and for create/update commands `data` → top-level fields. */
+function entityAdapters(entityIdParam: string, commands: {
+  byId: string[];
+  create?: string[];
+  update?: string[];
+  fieldAliases?: Record<string, string>;
+}): Record<string, ParamAdapter> {
+  const fields = compose(flattenData, aliases(commands.fieldAliases ?? {}));
+  const out: Record<string, ParamAdapter> = {};
+  for (const c of commands.byId) out[c] = idFrom(entityIdParam);
+  for (const c of commands.create ?? []) out[c] = fields;
+  for (const c of commands.update ?? []) out[c] = compose(idFrom(entityIdParam), fields);
+  return out;
+}
+
+/** Same as entityAdapters, for groups whose core functions forward `data` as the raw API body. */
+function configEntityAdapters(entityIdParam: string, commands: {
+  byId: string[];
+  create?: string[];
+  update?: string[];
+}): Record<string, ParamAdapter> {
+  const out: Record<string, ParamAdapter> = {};
+  for (const c of commands.byId) out[c] = idFrom(entityIdParam);
+  for (const c of commands.create ?? []) out[c] = dataAsConfig;
+  for (const c of commands.update ?? []) out[c] = compose(idFrom(entityIdParam), dataAsConfig);
+  return out;
+}
+
+function toNumberIfNumeric(value: unknown): unknown {
+  return typeof value === 'string' && value.trim() !== '' && !Number.isNaN(Number(value)) ? Number(value) : value;
+}
+
+/** users.*ApiKey core functions resolve a user by `userRef` (an ID string or an email). */
+const userRefFromUserId: ParamAdapter = (p) => {
+  if (p.userId === undefined || p.userRef !== undefined) return p;
+  const { userId, ...rest } = p;
+  return { ...rest, userRef: String(userId) };
+};
+
+/** addExperimentMetrics documents `[{ metric_id, type }]`; the core sends `metricIds`. */
+const metricIdsFromMetrics: ParamAdapter = (p) => {
+  if (!Array.isArray(p.metrics) || p.metricIds !== undefined) return p;
+  const { metrics, ...rest } = p;
+  return { ...rest, metricIds: metrics.map((m) => (isRecord(m) ? m.metric_id : m)) };
+};
+
+/** editTeamMemberRoles documents one `userId` and `roles`; the core takes `userIds` and `roleIds`. */
+const teamMemberRoles: ParamAdapter = (p) => {
+  const { userId, roles, ...rest } = p;
+  return {
+    ...rest,
+    ...(userId !== undefined && rest.userIds === undefined ? { userIds: [userId] } : {}),
+    ...(roles !== undefined && rest.roleIds === undefined ? { roleIds: roles } : {}),
+  };
+};
+
+/** reorderCustomSections documents an ordered ID list; the core sends `{ id, order_index }` rows. */
+const sectionOrder: ParamAdapter = (p) => {
+  if (!Array.isArray(p.ids) || p.sections !== undefined) return p;
+  const { ids, ...rest } = p;
+  return { ...rest, sections: ids.map((id, index) => ({ id, order_index: index })) };
+};
+
+/** searchExperiments documents `search` and `items`; the core reads `query` and `limit`. */
+const searchQuery: ParamAdapter = compose(renameTo('search', 'query'), renameTo('items', 'limit'));
+
+const NOTE_TEXT = renameTo('text', 'note');
+const FAVORITE_TARGET = compose(renameTo('entityType', 'type'), renameTo('entityId', ID_PARAM));
+
+const PARAM_ADAPTERS: Record<string, Record<string, ParamAdapter>> = {
+  experiments: {
+    searchExperiments: searchQuery,
+    restartExperiment: renameTo('type', 'asType'),
+    createExperimentNote: NOTE_TEXT,
+    editExperimentNote: NOTE_TEXT,
+    replyToExperimentNote: NOTE_TEXT,
+    addExperimentMetrics: metricIdsFromMetrics,
+    createScheduledAction: renameTo('scheduledAt', 'at'),
+    ...entityAdapters('fieldId', {
+      byId: ['getCustomField', 'archiveCustomField'],
+      create: ['createCustomField'],
+      update: ['updateCustomField'],
+      fieldAliases: { default_value: 'defaultValue' },
+    }),
+  },
+  goals: entityAdapters('goalId', {
+    byId: ['getGoal', 'followGoal', 'unfollowGoal', 'listGoalAccessUsers', 'grantGoalAccessUser', 'revokeGoalAccessUser', 'listGoalAccessTeams', 'grantGoalAccessTeam', 'revokeGoalAccessTeam'],
+    create: ['createGoal'],
+    update: ['updateGoal'],
+  }),
+  segments: entityAdapters('segmentId', {
+    byId: ['getSegment', 'deleteSegment'],
+    create: ['createSegment'],
+    update: ['updateSegment'],
+    fieldAliases: { value_source_attribute: 'attribute', display_name: 'displayName' },
+  }),
+  teams: {
+    ...entityAdapters('teamId', {
+      byId: ['getTeam', 'archiveTeam', 'listTeamMembers', 'addTeamMembers', 'removeTeamMembers'],
+      create: ['createTeam'],
+      update: ['updateTeam'],
+    }),
+    editTeamMemberRoles: compose(idFrom('teamId'), teamMemberRoles),
+  },
+  users: {
+    ...entityAdapters('userId', {
+      byId: ['getUser', 'archiveUser', 'resetUserPassword'],
+    }),
+    listUserApiKeys: userRefFromUserId,
+    createUserApiKey: compose(userRefFromUserId, flattenData),
+    deleteUserApiKey: userRefFromUserId,
+  },
+  apps: entityAdapters('appId', { byId: ['getApp', 'archiveApp'], create: ['createApp'], update: ['updateApp'] }),
+  envs: entityAdapters('envId', { byId: ['getEnv', 'archiveEnv'], create: ['createEnv'], update: ['updateEnv'] }),
+  units: entityAdapters('unitId', { byId: ['getUnit', 'archiveUnit'], create: ['createUnit'], update: ['updateUnit'] }),
+  tags: entityAdapters('tagId', { byId: ['getTag', 'deleteTag'], create: ['createTag'], update: ['updateTag'] }),
+  goaltags: entityAdapters('tagId', { byId: ['getGoalTag', 'deleteGoalTag'], create: ['createGoalTag'], update: ['updateGoalTag'] }),
+  metrictags: entityAdapters('tagId', { byId: ['getMetricTag', 'deleteMetricTag'], create: ['createMetricTag'], update: ['updateMetricTag'] }),
+  metriccategories: entityAdapters('categoryId', {
+    byId: ['getMetricCategory', 'archiveMetricCategory'],
+    create: ['createMetricCategory'],
+    update: ['updateMetricCategory'],
+  }),
+  auth: entityAdapters('keyId', {
+    byId: ['getAuthApiKey', 'deleteAuthApiKey'],
+    create: ['createAuthApiKey'],
+    update: ['updateAuthApiKey'],
+  }),
+  apikeys: entityAdapters('keyId', { byId: ['getApiKey', 'deleteApiKey'], create: ['createApiKey'], update: ['updateApiKey'] }),
+  webhooks: entityAdapters('webhookId', {
+    byId: ['getWebhook', 'deleteWebhook'],
+    create: ['createWebhook'],
+    update: ['updateWebhook'],
+    fieldAliases: { max_retries: 'maxRetries' },
+  }),
+  roles: entityAdapters('roleId', { byId: ['getRole', 'deleteRole'], create: ['createRole'], update: ['updateRole'] }),
+  assetroles: entityAdapters('roleId', {
+    byId: ['getAssetRole', 'deleteAssetRole'],
+    create: ['createAssetRole'],
+    update: ['updateAssetRole'],
+  }),
+  favorites: { addFavorite: FAVORITE_TARGET, removeFavorite: FAVORITE_TARGET },
+  insights: {
+    getVelocityInsights: flattenParams,
+    getVelocityInsightsDetail: flattenParams,
+    getDecisionInsights: flattenParams,
+    getDecisionInsightsHistory: flattenParams,
+  },
+  cors: entityAdapters('originId', { byId: ['getCorsOrigin', 'deleteCorsOrigin'], create: ['createCorsOrigin'], update: ['updateCorsOrigin'] }),
+  datasources: configEntityAdapters('datasourceId', {
+    byId: ['getDatasource', 'archiveDatasource'],
+    create: ['createDatasource'],
+    update: ['updateDatasource'],
+  }),
+  exportconfigs: configEntityAdapters('configId', {
+    byId: ['getExportConfig', 'archiveExportConfig', 'pauseExportConfig', 'listExportHistories'],
+    create: ['createExportConfig'],
+    update: ['updateExportConfig'],
+  }),
+  updateschedules: configEntityAdapters('scheduleId', {
+    byId: ['getUpdateSchedule', 'deleteUpdateSchedule'],
+    create: ['createUpdateSchedule'],
+    update: ['updateUpdateSchedule'],
+  }),
+  customsections: {
+    ...entityAdapters('sectionId', {
+      byId: ['archiveCustomSection'],
+      create: ['createCustomSection'],
+      update: ['updateCustomSection'],
+    }),
+    reorderCustomSections: sectionOrder,
+  },
+  activity: { listActivity: flattenParams },
+  statistics: { getPowerMatrix: renameTo(PARAMS_PARAM, CONFIG_PARAM) },
+  events: { listEvents: flattenParams, listEventsHistory: flattenParams },
+  storageconfigs: configEntityAdapters('configId', {
+    byId: ['getStorageConfig'],
+    create: ['createStorageConfig'],
+    update: ['updateStorageConfig'],
+  }),
+  actiondialogfields: configEntityAdapters('fieldId', {
+    byId: ['getActionDialogField'],
+    create: ['createActionDialogField'],
+    update: ['updateActionDialogField'],
+  }),
+};
+
+// Commands a param rename cannot express: positional cores, cores that drop
+// documented fields, and params that must be resolved to an ID first.
+type CommandRunner = (client: ApiClientLike, params: Record<string, unknown>) => Promise<unknown>;
+
+const BULK_COMMANDS = ['bulkStart', 'bulkStop', 'bulkArchive', 'bulkDevelopment', 'bulkFullOn'] as const;
+// Positional arguments after `names`, per @absmartly/cli core/experiments/bulk.js.
+const BULK_EXTRA_ARGS: Record<typeof BULK_COMMANDS[number], string[]> = {
+  bulkStart: ['note'],
+  bulkStop: ['reason', 'note'],
+  bulkArchive: ['note'],
+  bulkDevelopment: ['note'],
+  bulkFullOn: ['variant', 'note'],
+};
+// Arguments the backend rejects when absent; failing here beats sending `undefined`.
+const BULK_REQUIRED_ARGS: Partial<Record<typeof BULK_COMMANDS[number], string>> = {
+  bulkStop: 'reason',
+  bulkFullOn: 'variant',
+};
+
+const experimentsCore = CORE_MODULES.experiments;
+
+/**
+ * core bulk*(client, ids, names, ...args) take the ID list positionally. The
+ * names map only labels results, so it is passed empty rather than costing a
+ * GET per experiment (and aborting the batch on one transient failure).
+ */
+function bulkRunner(command: typeof BULK_COMMANDS[number]): CommandRunner {
+  return async (client, params) => {
+    const required = BULK_REQUIRED_ARGS[command];
+    if (required !== undefined && params[required] === undefined) {
+      throw new Error(`experiments.${command} requires "${required}"`);
+    }
+    const ids = Array.isArray(params.ids) ? params.ids.map(toNumberIfNumeric) : [];
+    const extra = BULK_EXTRA_ARGS[command].map((name) => params[name]);
+    return experimentsCore[command](client, ids, new Map(), ...extra);
+  };
+}
+
+const ASSET_ROLE_PAGE_SIZE = 100;
+const MAX_ASSET_ROLE_PAGES = 20;
+
+/**
+ * Every asset role. @absmartly/cli >= 1.16 pages listAssetRoles; older
+ * versions drop `{ items, page }` and return the whole list on every call.
+ * Paging stops at a short page, at a page larger than requested (paging was
+ * ignored), or at a page with no new IDs (the same list again).
+ */
+async function listAllAssetRoles(client: ApiClientLike): Promise<Array<{ id: number; name?: string }>> {
+  const roles = new Map<number, { id: number; name?: string }>();
+  for (let page = 1; page <= MAX_ASSET_ROLE_PAGES; page++) {
+    const { data } = await CORE_MODULES.assetroles.listAssetRoles(client, { items: ASSET_ROLE_PAGE_SIZE, page }) as { data: Array<{ id: number; name?: string }> };
+    const before = roles.size;
+    for (const role of data) roles.set(role.id, role);
+    if (data.length !== ASSET_ROLE_PAGE_SIZE || roles.size === before) break;
+  }
+  return [...roles.values()];
+}
+
+/** Resolves an asset role given by ID or by name. */
+async function resolveAssetRoleId(client: ApiClientLike, role: unknown): Promise<unknown> {
+  const numeric = toNumberIfNumeric(role);
+  if (typeof numeric === 'number') return numeric;
+  const data = await listAllAssetRoles(client);
+  const wanted = String(role).toLowerCase();
+  const match = data.find((r) => r.name?.toLowerCase() === wanted);
+  if (!match) {
+    throw new Error(`Asset role "${String(role)}" not found. Available: ${data.map((r) => r.name).join(', ')}`);
+  }
+  return match.id;
+}
+
+function experimentAccessRunner(command: 'grantExperimentAccessUser' | 'grantExperimentAccessTeam'): CommandRunner {
+  return async (client, params) => {
+    const { role, ...rest } = params;
+    if (role === undefined && rest.roleId === undefined) {
+      throw new Error(`experiments.${command} requires "role" (an asset role ID or name)`);
+    }
+    const roleId = rest.roleId !== undefined ? toNumberIfNumeric(rest.roleId) : await resolveAssetRoleId(client, role);
+    return experimentsCore[command](client, { ...rest, roleId });
+  };
+}
+
+/** Resolves a platform config given by numeric ID or by its name (e.g. "experiment_form_team_visibility"). */
+async function resolvePlatformConfigId(client: ApiClientLike, configKey: unknown): Promise<unknown> {
+  const numeric = toNumberIfNumeric(configKey);
+  if (typeof numeric === 'number') return numeric;
+  const { data } = await CORE_MODULES.platformconfig.listPlatformConfigs(client) as { data: Array<{ id: number; name?: string }> };
+  const match = data.find((c) => c.name === configKey);
+  if (!match) throw new Error(`Platform config "${String(configKey)}" not found`);
+  return match.id;
+}
+
+/** User data documents API names; send first_name/last_name verbatim instead of the core's name split. */
+function userFields(data: unknown): Record<string, unknown> {
+  return isRecord(data) ? data : {};
+}
+
+const EXPERIMENT_RUNNERS: Record<string, CommandRunner> = {
+  // core createExperiment(client, body) posts its second argument as the body.
+  createExperiment: (client, params) =>
+    experimentsCore.createExperiment(client, isRecord(params.data) ? params.data : {}),
+  // core cloneExperiment(client, payload, sourceId) expects a payload built by buildClonePayload.
+  cloneExperiment: async (client, params) => {
+    const experimentId = toNumberIfNumeric(params.experimentId);
+    const { payload, warnings } = await experimentsCore.buildClonePayload(client, {
+      ...params,
+      experimentId,
+      defaultType: params.defaultType ?? DEFAULT_EXPERIMENT_TYPE,
+    });
+    const result = await experimentsCore.cloneExperiment(client, payload, experimentId);
+    return warnings?.length ? { ...result, warnings: [...(result.warnings ?? []), ...warnings] } : result;
+  },
+  ...Object.fromEntries(BULK_COMMANDS.map((c) => [c, bulkRunner(c)])),
+  grantExperimentAccessUser: experimentAccessRunner('grantExperimentAccessUser'),
+  grantExperimentAccessTeam: experimentAccessRunner('grantExperimentAccessTeam'),
+  // core createAnnotation/updateAnnotation forward only `type`; the API takes the whole annotation.
+  createAnnotation: async (client, params) => ({
+    data: await client.createAnnotation({ ...userFields(params.data), experiment_id: params.experimentId } as any),
+  }),
+  updateAnnotation: async (client, params) => ({
+    data: await client.updateAnnotation(params.annotationId as any, userFields(params.data) as any),
+  }),
+};
+
+const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
+  experiments: EXPERIMENT_RUNNERS,
+  users: {
+    createUser: async (client, params) => ({ data: await client.createUser(userFields(params.data) as any) }),
+    updateUser: async (client, params) => {
+      const data = userFields(params.data);
+      if (Object.keys(data).length === 0) throw new Error('At least one update field is required');
+      await client.updateUser(params.userId as any, data as any);
+      return { data: { id: params.userId } };
+    },
+  },
+  platformconfig: {
+    getPlatformConfig: async (client, params) =>
+      CORE_MODULES.platformconfig.getPlatformConfig(client, { id: await resolvePlatformConfigId(client, params.configKey) }),
+    updatePlatformConfig: async (client, params) => {
+      const { data } = params;
+      return CORE_MODULES.platformconfig.updatePlatformConfig(client, {
+        id: await resolvePlatformConfigId(client, params.configKey),
+        value: isRecord(data) && 'value' in data ? data.value : data,
+      });
+    },
+  },
+};
+
+/**
+ * Core functions a runner calls besides the one named after the command, as
+ * `fn` (same group) or `group.fn`. scripts/endpoint-manifest.ts walks these
+ * too, so the manifest stays complete.
+ */
+export const RUNNER_EXTRA_CORE_FUNCTIONS: Record<string, string[]> = {
+  'experiments.cloneExperiment': ['buildClonePayload'],
+  'experiments.grantExperimentAccessUser': ['assetroles.listAssetRoles'],
+  'experiments.grantExperimentAccessTeam': ['assetroles.listAssetRoles'],
+  'platformconfig.getPlatformConfig': ['listPlatformConfigs'],
+  'platformconfig.updatePlatformConfig': ['listPlatformConfigs'],
+};
+
+/** True when a command is dispatched by a runner instead of a `(client, params)` core call. */
+export function hasCommandRunner(group: string, command: string): boolean {
+  return COMMAND_RUNNERS[group]?.[command] !== undefined;
+}
+
+/**
+ * Translates catalog-shaped params into the shape the dispatched core
+ * function reads. Exported so tests can pin the mapping per command.
+ */
+export function normalizeCommandParams(
   group: string,
   command: string,
   params: Record<string, unknown>
@@ -1369,7 +1783,8 @@ function normalizeCommandParams(
   if (group === METRICS_GROUP) {
     return normalizeMetricCommandParams(command, params);
   }
-  return params;
+  const adapt = PARAM_ADAPTERS[group]?.[command];
+  return adapt ? adapt(params) : params;
 }
 
 export async function executeCommand(
@@ -1386,6 +1801,11 @@ export async function executeCommand(
   const mod = CORE_MODULES[group];
   if (!mod) {
     throw new Error(`Unknown group: "${group}". Available: ${CLI_GROUPS.join(', ')}`);
+  }
+
+  const runner = COMMAND_RUNNERS[group]?.[command];
+  if (runner) {
+    return runner(client, params);
   }
 
   const fn = mod[command];

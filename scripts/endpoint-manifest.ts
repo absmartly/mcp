@@ -20,7 +20,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getGroupSummary } from "../src/cli-catalog.js";
+import { getGroupSummary, RUNNER_EXTRA_CORE_FUNCTIONS } from "../src/cli-catalog.js";
 import type { Endpoint, EndpointHttpMethod as HttpMethod, EndpointManifest } from "../src/endpoint-manifest.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -207,12 +207,14 @@ export function buildEndpointManifest(): EndpointManifest {
 
   const commands: EndpointManifest["commands"] = {};
   for (const { group, commands: names } of getGroupSummary()) {
-    const moduleFile = coreModuleFile(group);
     for (const command of names) {
-      const target = resolveExport(moduleFile, command);
-      if (!target) throw new Error(`Core function ${group}.${command} not found in ${moduleFile}`);
       const called = new Set<string>();
-      collectApiMethods(target.file, target.body, apiMethodNames, new Set(), called);
+      for (const ref of [command, ...(RUNNER_EXTRA_CORE_FUNCTIONS[`${group}.${command}`] ?? [])]) {
+        const [fnGroup, fn] = ref.includes(".") ? ref.split(".") : [group, ref];
+        const target = resolveExport(coreModuleFile(fnGroup), fn);
+        if (!target) throw new Error(`Core function ${fnGroup}.${fn} not found`);
+        collectApiMethods(target.file, target.body, apiMethodNames, new Set(), called);
+      }
       const sorted = [...called].sort();
       commands[`${group}.${command}`] = { apiMethods: sorted, endpoints: endpointsFor(sorted) };
     }

@@ -1,7 +1,7 @@
 {
   "manifestVersion": 1,
   "generatedFrom": {
-    "@absmartly/cli": "1.14.0"
+    "@absmartly/cli": "1.16.2"
   },
   "endpoints": [
     {
@@ -570,11 +570,11 @@
     },
     {
       "method": "GET",
-      "path": "/v1/insights/velocity/summary"
+      "path": "/v1/insights/summary"
     },
     {
       "method": "GET",
-      "path": "/v1/insights/velocity/summary/detail"
+      "path": "/v1/insights/summary/detail"
     },
     {
       "method": "GET",
@@ -1561,11 +1561,11 @@
         },
         {
           "method": "GET",
-          "path": "/v1/insights/velocity/summary"
+          "path": "/v1/insights/summary"
         },
         {
           "method": "GET",
-          "path": "/v1/insights/velocity/summary/detail"
+          "path": "/v1/insights/summary/detail"
         },
         {
           "method": "GET",
@@ -2471,12 +2471,52 @@
     },
     "experiments.cloneExperiment": {
       "apiMethods": [
-        "createExperiment"
+        "createExperiment",
+        "getExperiment",
+        "listApplications",
+        "listCustomSectionFields",
+        "listExperimentTags",
+        "listMetrics",
+        "listTeams",
+        "listUnitTypes",
+        "listUsers"
       ],
       "endpoints": [
         {
+          "method": "GET",
+          "path": "/v1/applications"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_section_fields"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_tags"
+        },
+        {
           "method": "POST",
           "path": "/v1/experiments"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/unit_types"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users"
         }
       ]
     },
@@ -2813,9 +2853,14 @@
     },
     "experiments.grantExperimentAccessUser": {
       "apiMethods": [
-        "grantExperimentAccessUser"
+        "grantExperimentAccessUser",
+        "listAssetRoles"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/asset_roles"
+        },
         {
           "method": "POST",
           "path": "/v1/experiments/{id}/asset_role_users"
@@ -2846,9 +2891,14 @@
     },
     "experiments.grantExperimentAccessTeam": {
       "apiMethods": [
-        "grantExperimentAccessTeam"
+        "grantExperimentAccessTeam",
+        "listAssetRoles"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/asset_roles"
+        },
         {
           "method": "POST",
           "path": "/v1/experiments/{id}/asset_role_teams"
@@ -4482,7 +4532,7 @@
       "endpoints": [
         {
           "method": "GET",
-          "path": "/v1/insights/velocity/summary"
+          "path": "/v1/insights/summary"
         },
         {
           "method": "GET",
@@ -4511,7 +4561,7 @@
         },
         {
           "method": "GET",
-          "path": "/v1/insights/velocity/summary/detail"
+          "path": "/v1/insights/summary/detail"
         },
         {
           "method": "GET",
@@ -4909,9 +4959,14 @@
     },
     "platformconfig.getPlatformConfig": {
       "apiMethods": [
-        "getPlatformConfig"
+        "getPlatformConfig",
+        "listPlatformConfigs"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/configs"
+        },
         {
           "method": "GET",
           "path": "/v1/configs/{id}"
@@ -4921,9 +4976,14 @@
     "platformconfig.updatePlatformConfig": {
       "apiMethods": [
         "getPlatformConfig",
+        "listPlatformConfigs",
         "updatePlatformConfig"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/configs"
+        },
         {
           "method": "GET",
           "path": "/v1/configs/{id}"
