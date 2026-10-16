@@ -1676,7 +1676,7 @@ function experimentAccessRunner(command: 'grantExperimentAccessUser' | 'grantExp
     if (role === undefined && rest.roleId === undefined) {
       throw new Error(`experiments.${command} requires "role" (an asset role ID or name)`);
     }
-    const roleId = rest.roleId ?? await resolveAssetRoleId(client, role);
+    const roleId = rest.roleId !== undefined ? toNumberIfNumeric(rest.roleId) : await resolveAssetRoleId(client, role);
     return experimentsCore[command](client, { ...rest, roleId });
   };
 }
