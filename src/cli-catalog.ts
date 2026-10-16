@@ -1361,7 +1361,329 @@ export function normalizeMetricCommandParams(command: string, params: Record<str
   return normalizeMetricFields(normalized);
 }
 
-function normalizeCommandParams(
+// ─── Catalog → core param translation (non-metric groups) ──────────────────
+// The catalog documents the public MCP shape: `<entity>Id` for the target,
+// and a nested `data` object for create/update fields, mostly in API
+// snake_case. Each core function reads its own shape (`id`, top-level
+// camelCase fields, `config` for raw API bodies). The adapters below
+// translate one into the other, keyed by `group.command`.
+
+type ParamAdapter = (params: Record<string, unknown>) => Record<string, unknown>;
+
+const DATA_PARAM = 'data';
+const PARAMS_PARAM = 'params';
+const CONFIG_PARAM = 'config';
+const ID_PARAM = 'id';
+const DEFAULT_EXPERIMENT_TYPE = 'test';
+
+/** Moves `from` to `to` when `to` is not already set. */
+function rename(params: Record<string, unknown>, from: string, to: string): Record<string, unknown> {
+  if (params[from] === undefined || params[to] !== undefined) return params;
+  const { [from]: value, ...rest } = params;
+  return { ...rest, [to]: value };
+}
+
+/** Spreads a nested object param into the top level. Top-level keys win. */
+function flatten(params: Record<string, unknown>, key: string): Record<string, unknown> {
+  const nested = params[key];
+  if (!isRecord(nested)) return params;
+  const { [key]: _nested, ...rest } = params;
+  return { ...nested, ...rest };
+}
+
+/** Renames snake_case API field names to the camelCase names a core function reads. */
+function aliasFields(params: Record<string, unknown>, aliases: Record<string, string>): Record<string, unknown> {
+  let result = params;
+  for (const [from, to] of Object.entries(aliases)) result = rename(result, from, to);
+  return result;
+}
+
+function compose(...adapters: ParamAdapter[]): ParamAdapter {
+  return (params) => adapters.reduce((acc, adapt) => adapt(acc), params);
+}
+
+const renameTo = (from: string, to: string): ParamAdapter => (p) => rename(p, from, to);
+const idFrom = (from: string): ParamAdapter => renameTo(from, ID_PARAM);
+const flattenData: ParamAdapter = (p) => flatten(p, DATA_PARAM);
+const flattenParams: ParamAdapter = (p) => flatten(p, PARAMS_PARAM);
+const aliases = (map: Record<string, string>): ParamAdapter => (p) => aliasFields(p, map);
+/** Core functions that forward a raw API body read it from `config`. */
+const dataAsConfig: ParamAdapter = renameTo(DATA_PARAM, CONFIG_PARAM);
+
+/** `<entity>Id` → `id`, and for create/update commands `data` → top-level fields. */
+function entityAdapters(entityIdParam: string, commands: {
+  byId: string[];
+  create?: string[];
+  update?: string[];
+  fieldAliases?: Record<string, string>;
+}): Record<string, ParamAdapter> {
+  const fields = compose(flattenData, aliases(commands.fieldAliases ?? {}));
+  const out: Record<string, ParamAdapter> = {};
+  for (const c of commands.byId) out[c] = idFrom(entityIdParam);
+  for (const c of commands.create ?? []) out[c] = fields;
+  for (const c of commands.update ?? []) out[c] = compose(idFrom(entityIdParam), fields);
+  return out;
+}
+
+/** Same as entityAdapters, for groups whose core functions forward `data` as the raw API body. */
+function configEntityAdapters(entityIdParam: string, commands: {
+  byId: string[];
+  create?: string[];
+  update?: string[];
+}): Record<string, ParamAdapter> {
+  const out: Record<string, ParamAdapter> = {};
+  for (const c of commands.byId) out[c] = idFrom(entityIdParam);
+  for (const c of commands.create ?? []) out[c] = dataAsConfig;
+  for (const c of commands.update ?? []) out[c] = compose(idFrom(entityIdParam), dataAsConfig);
+  return out;
+}
+
+function toNumberIfNumeric(value: unknown): unknown {
+  return typeof value === 'string' && value.trim() !== '' && !Number.isNaN(Number(value)) ? Number(value) : value;
+}
+
+/** users.*ApiKey core functions resolve a user by `userRef` (an ID string or an email). */
+const userRefFromUserId: ParamAdapter = (p) => {
+  if (p.userId === undefined || p.userRef !== undefined) return p;
+  const { userId, ...rest } = p;
+  return { ...rest, userRef: String(userId) };
+};
+
+/** createUser/updateUser core functions read a single `name` and split it into first/last. */
+const userName: ParamAdapter = (p) => {
+  if (p.name !== undefined || (p.first_name === undefined && p.last_name === undefined)) return p;
+  const { first_name, last_name, ...rest } = p;
+  return { ...rest, name: [first_name, last_name].filter((part) => part !== undefined && part !== '').join(' ') };
+};
+
+/** addExperimentMetrics documents `[{ metric_id, type }]`; the core sends `metricIds`. */
+const metricIdsFromMetrics: ParamAdapter = (p) => {
+  if (!Array.isArray(p.metrics) || p.metricIds !== undefined) return p;
+  const { metrics, ...rest } = p;
+  return { ...rest, metricIds: metrics.map((m) => (isRecord(m) ? m.metric_id : m)) };
+};
+
+/** editTeamMemberRoles documents one `userId` and `roles`; the core takes `userIds` and `roleIds`. */
+const teamMemberRoles: ParamAdapter = (p) => {
+  const { userId, roles, ...rest } = p;
+  return {
+    ...rest,
+    ...(userId !== undefined && rest.userIds === undefined ? { userIds: [userId] } : {}),
+    ...(roles !== undefined && rest.roleIds === undefined ? { roleIds: roles } : {}),
+  };
+};
+
+/** reorderCustomSections documents an ordered ID list; the core sends `{ id, order_index }` rows. */
+const sectionOrder: ParamAdapter = (p) => {
+  if (!Array.isArray(p.ids) || p.sections !== undefined) return p;
+  const { ids, ...rest } = p;
+  return { ...rest, sections: ids.map((id, index) => ({ id, order_index: index })) };
+};
+
+/** updatePlatformConfig documents the new value as `data`; the core reads `value`. */
+const platformConfigValue: ParamAdapter = (p) => {
+  if (p.data === undefined || p.value !== undefined) return p;
+  const { data, ...rest } = p;
+  return { ...rest, value: isRecord(data) && 'value' in data ? data.value : data };
+};
+
+/** Experiment access commands document an optional `role`; the core sends `roleId` as asset_role_id. */
+const experimentAccessRole: ParamAdapter = (p) => {
+  if (p.role === undefined || p.roleId !== undefined) return p;
+  const { role, ...rest } = p;
+  return { ...rest, roleId: toNumberIfNumeric(role) };
+};
+
+/** searchExperiments documents `search` and `items`; the core reads `query` and `limit`. */
+const searchQuery: ParamAdapter = compose(renameTo('search', 'query'), renameTo('items', 'limit'));
+
+const NOTE_TEXT = renameTo('text', 'note');
+const FAVORITE_TARGET = compose(renameTo('entityType', 'type'), renameTo('entityId', ID_PARAM));
+
+const PARAM_ADAPTERS: Record<string, Record<string, ParamAdapter>> = {
+  experiments: {
+    createExperiment: (p) => p, // dispatched by EXPERIMENT_RUNNERS, which sends `data` as the body
+    searchExperiments: searchQuery,
+    restartExperiment: renameTo('type', 'asType'),
+    createExperimentNote: NOTE_TEXT,
+    editExperimentNote: NOTE_TEXT,
+    replyToExperimentNote: NOTE_TEXT,
+    addExperimentMetrics: metricIdsFromMetrics,
+    createScheduledAction: renameTo('scheduledAt', 'at'),
+    grantExperimentAccessUser: experimentAccessRole,
+    grantExperimentAccessTeam: experimentAccessRole,
+    createAnnotation: flattenData,
+    updateAnnotation: flattenData,
+    ...entityAdapters('fieldId', {
+      byId: ['getCustomField', 'archiveCustomField'],
+      create: ['createCustomField'],
+      update: ['updateCustomField'],
+      fieldAliases: { default_value: 'defaultValue' },
+    }),
+  },
+  goals: entityAdapters('goalId', {
+    byId: ['getGoal', 'followGoal', 'unfollowGoal', 'listGoalAccessUsers', 'grantGoalAccessUser', 'revokeGoalAccessUser', 'listGoalAccessTeams', 'grantGoalAccessTeam', 'revokeGoalAccessTeam'],
+    create: ['createGoal'],
+    update: ['updateGoal'],
+  }),
+  segments: entityAdapters('segmentId', {
+    byId: ['getSegment', 'deleteSegment'],
+    create: ['createSegment'],
+    update: ['updateSegment'],
+    fieldAliases: { value_source_attribute: 'attribute', display_name: 'displayName' },
+  }),
+  teams: {
+    ...entityAdapters('teamId', {
+      byId: ['getTeam', 'archiveTeam', 'listTeamMembers', 'addTeamMembers', 'removeTeamMembers'],
+      create: ['createTeam'],
+      update: ['updateTeam'],
+    }),
+    editTeamMemberRoles: compose(idFrom('teamId'), teamMemberRoles),
+  },
+  users: {
+    ...entityAdapters('userId', {
+      byId: ['getUser', 'archiveUser', 'resetUserPassword'],
+    }),
+    createUser: compose(flattenData, userName),
+    updateUser: compose(idFrom('userId'), flattenData, userName),
+    listUserApiKeys: userRefFromUserId,
+    createUserApiKey: compose(userRefFromUserId, flattenData),
+    deleteUserApiKey: userRefFromUserId,
+  },
+  apps: entityAdapters('appId', { byId: ['getApp', 'archiveApp'], create: ['createApp'], update: ['updateApp'] }),
+  envs: entityAdapters('envId', { byId: ['getEnv', 'archiveEnv'], create: ['createEnv'], update: ['updateEnv'] }),
+  units: entityAdapters('unitId', { byId: ['getUnit', 'archiveUnit'], create: ['createUnit'], update: ['updateUnit'] }),
+  tags: entityAdapters('tagId', { byId: ['getTag', 'deleteTag'], create: ['createTag'], update: ['updateTag'] }),
+  goaltags: entityAdapters('tagId', { byId: ['getGoalTag', 'deleteGoalTag'], create: ['createGoalTag'], update: ['updateGoalTag'] }),
+  metrictags: entityAdapters('tagId', { byId: ['getMetricTag', 'deleteMetricTag'], create: ['createMetricTag'], update: ['updateMetricTag'] }),
+  metriccategories: entityAdapters('categoryId', {
+    byId: ['getMetricCategory', 'archiveMetricCategory'],
+    create: ['createMetricCategory'],
+    update: ['updateMetricCategory'],
+  }),
+  auth: entityAdapters('keyId', {
+    byId: ['getAuthApiKey', 'deleteAuthApiKey'],
+    create: ['createAuthApiKey'],
+    update: ['updateAuthApiKey'],
+  }),
+  apikeys: entityAdapters('keyId', { byId: ['getApiKey', 'deleteApiKey'], create: ['createApiKey'], update: ['updateApiKey'] }),
+  webhooks: entityAdapters('webhookId', {
+    byId: ['getWebhook', 'deleteWebhook'],
+    create: ['createWebhook'],
+    update: ['updateWebhook'],
+    fieldAliases: { max_retries: 'maxRetries' },
+  }),
+  roles: entityAdapters('roleId', { byId: ['getRole', 'deleteRole'], create: ['createRole'], update: ['updateRole'] }),
+  assetroles: entityAdapters('roleId', {
+    byId: ['getAssetRole', 'deleteAssetRole'],
+    create: ['createAssetRole'],
+    update: ['updateAssetRole'],
+  }),
+  favorites: { addFavorite: FAVORITE_TARGET, removeFavorite: FAVORITE_TARGET },
+  insights: {
+    getVelocityInsights: flattenParams,
+    getVelocityInsightsDetail: flattenParams,
+    getDecisionInsights: flattenParams,
+    getDecisionInsightsHistory: flattenParams,
+  },
+  cors: entityAdapters('originId', { byId: ['getCorsOrigin', 'deleteCorsOrigin'], create: ['createCorsOrigin'], update: ['updateCorsOrigin'] }),
+  datasources: configEntityAdapters('datasourceId', {
+    byId: ['getDatasource', 'archiveDatasource'],
+    create: ['createDatasource'],
+    update: ['updateDatasource'],
+  }),
+  exportconfigs: configEntityAdapters('configId', {
+    byId: ['getExportConfig', 'archiveExportConfig', 'pauseExportConfig', 'listExportHistories'],
+    create: ['createExportConfig'],
+    update: ['updateExportConfig'],
+  }),
+  updateschedules: configEntityAdapters('scheduleId', {
+    byId: ['getUpdateSchedule', 'deleteUpdateSchedule'],
+    create: ['createUpdateSchedule'],
+    update: ['updateUpdateSchedule'],
+  }),
+  customsections: {
+    ...entityAdapters('sectionId', {
+      byId: ['archiveCustomSection'],
+      create: ['createCustomSection'],
+      update: ['updateCustomSection'],
+    }),
+    reorderCustomSections: sectionOrder,
+  },
+  platformconfig: {
+    getPlatformConfig: idFrom('configKey'),
+    updatePlatformConfig: compose(idFrom('configKey'), platformConfigValue),
+  },
+  activity: { listActivity: flattenParams },
+  statistics: { getPowerMatrix: renameTo(PARAMS_PARAM, CONFIG_PARAM) },
+  events: { listEvents: flattenParams, listEventsHistory: flattenParams },
+  storageconfigs: configEntityAdapters('configId', {
+    byId: ['getStorageConfig'],
+    create: ['createStorageConfig'],
+    update: ['updateStorageConfig'],
+  }),
+  actiondialogfields: configEntityAdapters('fieldId', {
+    byId: ['getActionDialogField'],
+    create: ['createActionDialogField'],
+    update: ['updateActionDialogField'],
+  }),
+};
+
+// A few experiment core functions do not take `(client, params)`: they take a
+// payload or an ID list positionally, so they need a runner, not an adapter.
+type CommandRunner = (client: ApiClientLike, params: Record<string, unknown>) => Promise<unknown>;
+
+const BULK_COMMANDS = ['bulkStart', 'bulkStop', 'bulkArchive', 'bulkDevelopment', 'bulkFullOn'] as const;
+
+/** core bulk*(client, ids, names, ...) take the ID list and a name lookup positionally. */
+function bulkRunner(command: typeof BULK_COMMANDS[number]): CommandRunner {
+  return async (client, params) => {
+    const ids = Array.isArray(params.ids) ? params.ids.map(toNumberIfNumeric) : [];
+    const exp = coreExperiments as unknown as Record<string, Function>;
+    const names = await exp.fetchBulkNames(client, ids);
+    return exp[command](client, ids, names);
+  };
+}
+
+const EXPERIMENT_RUNNERS: Record<string, CommandRunner> = {
+  // core createExperiment(client, body) posts its second argument as the body.
+  createExperiment: (client, params) =>
+    (coreExperiments.createExperiment as unknown as Function)(client, isRecord(params.data) ? params.data : {}),
+  // core cloneExperiment(client, payload, sourceId) expects a payload built by buildClonePayload.
+  cloneExperiment: async (client, params) => {
+    const exp = coreExperiments as unknown as Record<string, Function>;
+    const { payload } = await exp.buildClonePayload(client, {
+      ...params,
+      defaultType: params.defaultType ?? DEFAULT_EXPERIMENT_TYPE,
+    });
+    return exp.cloneExperiment(client, payload, params.experimentId);
+  },
+  ...Object.fromEntries(BULK_COMMANDS.map((c) => [c, bulkRunner(c)])),
+};
+
+const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
+  experiments: EXPERIMENT_RUNNERS,
+};
+
+/**
+ * Core functions a runner calls besides the one named after the command.
+ * scripts/endpoint-manifest.ts walks these too, so the manifest stays complete.
+ */
+export const RUNNER_EXTRA_CORE_FUNCTIONS: Record<string, string[]> = {
+  'experiments.cloneExperiment': ['buildClonePayload'],
+  ...Object.fromEntries(BULK_COMMANDS.map((c) => [`experiments.${c}`, ['fetchBulkNames']])),
+};
+
+/** True when a command is dispatched by a runner instead of a `(client, params)` core call. */
+export function hasCommandRunner(group: string, command: string): boolean {
+  return COMMAND_RUNNERS[group]?.[command] !== undefined;
+}
+
+/**
+ * Translates catalog-shaped params into the shape the dispatched core
+ * function reads. Exported so tests can pin the mapping per command.
+ */
+export function normalizeCommandParams(
   group: string,
   command: string,
   params: Record<string, unknown>
@@ -1369,7 +1691,8 @@ function normalizeCommandParams(
   if (group === METRICS_GROUP) {
     return normalizeMetricCommandParams(command, params);
   }
-  return params;
+  const adapt = PARAM_ADAPTERS[group]?.[command];
+  return adapt ? adapt(params) : params;
 }
 
 export async function executeCommand(
@@ -1386,6 +1709,11 @@ export async function executeCommand(
   const mod = CORE_MODULES[group];
   if (!mod) {
     throw new Error(`Unknown group: "${group}". Available: ${CLI_GROUPS.join(', ')}`);
+  }
+
+  const runner = COMMAND_RUNNERS[group]?.[command];
+  if (runner) {
+    return runner(client, params);
   }
 
   const fn = mod[command];

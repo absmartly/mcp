@@ -2471,12 +2471,52 @@
     },
     "experiments.cloneExperiment": {
       "apiMethods": [
-        "createExperiment"
+        "createExperiment",
+        "getExperiment",
+        "listApplications",
+        "listCustomSectionFields",
+        "listExperimentTags",
+        "listMetrics",
+        "listTeams",
+        "listUnitTypes",
+        "listUsers"
       ],
       "endpoints": [
         {
+          "method": "GET",
+          "path": "/v1/applications"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_section_fields"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_tags"
+        },
+        {
           "method": "POST",
           "path": "/v1/experiments"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/unit_types"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users"
         }
       ]
     },
@@ -2912,9 +2952,14 @@
     },
     "experiments.bulkStart": {
       "apiMethods": [
+        "getExperiment",
         "startExperiment"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}"
+        },
         {
           "method": "PUT",
           "path": "/v1/experiments/{id}/start"
@@ -2923,9 +2968,14 @@
     },
     "experiments.bulkStop": {
       "apiMethods": [
+        "getExperiment",
         "stopExperiment"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}"
+        },
         {
           "method": "PUT",
           "path": "/v1/experiments/{id}/stop"
@@ -2934,9 +2984,14 @@
     },
     "experiments.bulkArchive": {
       "apiMethods": [
-        "archiveExperiment"
+        "archiveExperiment",
+        "getExperiment"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}"
+        },
         {
           "method": "PUT",
           "path": "/v1/experiments/{id}/archive"
@@ -2945,9 +3000,14 @@
     },
     "experiments.bulkDevelopment": {
       "apiMethods": [
-        "developmentExperiment"
+        "developmentExperiment",
+        "getExperiment"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}"
+        },
         {
           "method": "PUT",
           "path": "/v1/experiments/{id}/development"
@@ -2956,9 +3016,14 @@
     },
     "experiments.bulkFullOn": {
       "apiMethods": [
-        "fullOnExperiment"
+        "fullOnExperiment",
+        "getExperiment"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}"
+        },
         {
           "method": "PUT",
           "path": "/v1/experiments/{id}/full_on"
