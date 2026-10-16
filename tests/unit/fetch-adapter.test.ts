@@ -247,6 +247,11 @@ export default async function runTests() {
     'experiments',
     '/experiments\u0000',
     '/experiments#frag',
+    '/experiments/..;/auth/current-user',
+    '/experiments/%2e%2e;x/admin',
+    '/\uFF0E\uFF0E/auth/current-user',
+    '/%EF%BC%8E%EF%BC%8E/auth/current-user',
+    '/\u2024\u2024/auth/current-user',
   ];
   for (const path of ESCAPING_PATHS) {
     await asyncTest(`Path hardening: ${JSON.stringify(path)} rejected before fetch`, async () => {
@@ -272,6 +277,8 @@ export default async function runTests() {
     'https://example.com\\v1\\..%2f..%2fadmin/v1/x',
     'https://example.com/v1/%2e%2e%2fadmin',
     'https://example.com/v1/x?y=1#frag',
+    'https://user:pw@example.com/v1/x',
+    'https://example.com/v1/..;/admin',
   ];
   for (const url of ESCAPING_ABSOLUTE_URLS) {
     await asyncTest(`Path hardening: same-origin ${JSON.stringify(url)} rejected`, async () => {

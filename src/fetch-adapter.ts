@@ -12,20 +12,24 @@ const ROOT_AUTH_PATH = '/auth/current-user';
 // Percent-decoding passes applied when looking for hidden dot segments; covers
 // double and triple encoding (%252e, %25252e).
 const MAX_DECODE_PASSES = 3;
-// A path segment that URL parsing turns into "." or "..", in any encoding.
-const DOT_SEGMENT = /^\.{1,2}$/;
+// A path segment that URL parsing, or a server behind it, treats as "." or
+// "..": also with a ";param" suffix (Tomcat-style "..;"), and after NFKC
+// normalisation (fullwidth "．", one-dot leader "․").
+const DOT_SEGMENT = /^\.{1,2}(;.*)?$/;
 const ENCODED_SEPARATOR = /%(2f|5c)/i;
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
-// One percent-escape; decoded one at a time so a literal "%" (e.g. "50%off")
-// is kept as text rather than failing the whole path.
-const PERCENT_ESCAPE = /%[0-9a-f]{2}/gi;
+// A run of percent-escapes, decoded together so multi-byte UTF-8 (e.g. a
+// fullwidth "．" as %EF%BC%8E) is seen as its character. A run that is not
+// valid UTF-8, and a literal "%" (e.g. "50%off"), stay as text instead of
+// failing the whole path.
+const PERCENT_ESCAPE_RUN = /(?:%[0-9a-f]{2})+/gi;
 
 function decodeOnce(text: string): string {
-  return text.replace(PERCENT_ESCAPE, (escape) => {
+  return text.replace(PERCENT_ESCAPE_RUN, (run) => {
     try {
-      return decodeURIComponent(escape);
+      return decodeURIComponent(run);
     } catch {
-      return escape; // a lone byte of a multi-byte sequence: not "." or "/"
+      return run;
     }
   });
 }
@@ -44,7 +48,7 @@ export function assertSafeRequestPath(path: string): void {
       throw new Error(`Invalid API path: backslashes, encoded separators and control characters are not allowed: ${path}`);
     }
     const segments = decoded.split('/').slice(1);
-    if (segments.some((segment, i) => DOT_SEGMENT.test(segment) || (segment === '' && i < segments.length - 1))) {
+    if (segments.some((segment, i) => DOT_SEGMENT.test(segment.normalize('NFKC')) || (segment === '' && i < segments.length - 1))) {
       throw new Error(`Invalid API path: dot segments and empty segments are not allowed: ${path}`);
     }
     const next = decodeOnce(decoded);
@@ -120,6 +124,9 @@ export class FetchHttpClient implements HttpClient {
       url = new URL(requested);
       if (url.origin !== this.origin) {
         throw new Error(`Absolute URLs to other origins are not permitted: ${requested}`);
+      }
+      if (url.username || url.password) {
+        throw new Error(`Absolute URLs with credentials are not permitted: ${requested}`);
       }
       // Check the path both as written (URL parsing already resolved any "..")
       // and as parsed. With "\\" rejected above, the written path starts at
