@@ -540,6 +540,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         description: 'Start multiple experiments at once',
         params: [
           { name: 'ids', type: 'array', required: true, description: 'Array of experiment IDs' },
+          { name: 'note', type: 'string', required: false, description: 'Note recorded on each experiment' },
         ],
         returns: 'Bulk operation results',
         dangerous: true,
@@ -548,6 +549,8 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         description: 'Stop multiple experiments at once',
         params: [
           { name: 'ids', type: 'array', required: true, description: 'Array of experiment IDs' },
+          { name: 'reason', type: 'string', required: true, description: 'Stop reason, same enum as stopExperiment' },
+          { name: 'note', type: 'string', required: false, description: 'Note recorded on each experiment' },
         ],
         returns: 'Bulk operation results',
         dangerous: true,
@@ -556,6 +559,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         description: 'Archive multiple experiments at once',
         params: [
           { name: 'ids', type: 'array', required: true, description: 'Array of experiment IDs' },
+          { name: 'note', type: 'string', required: false, description: 'Note recorded on each experiment' },
         ],
         returns: 'Bulk operation results',
         dangerous: true,
@@ -564,6 +568,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         description: 'Put multiple experiments into development mode',
         params: [
           { name: 'ids', type: 'array', required: true, description: 'Array of experiment IDs' },
+          { name: 'note', type: 'string', required: false, description: 'Note recorded on each experiment' },
         ],
         returns: 'Bulk operation results',
         dangerous: true,
@@ -572,6 +577,8 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         description: 'Set multiple experiments to full-on mode',
         params: [
           { name: 'ids', type: 'array', required: true, description: 'Array of experiment IDs' },
+          { name: 'variant', type: 'number', required: true, description: 'Variant index to roll out to 100%' },
+          { name: 'note', type: 'string', required: false, description: 'Note recorded on each experiment' },
         ],
         returns: 'Bulk operation results',
         dangerous: true,
@@ -1597,12 +1604,8 @@ const PARAM_ADAPTERS: Record<string, Record<string, ParamAdapter>> = {
   }),
 };
 
-// Some commands cannot be expressed as a param rename, so they get a runner:
-// - experiment cores that take a payload or an ID list positionally;
-// - cores that would lose documented fields (createUser/updateUser re-split a
-//   joined name on the first space; create/updateAnnotation keep only `type`);
-// - params that must be resolved to an ID first (asset role names, platform
-//   config keys).
+// Commands a param rename cannot express: positional cores, cores that drop
+// documented fields, and params that must be resolved to an ID first.
 type CommandRunner = (client: ApiClientLike, params: Record<string, unknown>) => Promise<unknown>;
 
 const BULK_COMMANDS = ['bulkStart', 'bulkStop', 'bulkArchive', 'bulkDevelopment', 'bulkFullOn'] as const;

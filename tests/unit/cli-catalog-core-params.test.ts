@@ -1,11 +1,8 @@
-// Catalog → core integration tests. Each case runs executeCommand with the
-// documented catalog params through the REAL @absmartly/cli APIClient and core
-// functions, over a fake HttpClient, and pins the exact HTTP requests sent.
-// A final test runs scripts/audit-catalog-params.ts over the whole catalog and
-// fails on any catalog/core param mismatch not listed in KNOWN_CATALOG_GAPS.
+// Runs catalog commands through the real @absmartly/cli core over a fake
+// HttpClient, and guards the whole catalog with scripts/audit-catalog-params.ts.
 import { APIClient } from '@absmartly/cli/api-client';
 import type { HttpClient, HttpRequestConfig, HttpResponse } from '@absmartly/cli/api-client';
-import { executeCommand } from '../../src/cli-catalog';
+import { executeCommand, getCommandEntry, validateCommandParams } from '../../src/cli-catalog';
 import { auditCatalogParams } from '../../scripts/audit-catalog-params';
 
 const BASE_URL = 'https://api.test/v1';
@@ -402,6 +399,16 @@ export default async function runTests() {
       { firstRequest: { method: 'GET', url: '/experiments/3' }, posts: [{ url: '/experiments', name: 'copy', state: 'created' }], sourceId: 3, surfacesPayloadWarnings: true },
       'experiments.cloneExperiment: builds the payload from the source, posts the clone and surfaces payload warnings',
     );
+  }
+
+  // Every param a runner requires must also pass execute_command's catalog
+  // validation, or the command is unreachable through the MCP tool.
+  for (const [command, params] of [
+    ['bulkStop', { ids: [5], reason: 'testing', note: 'done' }],
+    ['bulkFullOn', { ids: [5], variant: 1, note: 'done' }],
+    ['grantExperimentAccessUser', { experimentId: 3, userId: 2, role: 'Editor' }],
+  ] as const) {
+    assertEquals(validateCommandParams(getCommandEntry('experiments', command)!, params), [], `experiments.${command}: runner params pass catalog validation`);
   }
 
   // Broad guard: every catalog command, after translation, supplies the
