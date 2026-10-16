@@ -219,7 +219,6 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           { name: 'type', type: 'string', required: false, description: 'Restart as a different type: feature or experiment' },
           { name: 'state', type: 'string', required: false, description: 'State of the new iteration: running or development' },
           { name: 'reshuffle', type: 'boolean', required: false, description: 'Reshuffle variant assignment for the new iteration' },
-          { name: 'defaultType', type: 'string', required: false, description: 'Experiment type the source is read as when type is omitted (default: test)' },
           { name: 'note', type: 'string', required: false, description: 'Optional note' },
         ],
         returns: 'Restart result with the new iteration ID',
@@ -1218,8 +1217,16 @@ export function validateCommandParams(
     errors.push(guess ? `${baseMsg} Did you mean "${guess}"?` : baseMsg);
   }
 
+  // A deprecated object param (the legacy `params` filter bag) still carries
+  // the fields it was replaced by, so its fields count as supplied.
+  const legacyFields = entry.params
+    .filter((p) => p.deprecated && p.type === 'object' && isRecord(provided[p.name]))
+    .map((p) => provided[p.name] as Record<string, unknown>);
+  const supplied = (name: string) =>
+    provided[name] !== undefined || legacyFields.some((fields) => fields[name] !== undefined);
+
   for (const p of entry.params) {
-    if (p.required && provided[p.name] === undefined) {
+    if (p.required && !supplied(p.name)) {
       errors.push(`Missing required param "${p.name}" (${p.type}) for ${entry.group}.${entry.command}: ${p.description}`);
     }
   }
@@ -1506,6 +1513,9 @@ const FAVORITE_TARGET = compose(renameTo('entityType', 'type'), renameTo('entity
 const PARAM_ADAPTERS: Record<string, Record<string, ParamAdapter>> = {
   experiments: {
     searchExperiments: searchQuery,
+    // RestartExperimentParams types defaultType as required, but core
+    // restartExperiment never reads it (only buildRestartChanges does), so it
+    // is filled in, not documented.
     restartExperiment: compose(renameTo('type', 'asType'), withDefault('defaultType', DEFAULT_EXPERIMENT_TYPE)),
     generateTemplate: compose(withDefault('name', DEFAULT_TEMPLATE_NAME), withDefault('type', DEFAULT_EXPERIMENT_TYPE)),
     listCustomFields: withDefault('type', DEFAULT_EXPERIMENT_TYPE),
@@ -1701,10 +1711,10 @@ async function resolveAssetRoleId(client: ApiClientLike, role: unknown): Promise
 function accessRunner(group: string, command: string, entityIdParam: string, coreIdParam: string): CommandRunner {
   return async (client, params) => {
     const { role, [entityIdParam]: entityId, ...rest } = params;
-    if (role === undefined && rest.roleId === undefined) {
+    if (role === undefined) {
       throw new Error(`${group}.${command} requires "role" (an asset role ID or name)`);
     }
-    const roleId = rest.roleId !== undefined ? toNumberIfNumeric(rest.roleId) : await resolveAssetRoleId(client, role);
+    const roleId = await resolveAssetRoleId(client, role);
     return CORE_MODULES[group][command](client, { ...rest, [coreIdParam]: entityId, roleId });
   };
 }
@@ -1720,7 +1730,15 @@ const GOAL_ACCESS_COMMANDS = ['grantGoalAccessUser', 'revokeGoalAccessUser', 'gr
 function datasourceRunner(command: string): CommandRunner {
   return async (client, params) => {
     const body: Record<string, unknown> = { datasource_id: params.datasourceId };
-    if (isRecord(params.config)) Object.assign(body, params.config, { datasource_id: params.datasourceId });
+    if (params.config !== undefined) {
+      // The backend tests the inline config only when it has both type and
+      // properties; anything less would silently test the stored config.
+      if (!isRecord(params.config) || typeof params.config.type !== 'string' || !isRecord(params.config.properties)) {
+        throw new Error(`datasources.${command}: "config" must be an object with "type" (string) and "properties" (object)`);
+      }
+      body.type = params.config.type;
+      body.properties = params.config.properties;
+    }
     if (params.query !== undefined) body.query = params.query;
     return CORE_MODULES.datasources[command](client, { config: body });
   };
@@ -1782,10 +1800,13 @@ const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
   datasources: Object.fromEntries(['testDatasource', 'introspectDatasource', 'validateDatasourceQuery'].map((c) => [c, datasourceRunner(c)])),
   storageconfigs: {
     // Like datasources: the backend merges the stored secret key when given storage_config_id.
+    // The backend merges only the stored secret key (by storage_config_id); the
+    // exporter needs type and properties in the body, so read those first.
     testStorageConfig: async (client, params) => {
       const { data: stored } = await CORE_MODULES.storageconfigs.getStorageConfig(client, { id: params.configId }) as { data: Record<string, unknown> };
-      const { id: _id, ...config } = stored;
-      return CORE_MODULES.storageconfigs.testStorageConfig(client, { config: { ...config, storage_config_id: params.configId } });
+      return CORE_MODULES.storageconfigs.testStorageConfig(client, {
+        config: { type: stored.type, properties: stored.properties, storage_config_id: params.configId },
+      });
     },
   },
   platformconfig: {

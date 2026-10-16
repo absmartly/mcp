@@ -247,7 +247,6 @@ export default async function runTests() {
     'experiments',
     '/experiments\u0000',
     '/experiments#frag',
-    '/%zz',
   ];
   for (const path of ESCAPING_PATHS) {
     await asyncTest(`Path hardening: ${JSON.stringify(path)} rejected before fetch`, async () => {
@@ -270,6 +269,9 @@ export default async function runTests() {
     'https://example.com/auth/other',
     'https://example.com/auth/current-user/../../admin',
     'https://example.com/v1\\..\\admin',
+    'https://example.com\\v1\\..%2f..%2fadmin/v1/x',
+    'https://example.com/v1/%2e%2e%2fadmin',
+    'https://example.com/v1/x?y=1#frag',
   ];
   for (const url of ESCAPING_ABSOLUTE_URLS) {
     await asyncTest(`Path hardening: same-origin ${JSON.stringify(url)} rejected`, async () => {
@@ -289,10 +291,16 @@ export default async function runTests() {
     mockFetch(async (url) => { urls.push(String(url)); return new Response('{}', { headers: { 'content-type': 'application/json' } }); });
     await client.request({ method: 'GET', url: '/experiments/42', params: { q: '../x' } });
     await client.request({ method: 'GET', url: '/experiments/' });
+    await client.request({ method: 'GET', url: '/goals/50%25off' });
+    await client.request({ method: 'GET', url: '/goals/50%off' });
+    await client.request({ method: 'GET', url: '/experiments?state=running', params: { items: 5 } });
     await client.request({ method: 'GET', url: 'https://example.com/base/auth/current-user/api_keys/7' });
     assertEquals(urls, [
       'https://example.com/base/v1/experiments/42?q=..%2Fx',
       'https://example.com/base/v1/experiments/',
+      'https://example.com/base/v1/goals/50%25off',
+      'https://example.com/base/v1/goals/50%off',
+      'https://example.com/base/v1/experiments?state=running&items=5',
       'https://example.com/base/auth/current-user/api_keys/7',
     ], 'Path hardening: allowed URLs are unchanged');
     restoreFetch();

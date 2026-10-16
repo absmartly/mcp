@@ -16,6 +16,19 @@ const MAX_DECODE_PASSES = 3;
 const DOT_SEGMENT = /^\.{1,2}$/;
 const ENCODED_SEPARATOR = /%(2f|5c)/i;
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
+// One percent-escape; decoded one at a time so a literal "%" (e.g. "50%off")
+// is kept as text rather than failing the whole path.
+const PERCENT_ESCAPE = /%[0-9a-f]{2}/gi;
+
+function decodeOnce(text: string): string {
+  return text.replace(PERCENT_ESCAPE, (escape) => {
+    try {
+      return decodeURIComponent(escape);
+    } catch {
+      return escape; // a lone byte of a multi-byte sequence: not "." or "/"
+    }
+  });
+}
 
 /**
  * Rejects a request path that URL parsing could move outside the prefix it
@@ -34,12 +47,7 @@ export function assertSafeRequestPath(path: string): void {
     if (segments.some((segment, i) => DOT_SEGMENT.test(segment) || (segment === '' && i < segments.length - 1))) {
       throw new Error(`Invalid API path: dot segments and empty segments are not allowed: ${path}`);
     }
-    let next: string;
-    try {
-      next = decodeURIComponent(decoded);
-    } catch {
-      throw new Error(`Invalid API path: malformed percent-encoding: ${path}`);
-    }
+    const next = decodeOnce(decoded);
     if (next === decoded) return;
     decoded = next;
   }
@@ -62,6 +70,9 @@ function credentialHeaders(options: FetchHttpClientOptions): Record<string, stri
 
 export class FetchHttpClient implements HttpClient {
   private baseUrl: string;
+  private origin: string;
+  private apiPrefix: string;
+  private authPrefix: string;
   private credentialHeaders: Record<string, string>;
   private timeout: number;
 
@@ -70,6 +81,11 @@ export class FetchHttpClient implements HttpClient {
     if (this.baseUrl.endsWith(API_VERSION_PREFIX)) {
       this.baseUrl = this.baseUrl.substring(0, this.baseUrl.length - API_VERSION_PREFIX.length);
     }
+    const base = new URL(this.baseUrl);
+    const basePath = base.pathname.replace(/\/$/, '');
+    this.origin = base.origin;
+    this.apiPrefix = `${basePath}${API_VERSION_PREFIX}`;
+    this.authPrefix = `${basePath}${ROOT_AUTH_PATH}`;
     this.credentialHeaders = credentialHeaders(options);
     this.timeout = options.timeout ?? DEFAULT_REQUEST_TIMEOUT_MS;
   }
@@ -78,66 +94,64 @@ export class FetchHttpClient implements HttpClient {
     return `${this.baseUrl}${API_VERSION_PREFIX}`;
   }
 
+  /** Under <base>/v1/, or one of the root auth paths APIClient.getRootUrl() builds. */
+  private isAllowedPath(path: string): boolean {
+    return path === this.authPrefix || path.startsWith(`${this.authPrefix}/`) || path.startsWith(`${this.apiPrefix}/`);
+  }
+
   /**
    * Builds the request URL, allowing only paths under the configured base's
-   * /v1, plus the same-origin root auth paths APIClient.getRootUrl() builds.
-   * A cross-origin absolute URL is rejected: accepting one would send the
-   * attached credential to an arbitrary host.
+   * /v1, plus the same-origin root auth paths. A cross-origin absolute URL is
+   * rejected: accepting one would send the attached credential to an
+   * arbitrary host.
    */
-  private resolveUrl(requested: string): string {
-    const base = new URL(this.baseUrl);
-    const basePath = base.pathname.replace(/\/$/, '');
-    const apiPrefix = `${basePath}${API_VERSION_PREFIX}`;
-    const authPrefix = `${basePath}${ROOT_AUTH_PATH}`;
+  private resolveUrl(requested: string): URL {
+    // WHATWG URL treats "\\" as "/" in http(s) URLs, anywhere in the string, so
+    // reject it before any parsing or slicing.
+    if (requested.includes('\\') || CONTROL_CHARACTER.test(requested)) {
+      throw new Error(`Invalid API path: backslashes and control characters are not allowed: ${requested}`);
+    }
+    if (requested.includes('#')) {
+      throw new Error(`Invalid API path: fragments are not allowed: ${requested}`);
+    }
 
-    let path: string;
+    let url: URL;
     if (ABSOLUTE_URL_PATTERN.test(requested)) {
-      const parsed = new URL(requested);
-      if (parsed.origin !== base.origin) {
+      url = new URL(requested);
+      if (url.origin !== this.origin) {
         throw new Error(`Absolute URLs to other origins are not permitted: ${requested}`);
       }
-      // Check the path as written, not as URL parsing normalised it.
-      path = requested.slice(requested.indexOf('/', requested.indexOf('//') + 2)).split(/[?#]/)[0];
-      assertSafeRequestPath(path);
-      if (!(path === authPrefix || path.startsWith(`${authPrefix}/`) || path.startsWith(`${apiPrefix}/`))) {
-        throw new Error(`Absolute URLs outside the API base are not permitted: ${requested}`);
-      }
+      // Check the path both as written (URL parsing already resolved any "..")
+      // and as parsed. With "\\" rejected above, the written path starts at
+      // the first "/" after the authority.
+      const authorityEnd = requested.indexOf('/', requested.indexOf('//') + 2);
+      const writtenPath = authorityEnd === -1 ? '/' : requested.slice(authorityEnd).split('?')[0];
+      assertSafeRequestPath(writtenPath);
+      assertSafeRequestPath(url.pathname);
     } else {
       if (!requested.startsWith('/') || requested.startsWith('//')) {
         throw new Error(`Invalid API path: must be a single "/"-prefixed path relative to ${API_VERSION_PREFIX}: ${requested}`);
       }
-      if (requested.includes('#')) {
-        throw new Error(`Invalid API path: fragments are not allowed: ${requested}`);
-      }
       const [relativePath] = requested.split('?');
       assertSafeRequestPath(relativePath);
-      path = `${apiPrefix}${relativePath}`;
-      requested = `${base.origin}${apiPrefix}${requested}`;
+      url = new URL(`${this.origin}${this.apiPrefix}${requested}`);
     }
 
-    // Defense in depth: what fetch will request must still be under the prefix.
-    const resolved = new URL(requested).pathname;
-    if (!(resolved === authPrefix || resolved.startsWith(`${authPrefix}/`) || resolved.startsWith(`${apiPrefix}/`))) {
-      throw new Error(`Request path resolves outside the API base: ${path}`);
+    if (!this.isAllowedPath(url.pathname)) {
+      throw new Error(`Request path is outside the API base: ${requested}`);
     }
-    return requested;
+    return url;
   }
 
   async request<T = unknown>(config: HttpRequestConfig): Promise<HttpResponse<T>> {
-    let url = this.resolveUrl(config.url);
-
-    if (config.params) {
-      const searchParams = new URLSearchParams();
-      for (const [key, value] of Object.entries(config.params)) {
-        if (value !== undefined && value !== null) {
-          searchParams.append(key, String(value));
-        }
-      }
-      const query = searchParams.toString();
-      if (query) {
-        url += `?${query}`;
+    const target = this.resolveUrl(config.url);
+    // Merged with any query already in the path, never a second "?".
+    for (const [key, value] of Object.entries(config.params ?? {})) {
+      if (value !== undefined && value !== null) {
+        target.searchParams.append(key, String(value));
       }
     }
+    const url = target.toString();
 
     // Header names are case-insensitive, so set() replaces a request header
     // of any casing. Credential headers go last so a request header can never

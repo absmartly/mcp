@@ -144,9 +144,6 @@ const CASES: Case[] = [
       { method: 'GET', url: '/asset_roles', params: { items: '100', page: '2' } },
       { method: 'POST', url: '/experiments/3/asset_role_users', data: { user_id: 2, asset_role_id: 777 } },
     ] },
-  { name: 'grantExperimentAccessTeam normalises a direct numeric-string roleId', group: 'experiments', command: 'grantExperimentAccessTeam',
-    params: { experimentId: 3, teamId: 2, roleId: '6' },
-    expected: [{ method: 'POST', url: '/experiments/3/asset_role_teams', data: { team_id: 2, asset_role_id: 6 } }] },
   // Pre-1.16 cores drop { items, page } and return every role on each call
   // (simulated by a server that ignores the paging params).
   { name: 'role lookup makes one request when paging is ignored and the list exceeds a page', group: 'experiments', command: 'grantExperimentAccessUser',
@@ -394,6 +391,12 @@ const CASES: Case[] = [
   { name: 'testDatasource merges unsaved edits but keeps the id', group: 'datasources', command: 'testDatasource',
     params: { datasourceId: 2, config: { type: 'clickhouse', properties: { host: 'ch.test' }, datasource_id: 99 } },
     expected: [{ method: 'POST', url: '/datasources/test', data: { datasource_id: 2, type: 'clickhouse', properties: { host: 'ch.test' } } }] },
+  { name: 'testDatasource rejects a partial config instead of testing the stored one', group: 'datasources', command: 'testDatasource',
+    params: { datasourceId: 2, config: { properties: { host: 'ch.test' } } },
+    expectedError: 'datasources.testDatasource: "config" must be an object with "type" (string) and "properties" (object)', expected: [] },
+  { name: 'testDatasource rejects a non-object config', group: 'datasources', command: 'testDatasource',
+    params: { datasourceId: 2, config: 'clickhouse' },
+    expectedError: 'datasources.testDatasource: "config" must be an object with "type" (string) and "properties" (object)', expected: [] },
   { name: 'introspectDatasource introspects the stored datasource by id', group: 'datasources', command: 'introspectDatasource', params: { datasourceId: 2 },
     expected: [{ method: 'POST', url: '/datasources/introspect', data: { datasource_id: 2 } }] },
   { name: 'validateDatasourceQuery sends the id and query', group: 'datasources', command: 'validateDatasourceQuery',
@@ -405,7 +408,7 @@ const CASES: Case[] = [
       : { ok: true, test: {} }),
     expected: [
       { method: 'GET', url: '/storage_configs/5' },
-      { method: 'POST', url: '/storage_configs/test', data: { name: 's3', type: 'S3', properties: { bucket: 'b', accessKey: 'AK' }, storage_config_id: 5 } },
+      { method: 'POST', url: '/storage_configs/test', data: { type: 'S3', properties: { bucket: 'b', accessKey: 'AK' }, storage_config_id: 5 } },
     ] },
 ];
 
@@ -497,6 +500,26 @@ export default async function runTests() {
     ['grantExperimentAccessUser', { experimentId: 3, userId: 2, role: 'Editor' }],
   ] as const) {
     assertEquals(validateCommandParams(getCommandEntry('experiments', command)!, params), [], `experiments.${command}: runner params pass catalog validation`);
+  }
+
+  // The deprecated `params` bag still satisfies the required filters it replaced.
+  {
+    const insights = getCommandEntry('insights', 'getVelocityInsights')!;
+    assertEquals(
+      validateCommandParams(insights, { params: { from: '2026-01-01', to: '2026-02-01', aggregation: 'week' } }),
+      [],
+      'insights: the legacy params bag passes validation',
+    );
+    assertEquals(
+      validateCommandParams(insights, { params: { from: '2026-01-01' } }).length,
+      2,
+      'insights: a legacy params bag missing filters still fails validation',
+    );
+    assertEquals(
+      getCommandEntry('experiments', 'restartExperiment')!.params.some((p) => p.name === 'defaultType'),
+      false,
+      'restartExperiment does not document defaultType, which the core never reads',
+    );
   }
 
   // Deprecated params stay accepted (old callers keep working) but are not documented.
