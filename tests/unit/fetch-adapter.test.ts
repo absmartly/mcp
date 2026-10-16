@@ -1,4 +1,5 @@
 import assert from 'node:assert';
+import { APIClient } from '@absmartly/cli/api-client';
 import { FetchHttpClient } from '../../src/fetch-adapter';
 
 const originalFetch = globalThis.fetch;
@@ -220,6 +221,92 @@ export default async function runTests() {
     try { await client.request({ method: 'GET', url: 'https://attacker.example/steal' }); }
     catch (e: any) { threw = e.message.includes('other origins'); }
     ok(threw && !fetched, 'URL: cross-origin absolute URL rejected, credential never sent');
+    restoreFetch();
+  });
+
+  // Raw-request path hardening: nothing may leave /v1 (or the root auth
+  // paths), however the escape is encoded, and the check runs before fetch.
+  const ESCAPING_PATHS = [
+    '/../auth/current-user',
+    '/experiments/../../auth/current-user',
+    '/./experiments',
+    '/%2e%2e/auth/current-user',
+    '/%2E%2E/auth/current-user',
+    '/.%2e/auth/current-user',
+    '/%2e./auth/current-user',
+    '/%252e%252e/auth/current-user',
+    '/%25252e%25252e/auth/current-user',
+    '/experiments/%2e',
+    '/..\\auth/current-user',
+    '/\\..\\auth/current-user',
+    '/experiments%2f..%2f..%2fauth',
+    '/experiments%2F..',
+    '/experiments%5c..%5cauth',
+    '//evil.example/steal',
+    '/experiments//1',
+    'experiments',
+    '/experiments\u0000',
+    '/experiments#frag',
+    '/%zz',
+  ];
+  for (const path of ESCAPING_PATHS) {
+    await asyncTest(`Path hardening: ${JSON.stringify(path)} rejected before fetch`, async () => {
+      const client = new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'jwt' });
+      let fetched = false;
+      mockFetch(async () => { fetched = true; return new Response('{}'); });
+      let error = '';
+      try { await client.request({ method: 'GET', url: path }); }
+      catch (e: any) { error = e.message; }
+      ok(error.startsWith('Invalid API path') || error.includes('not permitted'), `Path hardening: ${JSON.stringify(path)} rejected`, `got "${error}"`);
+      ok(!fetched, `Path hardening: ${JSON.stringify(path)} never reaches fetch`);
+      restoreFetch();
+    });
+  }
+
+  const ESCAPING_ABSOLUTE_URLS = [
+    'https://example.com/v1/../auth/current-user/api_keys',
+    'https://example.com/v1/%2e%2e/admin',
+    'https://example.com/admin',
+    'https://example.com/auth/other',
+    'https://example.com/auth/current-user/../../admin',
+    'https://example.com/v1\\..\\admin',
+  ];
+  for (const url of ESCAPING_ABSOLUTE_URLS) {
+    await asyncTest(`Path hardening: same-origin ${JSON.stringify(url)} rejected`, async () => {
+      const client = new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'jwt' });
+      let fetched = false;
+      mockFetch(async () => { fetched = true; return new Response('{}'); });
+      let threw = false;
+      try { await client.request({ method: 'GET', url }); } catch { threw = true; }
+      ok(threw && !fetched, `Path hardening: same-origin ${JSON.stringify(url)} rejected before fetch`);
+      restoreFetch();
+    });
+  }
+
+  await asyncTest('Path hardening: ordinary paths, query params and root auth paths still work', async () => {
+    const client = new FetchHttpClient('https://example.com/base', { authToken: 'tok', authType: 'jwt' });
+    const urls: string[] = [];
+    mockFetch(async (url) => { urls.push(String(url)); return new Response('{}', { headers: { 'content-type': 'application/json' } }); });
+    await client.request({ method: 'GET', url: '/experiments/42', params: { q: '../x' } });
+    await client.request({ method: 'GET', url: '/experiments/' });
+    await client.request({ method: 'GET', url: 'https://example.com/base/auth/current-user/api_keys/7' });
+    assertEquals(urls, [
+      'https://example.com/base/v1/experiments/42?q=..%2Fx',
+      'https://example.com/base/v1/experiments/',
+      'https://example.com/base/auth/current-user/api_keys/7',
+    ], 'Path hardening: allowed URLs are unchanged');
+    restoreFetch();
+  });
+
+  await asyncTest('Path hardening: APIClient.rawRequest cannot escape /v1 through the MCP client', async () => {
+    const client = new APIClient(new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'jwt' }));
+    let fetched = false;
+    mockFetch(async () => { fetched = true; return new Response('{}'); });
+    let threw = 0;
+    for (const path of ['/v1/../auth/current-user', '/%2e%2e/auth/current-user', '/..%5cauth', '/%252e%252e/auth']) {
+      try { await client.rawRequest(path); } catch { threw++; }
+    }
+    ok(threw === 4 && !fetched, 'Path hardening: rawRequest escapes rejected before fetch', `threw ${threw}/4, fetched=${fetched}`);
     restoreFetch();
   });
 

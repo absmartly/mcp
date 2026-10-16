@@ -777,6 +777,7 @@ src/
 - **Session isolation** — each connection has its own credentials
 - **OAuth protection** — API key sessions block OAuth discovery to prevent auth method confusion
 - **Destructive action confirmation** — start, stop, archive, and delete operations require explicit confirmation
+- **Requests stay under the API base** — `FetchHttpClient` only sends requests under the configured base's `/v1` (plus the root `/auth/current-user` paths), to the configured origin. It rejects dot segments (including `%2e`/`%2E` and multiply-encoded forms), backslashes, encoded separators (`%2f`, `%5c`) and control characters before the URL is built, so `fetch` never normalises a path like `/v1/../auth` out of the prefix. Redirects are not followed.
 - **API error surfacing** — validation errors from the API are returned with full detail for correction
 
 ## License
