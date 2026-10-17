@@ -14,6 +14,7 @@ import {
   searchCommands,
   documentedParams,
   executeCommand,
+  TOOL_INJECTED_PARAMS,
   getTotalCommandCount,
   validateCommandParams,
 } from "./cli-catalog.js";
@@ -403,20 +404,22 @@ To create experiments, use group "experiments", command "createExperimentFromTem
           );
         }
 
-        // Apply default items limit for list operations
-        const itemsLimit = params.limit ?? DEFAULT_LIST_ITEMS;
-        if (params.command.startsWith('list') || params.command.startsWith('search')) {
-          if (commandParams.items === undefined) {
-            commandParams.items = itemsLimit;
+        // Defaults the tool layer injects; executeCommand lets exactly these
+        // through (TOOL_INJECTED_PARAMS), and the audit ignores them.
+        const injectedDefaults: Record<string, unknown> = {
+          items: params.limit ?? DEFAULT_LIST_ITEMS,
+          page: 1,
+          apiEndpoint: ctx.endpoint || undefined,
+        };
+        const isListCommand = params.command.startsWith('list') || params.command.startsWith('search');
+        const injectedNames: readonly string[] = [
+          ...TOOL_INJECTED_PARAMS.always,
+          ...(isListCommand ? TOOL_INJECTED_PARAMS.listCommands : []),
+        ];
+        for (const name of injectedNames) {
+          if (commandParams[name] === undefined && injectedDefaults[name] !== undefined) {
+            commandParams[name] = injectedDefaults[name];
           }
-          if (commandParams.page === undefined) {
-            commandParams.page = 1;
-          }
-        }
-
-        // Fill in apiEndpoint for commands that need it (clone, generateTemplate, etc.)
-        if (commandParams.apiEndpoint === undefined && ctx.endpoint) {
-          commandParams.apiEndpoint = ctx.endpoint;
         }
 
         const result = await executeCommand(ctx.apiClient, params.group, params.command, commandParams);

@@ -1231,82 +1231,138 @@ function idParams(entry: CommandEntry): CommandParam[] {
 }
 
 // Array params whose items are entity IDs. Other arrays (show, exclude,
-// metrics objects, event filters) are not IDs and are left alone.
+// metrics objects, event filters) are not IDs and are left alone. `ids` on
+// bulk commands must be non-empty (an empty batch is a mistake); a body list
+// like editTeamMemberRoles `roles` may be empty (it clears the roles).
 const ID_LIST_PARAMS = new Set([ID_LIST_PARAM, 'userIds', 'roles']);
+const NON_EMPTY_ID_LIST_PARAMS = new Set([ID_LIST_PARAM, 'userIds']);
 
-// Documented, deprecated aliases: the alias is validated and moved to the
-// canonical param, which only the alias or the canonical may supply.
-const ID_ALIASES: Record<string, Record<string, string>> = {
-  ...Object.fromEntries(['grantExperimentAccessUser', 'revokeExperimentAccessUser', 'grantExperimentAccessTeam', 'revokeExperimentAccessTeam']
-    .map((c) => [`experiments.${c}`, { roleId: 'role' }])),
-  ...Object.fromEntries(['grantGoalAccessUser', 'revokeGoalAccessUser', 'grantGoalAccessTeam', 'revokeGoalAccessTeam']
-    .map((c) => [`goals.${c}`, { roleId: 'role' }])),
-  ...Object.fromEntries(['grantMetricAccessUser', 'revokeMetricAccessUser', 'grantMetricAccessTeam', 'revokeMetricAccessTeam']
-    .map((c) => [`metrics.${c}`, { roleId: 'assetRoleId' }])),
-};
+/** Params the execute_command tool layer adds itself (src/tools.ts); the audit ignores them too. */
+export const TOOL_INJECTED_PARAMS = {
+  always: ['apiEndpoint'],
+  listCommands: ['items', 'page'],
+} as const;
+const TOOL_INJECTED_PARAM_NAMES = new Set<string>([...TOOL_INJECTED_PARAMS.always, ...TOOL_INJECTED_PARAMS.listCommands]);
 
-// Params the execute_command tool layer adds itself (src/tools.ts).
-const TOOL_INJECTED_PARAMS = new Set(['items', 'page', 'apiEndpoint']);
+const ROLE_ALIAS = 'roleId';
+
+/**
+ * Documented deprecated ID aliases (alias -> canonical), per command. Filled
+ * lazily (the access-command lists are declared further down).
+ */
+let documentedIdAliases: Record<string, Record<string, string>> | undefined;
+function documentedAliases(label: string): Record<string, string> {
+  documentedIdAliases ??= {
+    ...Object.fromEntries(EXPERIMENT_ACCESS_COMMANDS.map((c) => [`experiments.${c}`, { [ROLE_ALIAS]: 'role' }])),
+    ...Object.fromEntries(GOAL_ACCESS_COMMANDS.map((c) => [`goals.${c}`, { [ROLE_ALIAS]: 'role' }])),
+    ...Object.fromEntries([...METRIC_ACCESS_ROLE_COMMANDS].map((c) => [`metrics.${c}`, { [ROLE_ALIAS]: 'assetRoleId' }])),
+  };
+  return documentedIdAliases[label] ?? {};
+}
+
+/**
+ * Undocumented core-name aliases a 2.0 direct executeCommand caller could pass
+ * (e.g. `id` where the core reads `id` for a documented `goalId`). Derived from
+ * the adapters: a key an adapter renames a documented ID param to.
+ */
+const coreIdAliasCache = new Map<string, Record<string, string>>();
+function coreIdAliases(entry: CommandEntry): Record<string, string> {
+  const label = `${entry.group}.${entry.command}`;
+  const cached = coreIdAliasCache.get(label);
+  if (cached) return cached;
+  const aliases: Record<string, string> = {};
+  for (const p of idParams(entry)) {
+    if (p.deprecated) continue;
+    const marker = `__id_${p.name}`;
+    const translated = normalizeCommandParams(entry.group, entry.command, { [p.name]: marker });
+    for (const [key, value] of Object.entries(translated)) {
+      if (value === marker && key !== p.name) aliases[key] = p.name;
+    }
+  }
+  coreIdAliasCache.set(label, aliases);
+  return aliases;
+}
+
+const warnedAliases = new Set<string>();
+function warnDeprecatedAlias(label: string, alias: string, canonical: string): void {
+  const key = `${label}:${alias}`;
+  if (warnedAliases.has(key)) return;
+  warnedAliases.add(key);
+  console.warn(`@absmartly/mcp: "${alias}" for ${label} is deprecated; pass "${canonical}" instead.`);
+}
 
 /**
  * The one owner of entity-ID params, run at the top of executeCommand (and by
  * validateCommandParams for friendly errors). Returns new params where:
+ * - the deprecated `params` filter bag is flattened, so its keys go through
+ *   the same rules;
  * - every documented *Id param and ID array is a positive integer (" 05 " is
- *   5), so the value the core interpolates into a path is that integer;
- * - a documented deprecated alias (roleId) is validated and moved to its
- *   canonical param; it conflicts with a different canonical value;
- * - any undocumented key is dropped, so a core-name alias like `id` or
- *   `assetRoleId` can never override the normalised documented value;
- * - a required ID that is missing throws, so no path is built with "undefined".
- * Throws one error listing every problem.
+ *   5), so the value the core interpolates into a path is that integer; an
+ *   optional ID given as null is treated as absent;
+ * - a deprecated alias (documented, like roleId, or a 2.0 core name, like
+ *   `id`) is validated and moved to its canonical param, and conflicts with a
+ *   different canonical value; a core-name alias logs a one-time warning;
+ * - any other undocumented key is dropped, so it can never reach the core;
+ * - a required param that is missing (counting aliases) is reported, so no
+ *   path is built with "undefined".
+ * Throws an IdParamError listing every problem.
  */
-export function normalizeIdParams(group: string, command: string, params: Record<string, unknown>): Record<string, unknown> {
-  const entry = getCommandEntry(group, command);
-  if (!entry) throw new Error(`Unknown command: ${group}.${command}`);
+export function normalizeIdParams(
+  entry: CommandEntry,
+  params: Record<string, unknown>,
+  // The catalog audit probes partial param sets; it skips the required check.
+  options: { checkRequired?: boolean } = {},
+): Record<string, unknown> {
+  const checkRequired = options.checkRequired ?? true;
   const label = `${entry.group}.${entry.command}`;
   const errors: string[] = [];
-  const known = new Set([...entry.params.map((p) => p.name), ...TOOL_INJECTED_PARAMS]);
+  const bagParam = entry.params.find((p) => p.name === PARAMS_PARAM && p.deprecated);
+  const input = bagParam ? flatten(params, PARAMS_PARAM) : params;
+
+  const documented = documentedAliases(label);
+  const coreAliases = Object.fromEntries(Object.entries(coreIdAliases(entry)).filter(([alias]) => !(alias in documented)));
+  const aliases: Record<string, string> = { ...coreAliases, ...documented };
+  const known = new Set([...entry.params.map((p) => p.name), ...TOOL_INJECTED_PARAM_NAMES]);
   const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(params)) {
-    if (known.has(key)) out[key] = value;
+  for (const [key, value] of Object.entries(input)) {
+    if (known.has(key) && !(key in aliases)) out[key] = value;
   }
 
-  for (const [alias, canonical] of Object.entries(ID_ALIASES[label] ?? {})) {
-    if (out[alias] === undefined) continue;
-    const id = toPositiveInteger(out[alias]);
+  for (const [alias, canonical] of Object.entries(aliases)) {
+    const value = input[alias];
+    if (value === undefined || value === null) continue;
+    if (alias in coreAliases) warnDeprecatedAlias(label, alias, canonical);
+    const id = toPositiveInteger(value);
     if (id === undefined) {
       errors.push(`Param "${alias}" for ${label} must be a positive integer ID.`);
-    } else if (out[canonical] !== undefined && toPositiveInteger(out[canonical]) !== id) {
+    } else if (out[canonical] !== undefined && out[canonical] !== null && toPositiveInteger(out[canonical]) !== id) {
       errors.push(`Params "${alias}" and "${canonical}" for ${label} disagree; pass only "${canonical}".`);
     } else {
       out[canonical] = out[canonical] ?? id;
     }
-    delete out[alias];
-  }
-
-  for (const p of idParams(entry)) {
-    if (p.deprecated) continue;
-    if (out[p.name] === undefined) {
-      if (p.required) errors.push(`Missing required param "${p.name}" for ${label}.`);
-      continue;
-    }
-    const id = toPositiveInteger(out[p.name]);
-    if (id === undefined) errors.push(`Param "${p.name}" for ${label} must be a positive integer ID.`);
-    else out[p.name] = id;
   }
 
   for (const p of entry.params) {
-    if (p.type !== 'array' || !ID_LIST_PARAMS.has(p.name)) continue;
-    if (out[p.name] === undefined) {
-      if (p.required) errors.push(`Missing required param "${p.name}" for ${label}.`);
+    if (p.deprecated) continue;
+    if (out[p.name] === null && !p.required) delete out[p.name];
+    const value = out[p.name];
+    if (value === undefined || value === null) {
+      if (p.required && checkRequired) errors.push(`Missing required param "${p.name}" (${p.type}) for ${label}: ${p.description}`);
       continue;
     }
-    const list = out[p.name];
-    const ids = Array.isArray(list) ? list.map(toPositiveInteger) : [];
-    if (ids.length === 0 || ids.some((id) => id === undefined)) {
-      errors.push(`Param "${p.name}" for ${label} must be a non-empty array of positive integer IDs.`);
-    } else {
-      out[p.name] = ids;
+    if (p.type === 'number' && ID_PARAM_NAME.test(p.name)) {
+      const id = toPositiveInteger(value);
+      if (id === undefined) errors.push(`Param "${p.name}" for ${label} must be a positive integer ID.`);
+      else out[p.name] = id;
+    } else if (p.type === 'array' && ID_LIST_PARAMS.has(p.name)) {
+      const ids = Array.isArray(value) ? value.map(toPositiveInteger) : null;
+      const empty = ids !== null && ids.length === 0 && NON_EMPTY_ID_LIST_PARAMS.has(p.name);
+      if (ids === null || empty || ids.some((id) => id === undefined)) {
+        const what = NON_EMPTY_ID_LIST_PARAMS.has(p.name) ? 'a non-empty array' : 'an array';
+        errors.push(`Param "${p.name}" for ${label} must be ${what} of positive integer IDs.`);
+      } else {
+        out[p.name] = ids;
+      }
     }
   }
 
@@ -1357,19 +1413,12 @@ export function validateCommandParams(
     errors.push(guess ? `${baseMsg} Did you mean "${guess}"?` : baseMsg);
   }
 
-  const aliasFor = Object.fromEntries(Object.entries(ID_ALIASES[`${entry.group}.${entry.command}`] ?? {}).map(([alias, canonical]) => [canonical, alias]));
-  for (const p of entry.params) {
-    if (p.required && checked[p.name] === undefined && (aliasFor[p.name] === undefined || checked[aliasFor[p.name]] === undefined)) {
-      errors.push(`Missing required param "${p.name}" (${p.type}) for ${entry.group}.${entry.command}: ${p.description}`);
-    }
-  }
-  // The same ID rules executeCommand enforces, as friendly errors. Missing
-  // required params are already reported above.
+  // Required params and ID rules: exactly what executeCommand enforces.
   try {
-    normalizeIdParams(entry.group, entry.command, checked);
+    normalizeIdParams(entry, checked);
   } catch (e) {
     if (!(e instanceof IdParamError)) throw e;
-    errors.push(...e.problems.filter((problem) => !problem.startsWith('Missing required param')));
+    errors.push(...e.problems);
   }
 
   return errors;
@@ -1787,11 +1836,6 @@ const BULK_EXTRA_ARGS: Record<typeof BULK_COMMANDS[number], string[]> = {
   bulkDevelopment: ['note'],
   bulkFullOn: ['variant', 'note'],
 };
-// Arguments the backend rejects when absent; failing here beats sending `undefined`.
-const BULK_REQUIRED_ARGS: Partial<Record<typeof BULK_COMMANDS[number], string>> = {
-  bulkStop: 'reason',
-  bulkFullOn: 'variant',
-};
 
 const experimentsCore = CORE_MODULES.experiments;
 
@@ -1802,10 +1846,6 @@ const experimentsCore = CORE_MODULES.experiments;
  */
 function bulkRunner(command: typeof BULK_COMMANDS[number]): CommandRunner {
   return async (client, params) => {
-    const required = BULK_REQUIRED_ARGS[command];
-    if (required !== undefined && params[required] === undefined) {
-      throw new Error(`experiments.${command} requires "${required}"`);
-    }
     // normalizeIdParams has already made ids a non-empty array of integers.
     const ids = params[ID_LIST_PARAM] as number[];
     const extra = BULK_EXTRA_ARGS[command].map((name) => params[name]);
@@ -1855,10 +1895,8 @@ async function resolveAssetRoleId(client: ApiClientLike, role: unknown): Promise
  */
 function accessRunner(group: string, command: string, entityIdParam: string, coreIdParam: string): CommandRunner {
   return async (client, params) => {
+    // normalizeIdParams has checked that role (or its roleId alias) is present.
     const { role, [entityIdParam]: entityId, ...rest } = params;
-    if (role === undefined) {
-      throw new Error(`${group}.${command} requires "role" (an asset role ID or name)`);
-    }
     const roleId = await resolveAssetRoleId(client, role);
     return CORE_MODULES[group][command](client, { ...rest, [coreIdParam]: entityId, roleId });
   };
@@ -1914,14 +1952,13 @@ const EXPERIMENT_RUNNERS: Record<string, CommandRunner> = {
   createExperiment: (client, params) =>
     experimentsCore.createExperiment(client, isRecord(params.data) ? params.data : {}),
   // core cloneExperiment(client, payload, sourceId) expects a payload built by buildClonePayload.
+  // experimentId is already a positive integer (normalizeIdParams).
   cloneExperiment: async (client, params) => {
-    const experimentId = toPositiveInteger(params.experimentId);
     const { payload, warnings } = await experimentsCore.buildClonePayload(client, {
       ...params,
-      experimentId,
       defaultType: params.defaultType ?? DEFAULT_EXPERIMENT_TYPE,
     });
-    const result = await experimentsCore.cloneExperiment(client, payload, experimentId);
+    const result = await experimentsCore.cloneExperiment(client, payload, params.experimentId);
     return warnings?.length ? { ...result, warnings: [...(result.warnings ?? []), ...warnings] } : result;
   },
   ...Object.fromEntries(BULK_COMMANDS.map((c) => [c, bulkRunner(c)])),
@@ -2023,7 +2060,7 @@ export async function executeCommand(
   }
 
   // Entity IDs are normalised before any adapter, runner or core sees them.
-  const idSafeParams = normalizeIdParams(group, command, params);
+  const idSafeParams = normalizeIdParams(entry, params);
 
   const runner = COMMAND_RUNNERS[group]?.[command];
   if (runner) {

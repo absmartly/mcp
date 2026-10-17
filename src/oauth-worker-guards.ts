@@ -27,11 +27,14 @@ type OAuthErrorClass = new (code: string, options: { description: string; status
 export async function checkBackendSessionOnRefresh(options: TokenExchangeCallbackOptions, OAuthErrorImpl: OAuthErrorClass): Promise<void> {
     if (options.grantType !== REFRESH_GRANT_TYPE) return;
     const props = options.props as ABsmartlyProps;
-    if (!props?.oauth_jwt || !props.absmartly_endpoint) return;
-    const baseUrl = tryParseAbsmartlyEndpoint(props.absmartly_endpoint)?.baseUrl;
-    if (!baseUrl) {
+    // Checked before the JWT early return: a grant with a bad stored endpoint
+    // must end here, or refreshing would keep it alive while every MCP call
+    // is turned away (withValidStoredEndpoint).
+    if (props?.absmartly_endpoint !== undefined && !tryParseAbsmartlyEndpoint(props.absmartly_endpoint)) {
         throw new OAuthErrorImpl(OAUTH_ERROR_INVALID_GRANT, { description: `${MESSAGE_INVALID_ENDPOINT}: ${props.absmartly_endpoint}. Please sign in again.` });
     }
+    if (!props?.oauth_jwt || !props.absmartly_endpoint) return;
+    const baseUrl = tryParseAbsmartlyEndpoint(props.absmartly_endpoint)!.baseUrl;
     let response: Response;
     try {
         response = await fetch(`${baseUrl}${USERINFO_PATH}`, {

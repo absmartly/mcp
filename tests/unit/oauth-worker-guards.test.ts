@@ -123,6 +123,16 @@ export default async function run() {
     });
   });
 
+  await asyncTest('refresh ends a grant with a bad stored endpoint even when it has no backend JWT (API-key grant)', async () => {
+    await withFetch(200, async (calls) => {
+      await assert.rejects(
+        checkBackendSessionOnRefresh(refreshOptions({ props: { absmartly_api_key: 'k', absmartly_endpoint: 'https://demo.absmartly.com/%2e%2e' } }), OAuthError as any),
+        (e: any) => e instanceof OAuthError && e.code === 'invalid_grant',
+      );
+      assert.deepStrictEqual(calls, []);
+    });
+  });
+
   await asyncTest('an MCP request whose grant has an invalid stored endpoint gets 401 invalid_token, prompting re-authorization', async () => {
     let reached = 0;
     const handler = withValidStoredEndpoint({ fetch: async () => { reached++; return new Response('ok'); } }, '/mcp');

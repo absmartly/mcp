@@ -245,7 +245,9 @@ export async function beginAuthorization<Req extends AuthorizationRequest>(
   const endpointReady = !options.requireEndpoint || !!endpoint;
   // Only check approvals when an endpoint is present: an approval is keyed by endpoint,
   // so without one there is nothing meaningful to match against.
-  if (endpointReady && options.rememberApprovals && endpoint) {
+  // A remembered approval is not applied when the requested endpoint was
+  // rejected and a fallback chosen: the user must see the notice.
+  if (endpointReady && options.rememberApprovals && endpoint && !notice) {
     const approvals = await getApprovals(cookieHeader, options);
     if (hasApproval(approvals, authRequest.clientId, endpoint)) {
       return { type: "approved", authRequest, client, endpoint, setCookies: [] };
@@ -264,7 +266,10 @@ export async function beginAuthorization<Req extends AuthorizationRequest>(
   const bindingCookie = serializeHostCookie(consentCookieName(transactionId), browserBinding, CONSENT_TTL_SECONDS, options);
 
   if (!endpointReady) {
-    return respond(htmlResult(renderEndpointForm(options.formAction, transactionId), [bindingCookie]));
+    const rejected = params.endpoint && !explicit
+      ? `The ABsmartly URL in the request (${params.endpoint}) is not valid. Enter the https:// URL of your ABsmartly instance.`
+      : undefined;
+    return respond(htmlResult(renderEndpointForm(options.formAction, transactionId, rejected), [bindingCookie]));
   }
   return respond(consentPage(client, authRequest, endpoint, transactionId, options, [bindingCookie], notice));
 }

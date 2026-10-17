@@ -19,6 +19,14 @@ const DOT_SEGMENT = /^\.{1,2}$/;
 
 export const MESSAGE_INVALID_ENDPOINT = "Invalid ABsmartly endpoint";
 
+/**
+ * Printable ASCII only. WHATWG URL silently strips tabs, newlines and
+ * surrounding spaces and percent-encodes non-ASCII, so a check done before
+ * parsing must refuse them, or "/a/.\t./b" would pass as written and then
+ * resolve as "/a/../b". Shared with FetchHttpClient's path check.
+ */
+export const PRINTABLE_ASCII = /^[\x21-\x7e]*$/;
+
 /** Thrown for a malformed ABsmartly endpoint, so callers can tell it from an auth failure. */
 export class InvalidEndpointError extends Error {
   constructor(detail: string) {
@@ -60,6 +68,9 @@ function isSafeBaseSegment(segment: string): boolean {
 export function parseAbsmartlyEndpoint(raw: string): AbsmartlyEndpoint {
   const trimmed = raw.trim();
   if (!trimmed) throw new InvalidEndpointError("empty");
+  if (!PRINTABLE_ASCII.test(trimmed)) {
+    throw new InvalidEndpointError(`only printable ASCII is allowed: ${JSON.stringify(raw)}`);
+  }
   // WHATWG URL treats "\\" as "/" and resolves what follows, so reject it
   // before parsing rather than letting "base\\..\\x" become "/x".
   if (trimmed.includes("\\")) throw new InvalidEndpointError(`backslashes are not allowed: ${raw}`);

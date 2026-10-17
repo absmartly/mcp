@@ -1,7 +1,7 @@
 import type { HttpClient, HttpRequestConfig, HttpResponse } from '@absmartly/cli/api-client';
 import { debug } from './config.js';
 import { MCP_VERSION, CLI_CORE_VERSION } from './version.js';
-import { parseAbsmartlyEndpoint } from './oauth/endpoint.js';
+import { parseAbsmartlyEndpoint, PRINTABLE_ASCII } from './oauth/endpoint.js';
 
 export { InvalidEndpointError } from './oauth/endpoint.js';
 
@@ -13,9 +13,6 @@ const FETCH_REDIRECT_MODE = 'manual';
 // are the only ones outside /v1, and they use exactly these paths.
 const ROOT_AUTH_PATH = '/auth/current-user';
 const ROOT_AUTH_SUBPATH = /^(?:\/api_keys(?:\/[0-9]+)?)?$/;
-// Printable ASCII only in the path: WHATWG URL silently strips tabs, newlines
-// and surrounding spaces, and percent-encodes non-ASCII.
-const PRINTABLE_ASCII = /^[\x21-\x7e]*$/;
 // In the path, characters WHATWG URL reinterprets ("\\" as "/") or that start
 // a fragment. In the query, only "\\": a literal "#" can be a decoded value.
 const PATH_FORBIDDEN = /[\\#]/;

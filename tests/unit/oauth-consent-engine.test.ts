@@ -292,6 +292,34 @@ export default async function run() {
     assert.ok(plain.type === 'respond' && !(plain.response.body ?? '').includes('role="status"'), 'no notice when no endpoint was supplied');
   });
 
+  await asyncTest('a fallback endpoint is never auto-approved silently, even with a remembered approval', async () => {
+    const store = memoryStore();
+    const extra: Partial<ConsentOptions> = { requireEndpoint: true, rememberApprovals: true };
+    const first = await beginAuthorization({ authRequest: request(), endpoint: 'https://stored.absmartly.com', cookieHeader: null }, options(store, extra));
+    if (first.type !== 'respond') throw new Error('unreachable');
+    const transactionId = (first.response.body ?? '').match(/name="transaction_id" value="([^"]+)"/)?.[1] || '';
+    const approved = await submitConsent({ form: { action: 'approve', transactionId }, cookieHeader: cookiePair(first.response.setCookies[0] || '') }, options(store, extra));
+    if (approved.type !== 'approved') throw new Error('expected approval');
+    const approvalsCookie = cookiePair(approved.setCookies.find((c) => c.includes('approv')) ?? '');
+    const remembered = await beginAuthorization({ authRequest: request(), endpoint: 'https://stored.absmartly.com', cookieHeader: approvalsCookie }, options(store, extra));
+    assert.strictEqual(remembered.type, 'approved', 'a valid explicit endpoint still uses the remembered approval');
+    const fallback = await beginAuthorization(
+      { authRequest: request(), endpoint: 'ftp://bad', fallbackEndpoint: 'https://stored.absmartly.com', cookieHeader: approvalsCookie },
+      options(store, extra),
+    );
+    assert.ok(fallback.type === 'respond' && (fallback.response.body ?? '').includes('role="status"'), 'the fallback shows the consent page with the notice');
+  });
+
+  await asyncTest('an invalid explicit endpoint with no fallback shows the endpoint form with an error', async () => {
+    const store = memoryStore();
+    const begin = await beginAuthorization({ authRequest: request(), endpoint: 'ftp://bad.example', cookieHeader: null }, options(store, { requireEndpoint: true }));
+    if (begin.type !== 'respond') throw new Error('unreachable');
+    const body = begin.response.body ?? '';
+    assert.ok(body.includes('name="absmartly_endpoint"') && body.includes('role="alert"') && body.includes('ftp://bad.example') && body.includes('is not valid'), 'form with the rejection');
+    const none = await beginAuthorization({ authRequest: request(), endpoint: null, cookieHeader: null }, options(store, { requireEndpoint: true }));
+    assert.ok(none.type === 'respond' && !(none.response.body ?? '').includes('role="alert"'), 'no error when nothing was supplied');
+  });
+
   return {
     success: failed === 0,
     message: `${passed} passed, ${failed} failed`,
