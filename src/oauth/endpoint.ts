@@ -86,6 +86,9 @@ export function parseAbsmartlyEndpoint(raw: string): AbsmartlyEndpoint {
   // path below must be the whole path.
   if (/[?#]/.test(trimmed)) throw new InvalidEndpointError(`a query or fragment is not allowed: ${raw}`);
   const withScheme = URL_SCHEME_PATTERN.test(trimmed) ? trimmed : `${HTTPS_SCHEME}${trimmed}`;
+  if (/^[a-z][a-z0-9+.-]*:\/\/(?:\/|$)/i.test(withScheme)) {
+    throw new InvalidEndpointError(`missing host: ${raw}`);
+  }
   let url: URL;
   try {
     url = new URL(withScheme);

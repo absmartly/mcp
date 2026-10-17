@@ -29,7 +29,7 @@ export default async function runTests() {
     assertEquals(canonicalizeEndpoint(input), baseUrl, `canonicalizeEndpoint ${JSON.stringify(input)}`);
   }
 
-  for (const bad of ['', '   ', 'https://', 'ftp://acme.absmartly.com', 'https://u:p@acme.absmartly.com', 'https://acme.absmartly.com/?a=1', 'https://acme.absmartly.com/#x',
+  for (const bad of ['', '   ', 'https://', 'http:///tenant.example/v1', 'https:///tenant.example/v1', 'https:////tenant.example/v1', 'ftp://acme.absmartly.com', 'https://u:p@acme.absmartly.com', 'https://acme.absmartly.com/?a=1', 'https://acme.absmartly.com/#x',
     'https://acme.absmartly.com/a%2f..%2fadmin', 'https://acme.absmartly.com/%2e%2e', 'https://acme.absmartly.com/x/%2E', 'https://acme.absmartly.com/a%5Cb', 'https://acme.absmartly.com/tenant/../admin', 'acme.absmartly.com/./x', 'https://acme.absmartly.com/base\\..\\..\\y', 'acme.absmartly.com\\admin',
     'https://acme.absmartly.com/a/.\t./b', 'https://acme.absmartly.com/a/.\n./v1', 'https://acme.absmartly.com/a/%2e\t%2e/b', 'https://acme.absmartly.com/caf\u00e9',
     'https://acme.absmartly.com/proxy/..?', 'https://acme.absmartly.com/proxy/..#', 'https://acme.absmartly.com/proxy?', 'https://acme.absmartly.com/%252e%252e', 'https://acme.absmartly.com/caf%C3%A9', 'https://acme.absmartly.com/a%09b']) {
