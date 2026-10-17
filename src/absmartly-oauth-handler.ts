@@ -20,7 +20,7 @@ import {
   HTTP_STATUS_BAD_REQUEST,
   firstValidEndpoint,
   MESSAGE_INVALID_ENDPOINT,
-  parseAbsmartlyEndpoint,
+  type AbsmartlyEndpoint,
   tryParseAbsmartlyEndpoint,
 } from './oauth/index.js';
 
@@ -73,10 +73,11 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
       rememberApprovals: true,
       // Runs before the transaction is discarded, so a failed write leaves the
       // transaction (and its binding cookie) in place for the client to retry.
-      onApprove: async (authRequest, endpoint) => {
+      onApprove: async (authRequest, _endpoint, parsed) => {
+        // apiUrl, not the base URL: it is parsed again when read back.
         await c.env.OAUTH_KV.put(
           `oauth_endpoint:client:${authRequest.clientId}`,
-          endpoint as string,
+          (parsed as AbsmartlyEndpoint).apiUrl,
           { expirationTtl: OAUTH_STATE_TTL_SECONDS }
         );
       },
@@ -85,8 +86,7 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
 
   private async finishConsent(c: OAuthContext, outcome: ConsentOutcome<AbsmartlyAuthRequest>): Promise<Response> {
     if (outcome.type === 'respond') return toFetchResponse(outcome.response);
-    const endpoint = outcome.endpoint as string;
-    const response = await this.redirectToAbsmartlyOAuth(c, outcome.authRequest, endpoint);
+    const response = await this.redirectToAbsmartlyOAuth(c, outcome.authRequest, outcome.absmartlyEndpoint as AbsmartlyEndpoint);
     for (const cookie of outcome.setCookies) response.headers.append('Set-Cookie', cookie);
     return response;
   }
@@ -120,7 +120,9 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
       // as the explicit endpoint, with the substitute (a valid lower-priority
       // source, or else the stored mapping) as the fallback: consent then
       // shows the "was ignored" notice and does not auto-approve.
-      const valid = requested.endpoint?.baseUrl ?? null;
+      // apiUrl: beginAuthorization parses it again, and a base URL ending in
+      // "/v1" would lose that segment (https://h/tenant/v1 -> https://h/tenant).
+      const valid = requested.endpoint?.apiUrl ?? null;
       const substitute = valid ?? await safeKvGet(c.env.OAUTH_KV, `oauth_endpoint:client:${authRequest.clientId}`);
 
       const outcome = await beginAuthorization(
@@ -317,19 +319,20 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
     });
   }
 
-  private async redirectToAbsmartlyOAuth(c: OAuthContext, authRequest: AbsmartlyAuthRequest, absmartlyEndpoint: string) {
+  private async redirectToAbsmartlyOAuth(c: OAuthContext, authRequest: AbsmartlyAuthRequest, endpoint: AbsmartlyEndpoint) {
     const url = new URL(c.req.url);
     const env = c.env;
 
-    debug(`ABsmartly endpoint for OAuth redirect: ${absmartlyEndpoint}`);
+    debug(`ABsmartly endpoint for OAuth redirect: ${endpoint.baseUrl}`);
 
-    const cleanEndpoint = parseAbsmartlyEndpoint(absmartlyEndpoint).baseUrl;
+    const cleanEndpoint = endpoint.baseUrl;
     const { codeVerifier, codeChallenge } = await generatePkcePair();
     const stateToken = crypto.randomUUID();
     const browserBinding = crypto.randomUUID();
     const stateData = {
       authRequest,
-      absmartlyEndpoint: cleanEndpoint,
+      // apiUrl: the callback parses it again (see beginAuthorization).
+      absmartlyEndpoint: endpoint.apiUrl,
       codeVerifier,
       browserBinding,
     };

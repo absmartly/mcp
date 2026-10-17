@@ -184,6 +184,26 @@ export default async function run() {
     assert.strictEqual(retry.status, 302);
   });
 
+  await asyncTest('a proxy base path ending in /v1 survives /authorize, consent, the redirect and the stored state', async () => {
+    const handler = new ABsmartlyOAuthHandler();
+    const env = makeEnv(validAuthRequest({ resource: `${MCP_ORIGIN}/mcp?absmartly-endpoint=https://h.example/tenant/v1/v1` }));
+    const { transactionId, cookie } = await startConsent(handler, env);
+    const res = await postAuthorize(handler, env, { action: 'approve', transaction_id: transactionId! }, cookie);
+    assert.strictEqual(res.status, 302);
+    const location = new URL(res.headers.get('location')!);
+    assert.strictEqual(`${location.origin}${location.pathname}`, 'https://h.example/tenant/v1/auth/oauth/authorize');
+    const stateKey = [...env.OAUTH_KV.store.keys()].find(k => k.startsWith('oauth:state:'));
+    const stored = JSON.parse(env.OAUTH_KV.store.get(stateKey!)!);
+    assert.strictEqual(stored.absmartlyEndpoint, 'https://h.example/tenant/v1/v1', 'the callback reads the apiUrl, which parses back to /tenant/v1');
+    assert.strictEqual(env.OAUTH_KV.store.get(`oauth_endpoint:client:${LEGIT_CLIENT_ID}`), 'https://h.example/tenant/v1/v1', 'the client mapping is stored as the apiUrl');
+    // The stored mapping, read back as the fallback on the next /authorize, keeps the path too.
+    const next = makeEnv(validAuthRequest({ resource: undefined }));
+    next.OAUTH_KV = env.OAUTH_KV;
+    const again = await startConsent(handler, next);
+    assert.ok(again.page.includes('https://h.example/tenant/v1<') || again.page.includes('https://h.example/tenant/v1"'), 'the stored mapping shows /tenant/v1');
+    assert.ok(!again.page.includes('https://h.example/tenant<') && !again.page.includes('https://h.example/tenant"'), 'not /tenant');
+  });
+
   await asyncTest('cancel redirects only to the stored, registered redirect_uri', async () => {
     const handler = new ABsmartlyOAuthHandler();
     const env = makeEnv(validAuthRequest());

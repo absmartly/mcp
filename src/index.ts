@@ -721,7 +721,9 @@ async function handleMcpTransportRequest(
             extractEndpointFromPath(url.pathname, route.pathPrefix),
             endpoint,
         ]);
-        const pendingEndpoint = requested.endpoint?.baseUrl;
+        // apiUrl: /register parses it again, and a base URL ending in "/v1"
+        // would lose that segment.
+        const pendingEndpoint = requested.endpoint?.apiUrl;
         if (pendingEndpoint) {
             await safeKvPut(env.OAUTH_KV, `oauth_endpoint_pending:${clientFingerprint}`, pendingEndpoint, {
                 expirationTtl: OAUTH_STATE_TTL_SECONDS,
@@ -822,9 +824,10 @@ export default {
         }
 
         if (url.pathname === '/register' && request.method === 'POST') {
+            // Stored as apiUrl (parsed again when /authorize reads it).
             const pendingEndpoint = tryParseAbsmartlyEndpoint(
                 await safeKvGet(env.OAUTH_KV, `oauth_endpoint_pending:${clientFingerprint}`),
-            )?.baseUrl;
+            )?.apiUrl;
             const response = await oauthProvider.fetch(request, env, ctx);
 
             if (response.ok && pendingEndpoint) {

@@ -168,7 +168,8 @@ export default async function run() {
 
   await asyncTest('absmartlyEndpoint is preserved alongside codeVerifier in stored state', async () => {
     const { storedState } = await approveAndGetRedirect('https://demo-2.absmartly.com');
-    assert.strictEqual(storedState.absmartlyEndpoint, 'https://demo-2.absmartly.com');
+    // Stored as the apiUrl, which the callback parses back to the same endpoint.
+    assert.strictEqual(storedState.absmartlyEndpoint, 'https://demo-2.absmartly.com/v1');
     assert.ok(storedState.authRequest, 'authRequest missing from state');
   });
 

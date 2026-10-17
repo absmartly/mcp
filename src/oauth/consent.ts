@@ -25,7 +25,8 @@ import {
 } from "./http.js";
 import { renderConsentPage, renderEndpointForm } from "./pages.js";
 import { hasRequiredPkce } from "./pkce.js";
-import { canonicalizeEndpoint, MESSAGE_INVALID_ENDPOINT, tryParseAbsmartlyEndpoint } from "./endpoint.js";
+import { MESSAGE_INVALID_ENDPOINT, tryParseAbsmartlyEndpoint } from "./endpoint.js";
+import type { AbsmartlyEndpoint } from "./endpoint.js";
 import { HTTP_STATUS_BAD_REQUEST, HTTP_STATUS_SERVICE_UNAVAILABLE } from "./http-status.js";
 import { describeRedirectTarget, isAllowedRedirectUri, isLoopbackRedirectUri, isRegisteredRedirectUri, isSharedCallbackRedirectUri } from "./redirect-policy.js";
 
@@ -73,15 +74,21 @@ export type ConsentOptions<Req extends AuthorizationRequest = AuthorizationReque
   // Runs on approve, before the transaction is discarded, so the host can do its own
   // work (e.g. persist the endpoint) while still able to fail back to a retryable state.
   // If it throws, the transaction and its binding cookie are kept so the client can retry.
-  onApprove?: (authRequest: Req, endpoint: string | null) => Promise<void>;
+  // `endpoint` is the canonical base URL; `parsed` is the parsed endpoint. To store it,
+  // store `parsed.apiUrl`: re-parsing a base URL strips a trailing "/v1" again.
+  onApprove?: (authRequest: Req, endpoint: string | null, parsed: AbsmartlyEndpoint | null) => Promise<void>;
 };
 
 export type ConsentOutcome<Req extends AuthorizationRequest = AuthorizationRequest> =
   | { type: "respond"; response: OAuthHttpResult }
-  | { type: "approved"; authRequest: Req; client: OAuthClientInfo; endpoint: string | null; setCookies: string[] };
+  // endpoint: the canonical base URL (for display and building URLs). absmartlyEndpoint:
+  // the parsed endpoint, to pass on or store (as its apiUrl) without re-parsing endpoint.
+  | { type: "approved"; authRequest: Req; client: OAuthClientInfo; endpoint: string | null; absmartlyEndpoint: AbsmartlyEndpoint | null; setCookies: string[] };
 
 type ConsentTransaction<Req> = {
   authRequest: Req;
+  // The endpoint's apiUrl, which parses back to the same endpoint (a base URL
+  // ending in "/v1" would not). Transactions stored earlier may hold another form.
   absmartlyEndpoint: string | null;
   browserBinding: string;
 };
@@ -119,23 +126,25 @@ export function validateAuthorizationRequest(authRequest: AuthorizationRequest, 
 }
 
 // Remembered approvals are keyed by client_id AND ABsmartly endpoint, so approving a
-// client for one ABsmartly instance does not skip consent for another.
-function approvalKey(clientId: string, endpoint: string): string {
-  return JSON.stringify([clientId, canonicalizeEndpoint(endpoint) || endpoint.replace(/\/+$/, "")]);
+// client for one ABsmartly instance does not skip consent for another. The endpoint is
+// written as its apiUrl, which parses back to the same endpoint.
+function approvalKey(clientId: string, endpoint: AbsmartlyEndpoint): string {
+  return JSON.stringify([clientId, endpoint.apiUrl]);
 }
 
 /**
  * Whether `approvals` holds an approval for this client and endpoint. Keys
- * written before endpoints were canonicalised (e.g. with "/v1", or an
- * upper-case host) are canonicalised before comparing, so they still match.
+ * written in another form (2.0: the endpoint as entered, e.g. with "/v1" or an
+ * upper-case host) are parsed before comparing, so they still match.
  */
-function hasApproval(approvals: string[], clientId: string, endpoint: string): boolean {
+function hasApproval(approvals: string[], clientId: string, endpoint: AbsmartlyEndpoint): boolean {
   const wanted = approvalKey(clientId, endpoint);
   return approvals.some((stored) => {
     if (stored === wanted) return true;
     try {
       const [storedClient, storedEndpoint] = JSON.parse(stored) as [string, string];
-      return typeof storedEndpoint === "string" && approvalKey(storedClient, storedEndpoint) === wanted;
+      const parsed = typeof storedEndpoint === "string" ? tryParseAbsmartlyEndpoint(storedEndpoint) : null;
+      return storedClient === clientId && parsed?.apiUrl === endpoint.apiUrl;
     } catch {
       return false;
     }
@@ -234,14 +243,15 @@ export async function beginAuthorization<Req extends AuthorizationRequest>(
   // canonical form. One that does not parse is treated as absent: the
   // fallback is used if valid (with a visible notice when the explicit one was
   // ignored), otherwise the user is asked for it rather than stuck on a 400.
-  const explicit = tryParseAbsmartlyEndpoint(params.endpoint)?.baseUrl ?? null;
-  const fallback = tryParseAbsmartlyEndpoint(params.fallbackEndpoint)?.baseUrl ?? null;
+  // Parsed once here; only the parsed form travels on (see ConsentTransaction).
+  const explicit = tryParseAbsmartlyEndpoint(params.endpoint);
+  const fallback = tryParseAbsmartlyEndpoint(params.fallbackEndpoint);
   const endpoint = explicit ?? fallback;
   // The rejected value comes from the request, so it is not echoed on this
   // trusted page. The notice is shown whenever a supplied endpoint was refused.
   const rejectedExplicit = !!params.endpoint && !explicit;
   const notice = !rejectedExplicit ? undefined
-    : fallback ? `${MESSAGE_REQUEST_ENDPOINT_REJECTED} ${fallback} is used instead.`
+    : fallback ? `${MESSAGE_REQUEST_ENDPOINT_REJECTED} ${fallback.baseUrl} is used instead.`
     : MESSAGE_REQUEST_ENDPOINT_REJECTED;
   const client = await options.lookupClient(authRequest.clientId);
   const invalid = validateAuthorizationRequest(authRequest, client);
@@ -255,13 +265,13 @@ export async function beginAuthorization<Req extends AuthorizationRequest>(
   if (endpointReady && options.rememberApprovals && endpoint && !notice) {
     const approvals = await getApprovals(cookieHeader, options);
     if (hasApproval(approvals, authRequest.clientId, endpoint)) {
-      return { type: "approved", authRequest, client, endpoint, setCookies: [] };
+      return { type: "approved", authRequest, client, endpoint: endpoint.baseUrl, absmartlyEndpoint: endpoint, setCookies: [] };
     }
   }
 
   const transactionId = crypto.randomUUID();
   const browserBinding = crypto.randomUUID();
-  const transaction: ConsentTransaction<Req> = { authRequest, absmartlyEndpoint: endpoint, browserBinding };
+  const transaction: ConsentTransaction<Req> = { authRequest, absmartlyEndpoint: endpoint?.apiUrl ?? null, browserBinding };
   try {
     await options.store.put(`${CONSENT_STATE_KEY_PREFIX}${transactionId}`, JSON.stringify(transaction), CONSENT_TTL_SECONDS);
   } catch (e) {
@@ -276,7 +286,7 @@ export async function beginAuthorization<Req extends AuthorizationRequest>(
       : undefined;
     return respond(htmlResult(renderEndpointForm(options.formAction, transactionId, rejected), [bindingCookie]));
   }
-  return respond(consentPage(client, authRequest, endpoint, transactionId, options, [bindingCookie], notice));
+  return respond(consentPage(client, authRequest, endpoint?.baseUrl ?? null, transactionId, options, [bindingCookie], notice));
 }
 
 // POST /authorize: every authorization parameter comes from the stored transaction,
@@ -308,21 +318,21 @@ export async function submitConsent<Req extends AuthorizationRequest>(
 
   if (form.action === ACTION_SET_ENDPOINT) {
     if (!(form.endpoint || "").trim()) return respond(textResult(HTTP_STATUS_BAD_REQUEST, MESSAGE_ENDPOINT_REQUIRED));
-    const endpoint = canonicalizeEndpoint(form.endpoint || "");
+    const endpoint = tryParseAbsmartlyEndpoint(form.endpoint);
     if (!endpoint) {
       return respond(htmlResult(
         renderEndpointForm(options.formAction, transactionId, `${MESSAGE_INVALID_ENDPOINT}. ${MESSAGE_ENTER_ENDPOINT}`),
         [], HTTP_STATUS_BAD_REQUEST,
       ));
     }
-    transaction.absmartlyEndpoint = endpoint;
+    transaction.absmartlyEndpoint = endpoint.apiUrl;
     try {
       await options.store.put(`${CONSENT_STATE_KEY_PREFIX}${transactionId}`, JSON.stringify(transaction), CONSENT_TTL_SECONDS);
     } catch (e) {
       console.error("Failed to update consent transaction:", e);
       return respond(textResult(HTTP_STATUS_SERVICE_UNAVAILABLE, MESSAGE_SERVICE_UNAVAILABLE));
     }
-    return respond(consentPage(client, authRequest, endpoint, transactionId, options));
+    return respond(consentPage(client, authRequest, endpoint.baseUrl, transactionId, options));
   }
 
   if (form.action !== ACTION_APPROVE) return respond(textResult(HTTP_STATUS_BAD_REQUEST, MESSAGE_INVALID_ACTION));
@@ -330,13 +340,13 @@ export async function submitConsent<Req extends AuthorizationRequest>(
   // A transaction stored before endpoints were validated may hold a bad one:
   // reject it here, before onApprove persists it anywhere.
   const storedEndpoint = transaction.absmartlyEndpoint;
-  const endpoint = storedEndpoint ? canonicalizeEndpoint(storedEndpoint) : storedEndpoint;
+  const endpoint = storedEndpoint ? tryParseAbsmartlyEndpoint(storedEndpoint) : null;
   if (storedEndpoint && !endpoint) return respond(textResult(HTTP_STATUS_BAD_REQUEST, MESSAGE_INVALID_ENDPOINT));
   if (options.requireEndpoint && !endpoint) return respond(textResult(HTTP_STATUS_BAD_REQUEST, MESSAGE_ENDPOINT_REQUIRED));
 
   if (options.onApprove) {
     try {
-      await options.onApprove(authRequest, endpoint);
+      await options.onApprove(authRequest, endpoint?.baseUrl ?? null, endpoint);
     } catch (e) {
       // Keep the transaction and its binding cookie so the client can retry the same
       // approval instead of restarting consent from scratch.
@@ -347,5 +357,5 @@ export async function submitConsent<Req extends AuthorizationRequest>(
 
   const setCookies = await discardTransaction(transactionId, options);
   if (options.rememberApprovals && endpoint) setCookies.push(...await rememberApproval(cookieHeader, approvalKey(authRequest.clientId, endpoint), options));
-  return { type: "approved", authRequest, client, endpoint, setCookies };
+  return { type: "approved", authRequest, client, endpoint: endpoint?.baseUrl ?? null, absmartlyEndpoint: endpoint, setCookies };
 }

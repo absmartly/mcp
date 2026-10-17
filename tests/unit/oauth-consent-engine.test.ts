@@ -237,13 +237,14 @@ export default async function run() {
     assert.ok(empty.type === 'respond' && empty.response.status === 400 && empty.response.body === 'ABsmartly endpoint is required', 'an empty endpoint is still "required"');
   });
 
-  await asyncTest('a valid endpoint entering consent is stored in canonical form', async () => {
+  await asyncTest('a valid endpoint entering consent is stored in canonical (apiUrl) form', async () => {
     const store = memoryStore();
     const extra: Partial<ConsentOptions> = { requireEndpoint: true };
     const { transactionId, cookie } = await start(store, extra);
     await submitConsent({ form: { action: 'set_endpoint', transactionId, endpoint: ' acme.absmartly.com/v1/ ' }, cookieHeader: cookie }, options(store, extra));
     const stored = JSON.parse(store.data.get(`oauth:consent:${transactionId}`) ?? [...store.data.values()].find((v) => v.includes('absmartlyEndpoint')) ?? '{}');
-    assert.strictEqual(stored.absmartlyEndpoint, 'https://acme.absmartly.com');
+    // Stored as the apiUrl, which parses back to the same endpoint.
+    assert.strictEqual(stored.absmartlyEndpoint, 'https://acme.absmartly.com/v1');
   });
 
   await asyncTest('a pre-validation transaction with a bad endpoint is rejected before onApprove persists it', async () => {
@@ -275,6 +276,44 @@ export default async function run() {
     store.data.set(approvalsKey, JSON.stringify([JSON.stringify([CIMD_CLIENT, 'https://ACME.absmartly.com/v1/'])]));
     const again = await beginAuthorization({ authRequest: request(), endpoint: 'https://acme.absmartly.com/v1', cookieHeader: approvalsCookie }, options(store, extra));
     assert.strictEqual(again.type, 'approved', 'the legacy-shaped approval still skips consent');
+  });
+
+  await asyncTest('a proxy base path ending in /v1 survives beginAuthorization, submitConsent and a remembered approval', async () => {
+    // Mounted at /tenant/v1, so the API is /tenant/v1/v1. Each step parses
+    // what the previous one stored; a step that re-parsed a base URL would
+    // strip the mount's own "/v1".
+    const store = memoryStore();
+    const persisted: unknown[] = [];
+    const extra: Partial<ConsentOptions> = {
+      requireEndpoint: true, rememberApprovals: true,
+      onApprove: async (_r, endpoint, parsed) => { persisted.push([endpoint, parsed?.apiUrl]); },
+    };
+    const begin = await beginAuthorization({ authRequest: request(), endpoint: 'https://h.example/tenant/v1/v1', cookieHeader: null }, options(store, extra));
+    if (begin.type !== 'respond') throw new Error('expected the consent page');
+    assert.ok((begin.response.body ?? '').includes('https://h.example/tenant/v1'), 'consent shows the base URL');
+    const transactionId = (begin.response.body ?? '').match(/name="transaction_id" value="([^"]+)"/)?.[1] || '';
+    const cookie = cookiePair(begin.response.setCookies[0] || '');
+    const approved = await submitConsent({ form: { action: 'approve', transactionId }, cookieHeader: cookie }, options(store, extra));
+    if (approved.type !== 'approved') throw new Error('expected approval');
+    assert.strictEqual(approved.endpoint, 'https://h.example/tenant/v1');
+    assert.strictEqual(approved.absmartlyEndpoint?.basePath, '/tenant/v1');
+    assert.deepStrictEqual(persisted, [['https://h.example/tenant/v1', 'https://h.example/tenant/v1/v1']], 'onApprove gets the base URL and the apiUrl to store');
+    const approvalsCookie = cookiePair(approved.setCookies.find((c) => c.includes('approv')) ?? '');
+    const again = await beginAuthorization({ authRequest: request(), endpoint: 'https://h.example/tenant/v1/v1', cookieHeader: approvalsCookie }, options(store, extra));
+    if (again.type !== 'approved') throw new Error('expected the remembered approval');
+    assert.strictEqual(again.endpoint, 'https://h.example/tenant/v1');
+    const other = await beginAuthorization({ authRequest: request(), endpoint: 'https://h.example/tenant/v1', cookieHeader: approvalsCookie }, options(store, extra));
+    assert.strictEqual(other.type, 'respond', 'the approval for /tenant/v1 does not cover /tenant');
+  });
+
+  await asyncTest('set_endpoint with a /v1-mounted base path keeps it through approve', async () => {
+    const store = memoryStore();
+    const extra: Partial<ConsentOptions> = { requireEndpoint: true };
+    const { transactionId, cookie } = await start(store, extra);
+    await submitConsent({ form: { action: 'set_endpoint', transactionId, endpoint: 'https://h.example/tenant/v1/v1' }, cookieHeader: cookie }, options(store, extra));
+    const approved = await submitConsent({ form: { action: 'approve', transactionId }, cookieHeader: cookie }, options(store, extra));
+    if (approved.type !== 'approved') throw new Error('expected approval');
+    assert.strictEqual(approved.endpoint, 'https://h.example/tenant/v1');
   });
 
   await asyncTest('an invalid explicit endpoint falls back to the valid stored mapping, with a visible notice', async () => {

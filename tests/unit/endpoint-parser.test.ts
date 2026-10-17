@@ -41,6 +41,14 @@ export default async function runTests() {
     assertEquals(tryParseAbsmartlyEndpoint(bad), null, `tryParseAbsmartlyEndpoint(${JSON.stringify(bad)}) is null`);
   }
 
+  // apiUrl is the form to store or pass on: it parses back to the same endpoint
+  // (a baseUrl ending in "/v1" would not).
+  for (const input of ['https://h.example/tenant/v1/v1', 'https://h.example/tenant/v1', 'acme.absmartly.com', 'https://corp.example/absmartly/v2', 'https://h.example/v1/v1/v1']) {
+    const parsed = parseAbsmartlyEndpoint(input);
+    assertEquals(parseAbsmartlyEndpoint(parsed.apiUrl), parsed, `apiUrl round-trips: ${input}`);
+  }
+  assertEquals(parseAbsmartlyEndpoint('https://h.example/tenant/v1/v1').basePath, '/tenant/v1', 'a /v1-mounted base path keeps its own /v1');
+
   // normalizeEndpoint keeps its 2.0 behaviour for existing callers (deprecated).
   for (const [input, expected] of [
     ['acme.absmartly.com/', 'https://acme.absmartly.com'],
