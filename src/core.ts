@@ -31,6 +31,8 @@ export {
   getGroupCommands,
   getGroupSummary,
   getTotalCommandCount,
+  IdParamError,
+  normalizeIdParams,
   searchCommands,
   validateCommandParams,
 } from "./cli-catalog.js";

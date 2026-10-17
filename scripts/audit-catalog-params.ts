@@ -25,7 +25,7 @@ import ts from "typescript";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CLI_GROUPS, getGroupCommands, normalizeCommandParams, hasCommandRunner } from "../src/cli-catalog.js";
+import { CLI_GROUPS, getGroupCommands, normalizeCommandParams, normalizeIdParams, hasCommandRunner } from "../src/cli-catalog.js";
 
 const require = createRequire(import.meta.url);
 
@@ -119,11 +119,14 @@ export function auditCatalogParams(): CatalogParamFinding[] {
 
       const injected = new Set(ALWAYS_INJECTED_PARAMS);
       if (/^(list|search)/.test(entry.command)) LIST_INJECTED_PARAMS.forEach((p) => injected.add(p));
+      // The same pipeline executeCommand runs: IDs first, then the adapter.
+      // Deprecated params are left out of the sample: they are aliases or
+      // ignored, and an alias would otherwise compete with its canonical param.
       const translate = (params: Record<string, unknown>) =>
-        normalizeCommandParams(group, entry.command, structuredClone(params));
+        normalizeCommandParams(group, entry.command, normalizeIdParams(group, entry.command, structuredClone(params)));
 
       const sample: Record<string, unknown> = {};
-      entry.params.forEach((p, i) => { sample[p.name] = sampleValue(p.type, SAMPLE_BASE + 2 * i); });
+      entry.params.forEach((p, i) => { if (!p.deprecated) sample[p.name] = sampleValue(p.type, SAMPLE_BASE + 2 * i); });
       const baseline = readView(translate(sample), core);
 
       const dropped: string[] = [];

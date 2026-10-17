@@ -60,6 +60,9 @@ function isSafeBaseSegment(segment: string): boolean {
 export function parseAbsmartlyEndpoint(raw: string): AbsmartlyEndpoint {
   const trimmed = raw.trim();
   if (!trimmed) throw new InvalidEndpointError("empty");
+  // WHATWG URL treats "\\" as "/" and resolves what follows, so reject it
+  // before parsing rather than letting "base\\..\\x" become "/x".
+  if (trimmed.includes("\\")) throw new InvalidEndpointError(`backslashes are not allowed: ${raw}`);
   const withScheme = URL_SCHEME_PATTERN.test(trimmed) ? trimmed : `${HTTPS_SCHEME}${trimmed}`;
   let url: URL;
   try {

@@ -201,7 +201,7 @@ async function discardTransaction(transactionId: string, options: ConsentOptions
   return [clearHostCookie(consentCookieName(transactionId), options)];
 }
 
-function consentPage<Req extends AuthorizationRequest>(client: OAuthClientInfo, authRequest: Req, endpoint: string | null, transactionId: string, options: ConsentOptions, setCookies: string[] = []): OAuthHttpResult {
+function consentPage<Req extends AuthorizationRequest>(client: OAuthClientInfo, authRequest: Req, endpoint: string | null, transactionId: string, options: ConsentOptions, setCookies: string[] = [], notice?: string): OAuthHttpResult {
   return htmlResult(renderConsentPage({
     formAction: options.formAction,
     transactionId,
@@ -211,21 +211,33 @@ function consentPage<Req extends AuthorizationRequest>(client: OAuthClientInfo, 
     accountLabel: endpoint || undefined,
     loopbackRedirect: isLoopbackRedirectUri(authRequest.redirectUri),
     sharedCallbackRedirect: isSharedCallbackRedirectUri(authRequest.redirectUri),
+    notice,
   }), setCookies);
 }
 
 // GET /authorize: validates the request, then either reports a remembered approval or
 // starts a consent transaction bound to this browser and returns the page to show.
 export async function beginAuthorization<Req extends AuthorizationRequest>(
-  params: { authRequest: Req; endpoint: string | null; cookieHeader: string | null | undefined },
+  params: {
+    authRequest: Req;
+    endpoint: string | null;
+    cookieHeader: string | null | undefined;
+    // Used when `endpoint` is absent or does not parse (e.g. the client's stored mapping).
+    fallbackEndpoint?: string | null;
+  },
   options: ConsentOptions,
 ): Promise<ConsentOutcome<Req>> {
   const { authRequest, cookieHeader } = params;
-  // An endpoint from the request or a stored client mapping is validated here,
-  // where it enters consent, and kept in its canonical form.
-  // An endpoint that does not parse (e.g. a stale stored mapping) is treated
-  // as absent, so the user is asked for it instead of being stuck on a 400.
-  const endpoint = tryParseAbsmartlyEndpoint(params.endpoint)?.baseUrl ?? null;
+  // Endpoints are validated here, where they enter consent, and kept in
+  // canonical form. One that does not parse is treated as absent: the
+  // fallback is used if valid (with a visible notice when the explicit one was
+  // ignored), otherwise the user is asked for it rather than stuck on a 400.
+  const explicit = tryParseAbsmartlyEndpoint(params.endpoint)?.baseUrl ?? null;
+  const fallback = tryParseAbsmartlyEndpoint(params.fallbackEndpoint)?.baseUrl ?? null;
+  const endpoint = explicit ?? fallback;
+  const notice = params.endpoint && !explicit && fallback
+    ? `The ABsmartly URL in the request (${params.endpoint}) is not valid, so ${fallback} is used instead.`
+    : undefined;
   const client = await options.lookupClient(authRequest.clientId);
   const invalid = validateAuthorizationRequest(authRequest, client);
   if (invalid || !client) return respond(invalid ?? textResult(HTTP_STATUS_BAD_REQUEST, MESSAGE_CLIENT_NOT_FOUND));
@@ -254,7 +266,7 @@ export async function beginAuthorization<Req extends AuthorizationRequest>(
   if (!endpointReady) {
     return respond(htmlResult(renderEndpointForm(options.formAction, transactionId), [bindingCookie]));
   }
-  return respond(consentPage(client, authRequest, endpoint, transactionId, options, [bindingCookie]));
+  return respond(consentPage(client, authRequest, endpoint, transactionId, options, [bindingCookie], notice));
 }
 
 // POST /authorize: every authorization parameter comes from the stored transaction,
@@ -287,7 +299,12 @@ export async function submitConsent<Req extends AuthorizationRequest>(
   if (form.action === ACTION_SET_ENDPOINT) {
     if (!(form.endpoint || "").trim()) return respond(textResult(HTTP_STATUS_BAD_REQUEST, MESSAGE_ENDPOINT_REQUIRED));
     const endpoint = canonicalizeEndpoint(form.endpoint || "");
-    if (!endpoint) return respond(textResult(HTTP_STATUS_BAD_REQUEST, MESSAGE_INVALID_ENDPOINT));
+    if (!endpoint) {
+      return respond(htmlResult(
+        renderEndpointForm(options.formAction, transactionId, `${MESSAGE_INVALID_ENDPOINT}: ${form.endpoint}. Enter the https:// URL of your ABsmartly instance.`),
+        [], HTTP_STATUS_BAD_REQUEST,
+      ));
+    }
     transaction.absmartlyEndpoint = endpoint;
     try {
       await options.store.put(`${CONSENT_STATE_KEY_PREFIX}${transactionId}`, JSON.stringify(transaction), CONSENT_TTL_SECONDS);

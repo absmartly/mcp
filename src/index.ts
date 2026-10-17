@@ -6,7 +6,7 @@ import { z } from "zod";
 import { ABsmartlyResources } from "./resources.js";
 import { ABsmartlyOAuthHandler } from "./absmartly-oauth-handler.js";
 import { SCOPE_MCP_ACCESS, SUPPORTED_SCOPES, validateClientRegistration } from "./oauth/index.js";
-import { checkBackendSessionOnRefresh, normalizeResourceParameter, protectedResourceMetadataUrl, rejectUntrustedCimdClient } from "./oauth-worker-guards.js";
+import { checkBackendSessionOnRefresh, normalizeResourceParameter, protectedResourceMetadataUrl, rejectUntrustedCimdClient, withValidStoredEndpoint } from "./oauth-worker-guards.js";
 import { Env } from "./types.js";
 import { debug } from "./config.js";
 import { MCP_VERSION } from "./version.js";
@@ -158,8 +158,9 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             throw new Error("No valid authentication token available");
         }
 
-        // Props may predate endpoint validation; an invalid stored endpoint fails
-        // here with InvalidEndpointError ("Invalid ABsmartly endpoint: ...").
+        // OAuth grants with an endpoint that no longer parses are turned away
+        // before reaching here (withValidStoredEndpoint), so the client
+        // re-authorizes; anything else still fails with InvalidEndpointError.
         const fetchHttpClient = new FetchHttpClient(
             this.props.absmartly_endpoint,
             { authToken, authType }
@@ -581,8 +582,8 @@ const oauthHandler = new ABsmartlyOAuthHandler();
 
 const oauthProvider = new OAuthProvider({
     apiHandlers: {
-        [SSE_PATH]: sseMcpHandler,
-        [MCP_PATH]: streamableMcpHandler
+        [SSE_PATH]: withValidStoredEndpoint(sseMcpHandler as any, SSE_PATH),
+        [MCP_PATH]: withValidStoredEndpoint(streamableMcpHandler as any, MCP_PATH),
     },
     authorizeEndpoint: "/authorize",
     tokenEndpoint: "/token",

@@ -180,3 +180,34 @@ export async function normalizeResourceParameter(request: Request, url: URL): Pr
     }
     return request;
 }
+
+type ApiHandler = { fetch: (request: Request, env: any, ctx: any) => Promise<Response> };
+
+/**
+ * Wraps an MCP transport handler behind the OAuth provider. The provider puts
+ * the grant's props on ctx before calling it; a grant whose stored endpoint no
+ * longer parses (stored before endpoints were validated) gets a 401
+ * invalid_token, which makes the MCP client re-authorize, where consent asks
+ * for the endpoint again. Without this the session would fail on every call
+ * until the token expired.
+ */
+export function withValidStoredEndpoint(handler: ApiHandler, pathPrefix: string): ApiHandler {
+    return {
+        fetch: async (request, env, ctx) => {
+            const endpoint = (ctx?.props as ABsmartlyProps | undefined)?.absmartly_endpoint;
+            if (endpoint !== undefined && !tryParseAbsmartlyEndpoint(endpoint)) {
+                console.error(`${MESSAGE_INVALID_ENDPOINT} in stored grant props: ${endpoint}`);
+                const url = new URL(request.url);
+                return new Response(JSON.stringify({ error: 'invalid_token', error_description: `${MESSAGE_INVALID_ENDPOINT}. Please sign in again.` }), {
+                    status: HTTP_STATUS_UNAUTHORIZED,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...CORS_HEADERS,
+                        'WWW-Authenticate': `Bearer error="invalid_token", error_description="${MESSAGE_INVALID_ENDPOINT}", resource_metadata="${protectedResourceMetadataUrl(url, pathPrefix)}"`,
+                    },
+                });
+            }
+            return handler.fetch(request, env, ctx);
+        },
+    };
+}

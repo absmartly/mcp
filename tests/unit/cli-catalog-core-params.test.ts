@@ -202,12 +202,41 @@ const CASES: Case[] = [
     respond: (config) => (config.url === '/configs' ? { configs: [{ id: 1000, name: 'other' }] } : { config: {} }),
     expectedError: 'Platform config "1e3" not found', expected: [{ method: 'GET', url: '/configs' }] },
   { name: 'bulkStart rejects non-integer ids before any request', group: 'experiments', command: 'bulkStart', params: { ids: [1, '2.5'] },
-    expectedError: 'experiments.bulkStart: "ids" must be a non-empty array of positive integer experiment IDs', expected: [] },
+    expectedError: 'Param "ids" for experiments.bulkStart must be a non-empty array of positive integer IDs.', expected: [] },
   { name: 'bulkArchive rejects an empty ids array before any request', group: 'experiments', command: 'bulkArchive', params: { ids: [] },
-    expectedError: 'experiments.bulkArchive: "ids" must be a non-empty array of positive integer experiment IDs', expected: [] },
+    expectedError: 'Param "ids" for experiments.bulkArchive must be a non-empty array of positive integer IDs.', expected: [] },
   { name: 'bulkArchive rejects a non-array ids before any request', group: 'experiments', command: 'bulkArchive', params: { ids: '5' },
-    expectedError: 'experiments.bulkArchive: "ids" must be a non-empty array of positive integer experiment IDs', expected: [] },
+    expectedError: 'Param "ids" for experiments.bulkArchive must be a non-empty array of positive integer IDs.', expected: [] },
   // The ID rule runs in executeCommand, so direct Node callers are covered too.
+  // normalizeIdParams owns ID params: undocumented core-name aliases never reach the core.
+  { name: 'executeCommand drops an id alias that would override goalId', group: 'goals', command: 'followGoal', params: { goalId: 1, id: '6/follow' },
+    expected: [{ method: 'POST', url: '/goals/1/follow' }] },
+  { name: 'executeCommand drops an id alias on apikeys', group: 'apikeys', command: 'deleteApiKey', params: { keyId: 9, id: '1/../admin' },
+    expected: [{ method: 'DELETE', url: '/api_keys/9' }] },
+  { name: 'executeCommand rejects a deprecated metrics roleId that is not an integer', group: 'metrics', command: 'revokeMetricAccessUser',
+    params: { metricId: 8, userId: 4, roleId: '4/x' },
+    expectedError: 'Param "roleId" for metrics.revokeMetricAccessUser must be a positive integer ID. Missing required param "assetRoleId" for metrics.revokeMetricAccessUser.', expected: [] },
+  { name: 'executeCommand maps a deprecated metrics roleId to assetRoleId', group: 'metrics', command: 'revokeMetricAccessUser',
+    params: { metricId: 8, userId: 4, roleId: ' 05 ' },
+    expected: [{ method: 'DELETE', url: '/metrics/8/asset_role_users/4/5' }] },
+  { name: 'executeCommand rejects disagreeing roleId and assetRoleId', group: 'metrics', command: 'grantMetricAccessUser',
+    params: { metricId: 8, userId: 4, assetRoleId: 3, roleId: 5 },
+    expectedError: 'Params "roleId" and "assetRoleId" for metrics.grantMetricAccessUser disagree; pass only "assetRoleId".', expected: [] },
+  { name: 'a padded ID reaches the path as an integer', group: 'goals', command: 'getGoal', params: { goalId: ' 05 ' },
+    expected: [{ method: 'GET', url: '/goals/5' }] },
+  { name: 'a missing goalId throws before any request', group: 'goals', command: 'grantGoalAccessUser', params: { userId: 2, role: 5 },
+    expectedError: 'Missing required param "goalId" for goals.grantGoalAccessUser.', expected: [] },
+  { name: 'testStorageConfig {} throws before any request', group: 'storageconfigs', command: 'testStorageConfig', params: {},
+    expectedError: 'Missing required param "configId" for storageconfigs.testStorageConfig.', expected: [] },
+  { name: 'grantExperimentAccessUser still accepts the 2.0 roleId', group: 'experiments', command: 'grantExperimentAccessUser',
+    params: { experimentId: 3, userId: 2, roleId: 4 },
+    expected: [{ method: 'POST', url: '/experiments/3/asset_role_users', data: { user_id: 2, asset_role_id: 4 } }] },
+  { name: 'teams userIds are normalised as IDs', group: 'teams', command: 'addTeamMembers', params: { teamId: 5, userIds: [' 2', 3] },
+    expected: [{ method: 'PUT', url: '/teams/5/members/add', data: { user_ids: [2, 3] } }] },
+  { name: 'teams userIds reject a non-integer', group: 'teams', command: 'removeTeamMembers', params: { teamId: 5, userIds: ['2/x'] },
+    expectedError: 'Param "userIds" for teams.removeTeamMembers must be a non-empty array of positive integer IDs.', expected: [] },
+  { name: 'reorderCustomSections ids are normalised as IDs', group: 'customsections', command: 'reorderCustomSections', params: { ids: ['09', 7] },
+    expected: [{ method: 'PUT', url: '/experiment_custom_sections/order', data: { experiment_custom_sections: [{ id: 9, order_index: 0 }, { id: 7, order_index: 1 }] } }] },
   { name: 'executeCommand rejects a multi-segment experimentId (6/full_on)', group: 'experiments', command: 'startExperiment', params: { experimentId: '6/full_on' },
     expectedError: 'Param "experimentId" for experiments.startExperiment must be a positive integer ID.', expected: [] },
   { name: 'executeCommand rejects a traversal segmentId', group: 'segments', command: 'deleteSegment', params: { segmentId: '../users/5' },
@@ -639,6 +668,22 @@ export default async function runTests() {
       validateCommandParams(getCommandEntry('experiments', 'startExperiment')!, { experimentId: '6/full_on' }),
       ['Param "experimentId" for experiments.startExperiment must be a positive integer ID.'],
       'startExperiment: a multi-segment ID fails validation',
+    );
+  }
+
+  // validateCommandParams reports the same ID problems as normalizeIdParams.
+  {
+    const metric = getCommandEntry('metrics', 'grantMetricAccessUser')!;
+    assertEquals(validateCommandParams(metric, { metricId: 1, userId: 2, roleId: 3 }), [], 'metrics: the deprecated roleId alias satisfies assetRoleId');
+    assertEquals(
+      validateCommandParams(getCommandEntry('experiments', 'grantExperimentAccessUser')!, { experimentId: 3, userId: 2, roleId: 4 }),
+      [],
+      'experiments: the 2.0 roleId alias satisfies role',
+    );
+    assertEquals(
+      validateCommandParams(getCommandEntry('teams', 'addTeamMembers')!, { teamId: 1, userIds: [] }),
+      ['Param "userIds" for teams.addTeamMembers must be a non-empty array of positive integer IDs.'],
+      'teams: an empty userIds fails validation',
     );
   }
 

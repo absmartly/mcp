@@ -30,7 +30,7 @@ export default async function runTests() {
   }
 
   for (const bad of ['', '   ', 'https://', 'ftp://acme.absmartly.com', 'https://u:p@acme.absmartly.com', 'https://acme.absmartly.com/?a=1', 'https://acme.absmartly.com/#x',
-    'https://acme.absmartly.com/a%2f..%2fadmin', 'https://acme.absmartly.com/%2e%2e', 'https://acme.absmartly.com/x/%2E', 'https://acme.absmartly.com/a%5Cb', 'https://acme.absmartly.com/tenant/../admin', 'acme.absmartly.com/./x']) {
+    'https://acme.absmartly.com/a%2f..%2fadmin', 'https://acme.absmartly.com/%2e%2e', 'https://acme.absmartly.com/x/%2E', 'https://acme.absmartly.com/a%5Cb', 'https://acme.absmartly.com/tenant/../admin', 'acme.absmartly.com/./x', 'https://acme.absmartly.com/base\\..\\..\\y', 'acme.absmartly.com\\admin']) {
     let error: unknown;
     try { parseAbsmartlyEndpoint(bad); } catch (e) { error = e; }
     assertEquals(error instanceof InvalidEndpointError && (error as Error).message.startsWith('Invalid ABsmartly endpoint'), true, `rejects ${JSON.stringify(bad)}`);

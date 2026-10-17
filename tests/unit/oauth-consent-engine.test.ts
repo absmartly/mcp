@@ -229,7 +229,10 @@ export default async function run() {
     const extra: Partial<ConsentOptions> = { requireEndpoint: true };
     const { transactionId, cookie } = await start(store, extra);
     const set = await submitConsent({ form: { action: 'set_endpoint', transactionId, endpoint: 'https://acme.absmartly.com/%2e%2e' }, cookieHeader: cookie }, options(store, extra));
-    assert.ok(set.type === 'respond' && set.response.status === 400 && set.response.body === 'Invalid ABsmartly endpoint', 'set_endpoint rejects an invalid endpoint');
+    assert.ok(set.type === 'respond' && set.response.status === 400, 'set_endpoint rejects an invalid endpoint with 400');
+    const body = set.type === 'respond' ? set.response.body ?? '' : '';
+    assert.ok(body.includes('name="absmartly_endpoint"') && body.includes('Invalid ABsmartly endpoint') && body.includes('role="alert"'), 'and re-renders the endpoint form with the error');
+    assert.ok(body.includes(`value="${transactionId}"`), 'keeping the same transaction');
     const empty = await submitConsent({ form: { action: 'set_endpoint', transactionId, endpoint: '  ' }, cookieHeader: cookie }, options(store, extra));
     assert.ok(empty.type === 'respond' && empty.response.status === 400 && empty.response.body === 'ABsmartly endpoint is required', 'an empty endpoint is still "required"');
   });
@@ -272,6 +275,21 @@ export default async function run() {
     store.data.set(approvalsKey, JSON.stringify([JSON.stringify([CIMD_CLIENT, 'https://ACME.absmartly.com/v1/'])]));
     const again = await beginAuthorization({ authRequest: request(), endpoint: 'https://acme.absmartly.com/v1', cookieHeader: approvalsCookie }, options(store, extra));
     assert.strictEqual(again.type, 'approved', 'the legacy-shaped approval still skips consent');
+  });
+
+  await asyncTest('an invalid explicit endpoint falls back to the valid stored mapping, with a visible notice', async () => {
+    const store = memoryStore();
+    const extra: Partial<ConsentOptions> = { requireEndpoint: true };
+    const begin = await beginAuthorization(
+      { authRequest: request(), endpoint: 'https://acme.absmartly.com/%2e%2e', fallbackEndpoint: 'https://stored.absmartly.com/v1', cookieHeader: null },
+      options(store, extra),
+    );
+    if (begin.type !== 'respond') throw new Error('unreachable');
+    const body = begin.response.body ?? '';
+    assert.ok(body.includes('stored.absmartly.com') && !body.includes('name="absmartly_endpoint"'), 'consent is shown for the stored endpoint');
+    assert.ok(body.includes('role="status"') && body.includes('is not valid, so https://stored.absmartly.com is used instead'), 'with a notice that the supplied one was ignored');
+    const plain = await beginAuthorization({ authRequest: request(), endpoint: null, fallbackEndpoint: 'https://stored.absmartly.com', cookieHeader: null }, options(store, extra));
+    assert.ok(plain.type === 'respond' && !(plain.response.body ?? '').includes('role="status"'), 'no notice when no endpoint was supplied');
   });
 
   return {

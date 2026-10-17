@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { checkBackendSessionOnRefresh, normalizeResourceParameter, protectedResourceMetadataUrl, rejectUntrustedCimdClient } from '../../src/oauth-worker-guards';
+import { checkBackendSessionOnRefresh, normalizeResourceParameter, protectedResourceMetadataUrl, rejectUntrustedCimdClient, withValidStoredEndpoint } from '../../src/oauth-worker-guards';
 
 const ORIGIN = 'https://mcp.absmartly.com';
 const TRUSTED_CIMD = 'https://claude.ai/oauth/claude-code-client-metadata';
@@ -121,6 +121,20 @@ export default async function run() {
     await withFetch(401, async () => {
       await assert.rejects(checkBackendSessionOnRefresh(refreshOptions(), OAuthError as any), (e: any) => e instanceof OAuthError && e.code === 'invalid_grant');
     });
+  });
+
+  await asyncTest('an MCP request whose grant has an invalid stored endpoint gets 401 invalid_token, prompting re-authorization', async () => {
+    let reached = 0;
+    const handler = withValidStoredEndpoint({ fetch: async () => { reached++; return new Response('ok'); } }, '/mcp');
+    const bad = await handler.fetch(new Request(`${ORIGIN}/mcp`), {}, { props: { absmartly_endpoint: 'https://demo.absmartly.com/%2e%2e' } });
+    assert.strictEqual(bad.status, 401);
+    assert.match(bad.headers.get('WWW-Authenticate') ?? '', /error="invalid_token".*resource_metadata="[^"]+\/mcp"/);
+    assert.match(await bad.text(), /Invalid ABsmartly endpoint/);
+    const good = await handler.fetch(new Request(`${ORIGIN}/mcp`), {}, { props: { absmartly_endpoint: 'https://demo.absmartly.com/v1' } });
+    assert.strictEqual(good.status, 200);
+    const apiKeyOnly = await handler.fetch(new Request(`${ORIGIN}/mcp`), {}, {});
+    assert.strictEqual(apiKeyOnly.status, 200);
+    assert.strictEqual(reached, 2, 'only valid (or endpoint-less) requests reach the MCP handler');
   });
 
   await asyncTest('a stored endpoint that no longer parses fails with a clear invalid-endpoint grant error', async () => {

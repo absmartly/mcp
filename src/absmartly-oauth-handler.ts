@@ -108,15 +108,17 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
         return c.text('Invalid authorization request', HTTP_STATUS_BAD_REQUEST);
       }
 
-      let absmartlyEndpoint = this.extractEndpointFromResource(authRequest.resource) ||
-                              url.searchParams.get(ENDPOINT_QUERY_PARAM) ||
-                              c.req.header(ENDPOINT_HEADER) || null;
-      if (!absmartlyEndpoint) {
-        absmartlyEndpoint = await safeKvGet(c.env.OAUTH_KV, `oauth_endpoint:client:${authRequest.clientId}`);
-      }
+      const requestedEndpoint = this.extractEndpointFromResource(authRequest.resource) ||
+                                url.searchParams.get(ENDPOINT_QUERY_PARAM) ||
+                                c.req.header(ENDPOINT_HEADER) || null;
+      // The client's stored mapping is the fallback when the request names no
+      // endpoint or an invalid one; beginAuthorization picks and validates.
+      const storedEndpoint = tryParseAbsmartlyEndpoint(requestedEndpoint)
+        ? null
+        : await safeKvGet(c.env.OAUTH_KV, `oauth_endpoint:client:${authRequest.clientId}`);
 
       const outcome = await beginAuthorization(
-        { authRequest, endpoint: absmartlyEndpoint, cookieHeader: c.req.header('Cookie') },
+        { authRequest, endpoint: requestedEndpoint, fallbackEndpoint: storedEndpoint, cookieHeader: c.req.header('Cookie') },
         this.consentOptions(c),
       );
       return this.finishConsent(c, outcome);

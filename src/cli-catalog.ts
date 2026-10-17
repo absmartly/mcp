@@ -474,6 +474,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
           { name: 'userId', type: 'number', required: true, description: 'User ID' },
           { name: 'role', type: 'string', required: true, description: 'Asset role: its ID, or its name (e.g. Editor). See assetroles.listAssetRoles' },
+          { name: 'roleId', type: 'number', required: false, description: 'Deprecated alias of role (an asset role ID)', deprecated: true },
         ],
         returns: 'Grant result',
       },
@@ -483,6 +484,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
           { name: 'userId', type: 'number', required: true, description: 'User ID' },
           { name: 'role', type: 'string', required: true, description: 'Asset role: its ID, or its name (e.g. Editor). See assetroles.listAssetRoles' },
+          { name: 'roleId', type: 'number', required: false, description: 'Deprecated alias of role (an asset role ID)', deprecated: true },
         ],
         returns: 'Revocation result',
       },
@@ -499,6 +501,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
           { name: 'teamId', type: 'number', required: true, description: 'Team ID' },
           { name: 'role', type: 'string', required: true, description: 'Asset role: its ID, or its name (e.g. Editor). See assetroles.listAssetRoles' },
+          { name: 'roleId', type: 'number', required: false, description: 'Deprecated alias of role (an asset role ID)', deprecated: true },
         ],
         returns: 'Grant result',
       },
@@ -508,6 +511,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
           { name: 'teamId', type: 'number', required: true, description: 'Team ID' },
           { name: 'role', type: 'string', required: true, description: 'Asset role: its ID, or its name (e.g. Editor). See assetroles.listAssetRoles' },
+          { name: 'roleId', type: 'number', required: false, description: 'Deprecated alias of role (an asset role ID)', deprecated: true },
         ],
         returns: 'Revocation result',
       },
@@ -756,6 +760,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           { name: 'metricId', type: 'number', required: true, description: 'Metric ID' },
           { name: 'userId', type: 'number', required: true, description: 'User ID' },
           { name: 'assetRoleId', type: 'number', required: true, description: 'Asset role ID' },
+          { name: 'roleId', type: 'number', required: false, description: 'Deprecated alias of assetRoleId', deprecated: true },
         ],
         returns: 'Grant result',
       },
@@ -765,6 +770,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           { name: 'metricId', type: 'number', required: true, description: 'Metric ID' },
           { name: 'userId', type: 'number', required: true, description: 'User ID' },
           { name: 'assetRoleId', type: 'number', required: true, description: 'Asset role ID' },
+          { name: 'roleId', type: 'number', required: false, description: 'Deprecated alias of assetRoleId', deprecated: true },
         ],
         returns: 'Revocation result',
       },
@@ -779,6 +785,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           { name: 'metricId', type: 'number', required: true, description: 'Metric ID' },
           { name: 'teamId', type: 'number', required: true, description: 'Team ID' },
           { name: 'assetRoleId', type: 'number', required: true, description: 'Asset role ID' },
+          { name: 'roleId', type: 'number', required: false, description: 'Deprecated alias of assetRoleId', deprecated: true },
         ],
         returns: 'Grant result',
       },
@@ -788,6 +795,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           { name: 'metricId', type: 'number', required: true, description: 'Metric ID' },
           { name: 'teamId', type: 'number', required: true, description: 'Team ID' },
           { name: 'assetRoleId', type: 'number', required: true, description: 'Asset role ID' },
+          { name: 'roleId', type: 'number', required: false, description: 'Deprecated alias of assetRoleId', deprecated: true },
         ],
         returns: 'Revocation result',
       },
@@ -804,11 +812,11 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
       followGoal: { description: 'Follow a goal', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }], returns: 'Follow result' },
       unfollowGoal: { description: 'Unfollow a goal', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }], returns: 'Unfollow result' },
       listGoalAccessUsers: { description: 'List users with goal access', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }], returns: 'Array of user access entries' },
-      grantGoalAccessUser: { description: 'Grant user goal access', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }, { name: 'userId', type: 'number', required: true, description: 'User ID' }, { name: 'role', type: 'string', required: true, description: 'Asset role: its ID, or its name (e.g. Editor). See assetroles.listAssetRoles' }], returns: 'Grant result' },
-      revokeGoalAccessUser: { description: 'Revoke user goal access', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }, { name: 'userId', type: 'number', required: true, description: 'User ID' }, { name: 'role', type: 'string', required: true, description: 'Asset role: its ID, or its name (e.g. Editor). See assetroles.listAssetRoles' }], returns: 'Revocation result' },
+      grantGoalAccessUser: { description: 'Grant user goal access', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }, { name: 'userId', type: 'number', required: true, description: 'User ID' }, { name: 'role', type: 'string', required: true, description: 'Asset role: its ID, or its name (e.g. Editor). See assetroles.listAssetRoles' }, { name: 'roleId', type: 'number', required: false, description: 'Deprecated alias of role (an asset role ID)', deprecated: true }], returns: 'Grant result' },
+      revokeGoalAccessUser: { description: 'Revoke user goal access', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }, { name: 'userId', type: 'number', required: true, description: 'User ID' }, { name: 'role', type: 'string', required: true, description: 'Asset role: its ID, or its name (e.g. Editor). See assetroles.listAssetRoles' }, { name: 'roleId', type: 'number', required: false, description: 'Deprecated alias of role (an asset role ID)', deprecated: true }], returns: 'Revocation result' },
       listGoalAccessTeams: { description: 'List teams with goal access', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }], returns: 'Array of team access entries' },
-      grantGoalAccessTeam: { description: 'Grant team goal access', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }, { name: 'teamId', type: 'number', required: true, description: 'Team ID' }, { name: 'role', type: 'string', required: true, description: 'Asset role: its ID, or its name (e.g. Editor). See assetroles.listAssetRoles' }], returns: 'Grant result' },
-      revokeGoalAccessTeam: { description: 'Revoke team goal access', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }, { name: 'teamId', type: 'number', required: true, description: 'Team ID' }, { name: 'role', type: 'string', required: true, description: 'Asset role: its ID, or its name (e.g. Editor). See assetroles.listAssetRoles' }], returns: 'Revocation result' },
+      grantGoalAccessTeam: { description: 'Grant team goal access', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }, { name: 'teamId', type: 'number', required: true, description: 'Team ID' }, { name: 'role', type: 'string', required: true, description: 'Asset role: its ID, or its name (e.g. Editor). See assetroles.listAssetRoles' }, { name: 'roleId', type: 'number', required: false, description: 'Deprecated alias of role (an asset role ID)', deprecated: true }], returns: 'Grant result' },
+      revokeGoalAccessTeam: { description: 'Revoke team goal access', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }, { name: 'teamId', type: 'number', required: true, description: 'Team ID' }, { name: 'role', type: 'string', required: true, description: 'Asset role: its ID, or its name (e.g. Editor). See assetroles.listAssetRoles' }, { name: 'roleId', type: 'number', required: false, description: 'Deprecated alias of role (an asset role ID)', deprecated: true }], returns: 'Revocation result' },
     },
   },
 
@@ -1219,19 +1227,98 @@ function toPositiveInteger(value: unknown): number | undefined {
 
 /** Documented numeric entity-ID params; each is interpolated into a request path. */
 function idParams(entry: CommandEntry): CommandParam[] {
-  return entry.params.filter((p) => p.type === 'number' && !p.deprecated && ID_PARAM_NAME.test(p.name));
+  return entry.params.filter((p) => p.type === 'number' && ID_PARAM_NAME.test(p.name));
 }
 
+// Array params whose items are entity IDs. Other arrays (show, exclude,
+// metrics objects, event filters) are not IDs and are left alone.
+const ID_LIST_PARAMS = new Set([ID_LIST_PARAM, 'userIds', 'roles']);
+
+// Documented, deprecated aliases: the alias is validated and moved to the
+// canonical param, which only the alias or the canonical may supply.
+const ID_ALIASES: Record<string, Record<string, string>> = {
+  ...Object.fromEntries(['grantExperimentAccessUser', 'revokeExperimentAccessUser', 'grantExperimentAccessTeam', 'revokeExperimentAccessTeam']
+    .map((c) => [`experiments.${c}`, { roleId: 'role' }])),
+  ...Object.fromEntries(['grantGoalAccessUser', 'revokeGoalAccessUser', 'grantGoalAccessTeam', 'revokeGoalAccessTeam']
+    .map((c) => [`goals.${c}`, { roleId: 'role' }])),
+  ...Object.fromEntries(['grantMetricAccessUser', 'revokeMetricAccessUser', 'grantMetricAccessTeam', 'revokeMetricAccessTeam']
+    .map((c) => [`metrics.${c}`, { roleId: 'assetRoleId' }])),
+};
+
+// Params the execute_command tool layer adds itself (src/tools.ts).
+const TOOL_INJECTED_PARAMS = new Set(['items', 'page', 'apiEndpoint']);
+
 /**
- * Throws when an entity-ID param is not a positive integer. Runs in
- * executeCommand, so every entry point (execute_command and direct Node
- * callers) is covered: "6/full_on" or "../users/5" never reaches a path.
+ * The one owner of entity-ID params, run at the top of executeCommand (and by
+ * validateCommandParams for friendly errors). Returns new params where:
+ * - every documented *Id param and ID array is a positive integer (" 05 " is
+ *   5), so the value the core interpolates into a path is that integer;
+ * - a documented deprecated alias (roleId) is validated and moved to its
+ *   canonical param; it conflicts with a different canonical value;
+ * - any undocumented key is dropped, so a core-name alias like `id` or
+ *   `assetRoleId` can never override the normalised documented value;
+ * - a required ID that is missing throws, so no path is built with "undefined".
+ * Throws one error listing every problem.
  */
-function assertIdParams(entry: CommandEntry, params: Record<string, unknown>): void {
-  for (const p of idParams(entry)) {
-    if (params[p.name] !== undefined && toPositiveInteger(params[p.name]) === undefined) {
-      throw new Error(`Param "${p.name}" for ${entry.group}.${entry.command} must be a positive integer ID.`);
+export function normalizeIdParams(group: string, command: string, params: Record<string, unknown>): Record<string, unknown> {
+  const entry = getCommandEntry(group, command);
+  if (!entry) throw new Error(`Unknown command: ${group}.${command}`);
+  const label = `${entry.group}.${entry.command}`;
+  const errors: string[] = [];
+  const known = new Set([...entry.params.map((p) => p.name), ...TOOL_INJECTED_PARAMS]);
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (known.has(key)) out[key] = value;
+  }
+
+  for (const [alias, canonical] of Object.entries(ID_ALIASES[label] ?? {})) {
+    if (out[alias] === undefined) continue;
+    const id = toPositiveInteger(out[alias]);
+    if (id === undefined) {
+      errors.push(`Param "${alias}" for ${label} must be a positive integer ID.`);
+    } else if (out[canonical] !== undefined && toPositiveInteger(out[canonical]) !== id) {
+      errors.push(`Params "${alias}" and "${canonical}" for ${label} disagree; pass only "${canonical}".`);
+    } else {
+      out[canonical] = out[canonical] ?? id;
     }
+    delete out[alias];
+  }
+
+  for (const p of idParams(entry)) {
+    if (p.deprecated) continue;
+    if (out[p.name] === undefined) {
+      if (p.required) errors.push(`Missing required param "${p.name}" for ${label}.`);
+      continue;
+    }
+    const id = toPositiveInteger(out[p.name]);
+    if (id === undefined) errors.push(`Param "${p.name}" for ${label} must be a positive integer ID.`);
+    else out[p.name] = id;
+  }
+
+  for (const p of entry.params) {
+    if (p.type !== 'array' || !ID_LIST_PARAMS.has(p.name)) continue;
+    if (out[p.name] === undefined) {
+      if (p.required) errors.push(`Missing required param "${p.name}" for ${label}.`);
+      continue;
+    }
+    const list = out[p.name];
+    const ids = Array.isArray(list) ? list.map(toPositiveInteger) : [];
+    if (ids.length === 0 || ids.some((id) => id === undefined)) {
+      errors.push(`Param "${p.name}" for ${label} must be a non-empty array of positive integer IDs.`);
+    } else {
+      out[p.name] = ids;
+    }
+  }
+
+  if (errors.length > 0) throw new IdParamError(errors);
+  return out;
+}
+
+/** Thrown by normalizeIdParams; `problems` lists each invalid or missing ID. */
+export class IdParamError extends Error {
+  constructor(readonly problems: string[]) {
+    super(problems.join(' '));
+    this.name = 'IdParamError';
   }
 }
 
@@ -1270,23 +1357,19 @@ export function validateCommandParams(
     errors.push(guess ? `${baseMsg} Did you mean "${guess}"?` : baseMsg);
   }
 
+  const aliasFor = Object.fromEntries(Object.entries(ID_ALIASES[`${entry.group}.${entry.command}`] ?? {}).map(([alias, canonical]) => [canonical, alias]));
   for (const p of entry.params) {
-    if (p.required && checked[p.name] === undefined) {
+    if (p.required && checked[p.name] === undefined && (aliasFor[p.name] === undefined || checked[aliasFor[p.name]] === undefined)) {
       errors.push(`Missing required param "${p.name}" (${p.type}) for ${entry.group}.${entry.command}: ${p.description}`);
     }
   }
-  for (const p of idParams(entry)) {
-    if (checked[p.name] !== undefined && toPositiveInteger(checked[p.name]) === undefined) {
-      errors.push(`Param "${p.name}" for ${entry.group}.${entry.command} must be a positive integer ID.`);
-    }
-  }
-  // Bulk commands take their IDs as an array.
-  const idList = entry.params.find((p) => p.name === ID_LIST_PARAM && p.type === 'array');
-  if (idList && checked[ID_LIST_PARAM] !== undefined) {
-    const ids = checked[ID_LIST_PARAM];
-    if (!Array.isArray(ids) || ids.length === 0 || ids.some((id) => toPositiveInteger(id) === undefined)) {
-      errors.push(`Param "${ID_LIST_PARAM}" for ${entry.group}.${entry.command} must be a non-empty array of positive integer IDs.`);
-    }
+  // The same ID rules executeCommand enforces, as friendly errors. Missing
+  // required params are already reported above.
+  try {
+    normalizeIdParams(entry.group, entry.command, checked);
+  } catch (e) {
+    if (!(e instanceof IdParamError)) throw e;
+    errors.push(...e.problems.filter((problem) => !problem.startsWith('Missing required param')));
   }
 
   return errors;
@@ -1723,10 +1806,8 @@ function bulkRunner(command: typeof BULK_COMMANDS[number]): CommandRunner {
     if (required !== undefined && params[required] === undefined) {
       throw new Error(`experiments.${command} requires "${required}"`);
     }
-    const ids = Array.isArray(params.ids) ? params.ids.map(toPositiveInteger) : [];
-    if (ids.length === 0 || ids.some((id) => id === undefined)) {
-      throw new Error(`experiments.${command}: "ids" must be a non-empty array of positive integer experiment IDs`);
-    }
+    // normalizeIdParams has already made ids a non-empty array of integers.
+    const ids = params[ID_LIST_PARAM] as number[];
     const extra = BULK_EXTRA_ARGS[command].map((name) => params[name]);
     return experimentsCore[command](client, ids, new Map(), ...extra);
   };
@@ -1865,7 +1946,7 @@ const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
       return { data: { id: params.userId } };
     },
   },
-  goals: Object.fromEntries(GOAL_ACCESS_COMMANDS.map((c) => [c, accessRunner('goals', c, 'goalId', 'id')])),
+  goals: Object.fromEntries(GOAL_ACCESS_COMMANDS.map((c) => [c, accessRunner('goals', c, 'goalId', ID_PARAM)])),
   datasources: Object.fromEntries(DATASOURCE_CONFIG_COMMANDS.map((c) => [c, datasourceRunner(c)])),
   storageconfigs: {
     // The backend merges only the stored secret key (by storage_config_id); the
@@ -1941,11 +2022,12 @@ export async function executeCommand(
     throw new Error(`Unknown group: "${group}". Available: ${CLI_GROUPS.join(', ')}`);
   }
 
-  assertIdParams(entry, params);
+  // Entity IDs are normalised before any adapter, runner or core sees them.
+  const idSafeParams = normalizeIdParams(group, command, params);
 
   const runner = COMMAND_RUNNERS[group]?.[command];
   if (runner) {
-    return runner(client, params);
+    return runner(client, idSafeParams);
   }
 
   const fn = mod[command];
@@ -1953,5 +2035,5 @@ export async function executeCommand(
     throw new Error(`Function "${command}" not found in core module "${group}". Available: ${Object.keys(mod).filter(k => typeof mod[k] === 'function').join(', ')}`);
   }
 
-  return fn(client, normalizeCommandParams(group, command, params));
+  return fn(client, normalizeCommandParams(group, command, idSafeParams));
 }
