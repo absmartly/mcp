@@ -132,9 +132,9 @@ export function withPathIdGuard<T extends ApiClientLike>(client: T, table: PathT
       if (typeof prop !== "string" || typeof value !== "function") return value;
       const cached = wrapped.get(prop);
       if (cached) return cached;
-      const rawIndex = RAW_PATH_ARG[prop];
+      const rawIndex = Object.hasOwn(RAW_PATH_ARG, prop) ? RAW_PATH_ARG[prop] : undefined;
       const info = Object.hasOwn(table, prop) ? table[prop] : undefined;
-      const words = NON_ID_PATH_PARAMS[prop] ?? [];
+      const words = Object.hasOwn(NON_ID_PATH_PARAMS, prop) ? NON_ID_PATH_PARAMS[prop] : [];
       const guarded = function (...args: unknown[]) {
         if (rawIndex !== undefined) {
           checkRawPath(target, prop, rawIndex, args[rawIndex]);

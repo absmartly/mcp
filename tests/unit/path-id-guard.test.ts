@@ -162,6 +162,9 @@ export default async function runTests() {
   assertEquals(withPathIdGuard(client) === real, true, 'wrapping a client twice returns the same proxy');
   assertEquals(withPathIdGuard(real) === real, true, 'wrapping a proxy returns it');
   assertEquals(real.getGoal === real.getGoal, true, 'wrapped methods are cached per proxy');
+  assertEquals(String(real), '[object Object]', 'inherited toString is not a raw-path mapping');
+  assertEquals(real.valueOf() === real, true, 'inherited valueOf is not a raw-path mapping');
+  assertEquals(real.hasOwnProperty('httpClient'), true, 'inherited hasOwnProperty is not a raw-path mapping');
   assertEquals(await errorOf(() => real.getGoal('1/../users' as any)), 'PathIdError', 'real APIClient: getGoal refuses a path string');
   assertEquals(await errorOf(() => (real as any).uploadFile('../users', 'x')), 'PathIdError', 'real APIClient: uploadFile refuses a path usage');
   assertEquals(await errorOf(() => real.rawRequest('/goals/%2E%2E/users')), 'PathIdError', 'real APIClient: rawRequest refuses an encoded dot segment');
