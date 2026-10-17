@@ -203,11 +203,9 @@ const CASES: Case[] = [
     respond: (config) => (config.url === '/configs' ? { configs: [{ id: 1000, name: 'other' }] } : { config: {} }),
     expectedError: 'Platform config "1e3" not found', expected: [{ method: 'GET', url: '/configs' }] },
   { name: 'bulkStart rejects non-integer ids before any request', group: 'experiments', command: 'bulkStart', params: { ids: [1, '2.5'] },
-    expectedError: 'Param "ids" for experiments.bulkStart must be a non-empty array of positive integer IDs.', expected: [] },
-  { name: 'bulkArchive rejects an empty ids array before any request', group: 'experiments', command: 'bulkArchive', params: { ids: [] },
-    expectedError: 'Param "ids" for experiments.bulkArchive must be a non-empty array of positive integer IDs.', expected: [] },
+    expectedError: 'Param "ids" for experiments.bulkStart must be an array of positive integer IDs.', expected: [] },
   { name: 'bulkArchive rejects a non-array ids before any request', group: 'experiments', command: 'bulkArchive', params: { ids: '5' },
-    expectedError: 'Param "ids" for experiments.bulkArchive must be a non-empty array of positive integer IDs.', expected: [] },
+    expectedError: 'Param "ids" for experiments.bulkArchive must be an array of positive integer IDs.', expected: [] },
   // The ID rule runs in executeCommand, so direct Node callers are covered too.
   // normalizeIdParams owns ID params: undocumented core-name aliases never reach the core.
   { name: 'executeCommand rejects an invalid id alias instead of letting it reach the path', group: 'goals', command: 'followGoal', params: { goalId: 1, id: '6/follow' },
@@ -225,7 +223,9 @@ const CASES: Case[] = [
     expected: [{ method: 'GET', url: '/users', params: { items: '10', page: '1', include_archived: '1' } }] },
   { name: 'an undocumented ID-named key must still be a positive integer', group: 'experiments', command: 'getMetricResults',
     params: { experimentId: 3, metricId: '1/../x' },
-    expectedError: 'Param "metricId" for experiments.getMetricResults must be a positive integer ID.', expected: [] },
+    // Checked where the APIClient builds the path (withPathIdGuard).
+    select: (requests) => requests.filter((r) => r.url.includes('metric')),
+    expectedError: 'Invalid ID "1/../x" for getMetric: a path ID must be a positive integer.', expected: [] },
   { name: 'executeCommand rejects a deprecated metrics roleId that is not an integer', group: 'metrics', command: 'revokeMetricAccessUser',
     params: { metricId: 8, userId: 4, roleId: '4/x' },
     expectedError: 'Param "roleId" for metrics.revokeMetricAccessUser must be a positive integer ID.', expected: [] },
@@ -243,7 +243,7 @@ const CASES: Case[] = [
   { name: 'teams userIds are normalised as IDs', group: 'teams', command: 'addTeamMembers', params: { teamId: 5, userIds: [' 2', 3] },
     expected: [{ method: 'PUT', url: '/teams/5/members/add', data: { user_ids: [2, 3] } }] },
   { name: 'teams userIds reject a non-integer', group: 'teams', command: 'removeTeamMembers', params: { teamId: 5, userIds: ['2/x'] },
-    expectedError: 'Param "userIds" for teams.removeTeamMembers must be a non-empty array of positive integer IDs.', expected: [] },
+    expectedError: 'Param "userIds" for teams.removeTeamMembers must be an array of positive integer IDs.', expected: [] },
   { name: 'reorderCustomSections ids are normalised as IDs', group: 'customsections', command: 'reorderCustomSections', params: { ids: ['09', 7] },
     expected: [{ method: 'PUT', url: '/experiment_custom_sections/order', data: { experiment_custom_sections: [{ id: 9, order_index: 0 }, { id: 7, order_index: 1 }] } }] },
   { name: 'the deprecated params bag is flattened, then passed through like top-level params', group: 'events', command: 'listEvents',
@@ -295,9 +295,9 @@ const CASES: Case[] = [
   { name: 'validateDatasourceQuery with datasourceId still needs query', group: 'datasources', command: 'validateDatasourceQuery', params: { datasourceId: 2 },
     expectedError: 'datasources.validateDatasourceQuery requires "query" with "datasourceId"', expected: [] },
   { name: 'a null core-name ID is an error, never a /configs/null path', group: 'platformconfig', command: 'getPlatformConfig', params: { id: null },
-    expectedError: 'Param "id" for platformconfig.getPlatformConfig must be a positive integer ID.', expected: [] },
+    expectedError: 'Platform config must be a positive integer ID or a config name: null', expected: [] },
   { name: 'a null core-name ID on update is an error too', group: 'platformconfig', command: 'updatePlatformConfig', params: { id: null, value: 2 },
-    expectedError: 'Param "id" for platformconfig.updatePlatformConfig must be a positive integer ID.', expected: [] },
+    expectedError: 'Platform config must be a positive integer ID or a config name: null', expected: [] },
   { name: 'a null documented ID alias is an error', group: 'goals', command: 'followGoal', params: { id: null },
     expectedError: 'Param "id" for goals.followGoal must be a positive integer ID.', expected: [] },
   { name: 'bag conflicts compare normalised IDs', group: 'events', command: 'listEvents', params: { params: { take: 5, experimentId: 5 }, experimentId: ' 5' },
@@ -308,15 +308,40 @@ const CASES: Case[] = [
     expectedError: 'Param "userId" for users.listUserApiKeys must be a positive integer user ID or an email.', expected: [] },
   { name: 'a zero userRef (2.0 core shape) is refused', group: 'users', command: 'deleteUserApiKey', params: { userRef: '0', keyId: 2 },
     expectedError: 'Param "userRef" for users.deleteUserApiKey must be a positive integer user ID or an email.', expected: [] },
+  // Round 12: IDs nested in data reach the path through flattenData; the
+  // APIClient-boundary guard refuses them.
+  { name: 'an ID nested in data is refused at the path (abc)', group: 'goals', command: 'updateGoal', params: { data: { id: 'abc', description: 'x' } },
+    expectedError: 'Invalid ID "abc" for updateGoal: a path ID must be a positive integer.', expected: [] },
+  { name: 'an ID nested in data is refused at the path (x/y)', group: 'experiments', command: 'updateCustomField', params: { data: { id: 'x/y', name: 'n' } },
+    expectedError: 'Invalid ID "x/y" for updateCustomSectionField: a path ID must be a positive integer.', expected: [] },
+  { name: 'an ID nested in data is refused at the path (-3)', group: 'goals', command: 'updateGoal', params: { data: { id: -3, description: 'x' } },
+    expectedError: 'Invalid ID -3 for updateGoal: a path ID must be a positive integer.', expected: [] },
+  { name: 'an ID nested in data is refused at the path (0)', group: 'goals', command: 'updateGoal', params: { data: { id: 0, description: 'x' } },
+    expectedError: 'Invalid ID 0 for updateGoal: a path ID must be a positive integer.', expected: [] },
+  { name: 'a missing ID never reaches a path, whatever the HttpClient', group: 'experiments', command: 'startExperiment', params: {},
+    expectedError: 'Invalid ID undefined for getExperiment: a path ID must be a positive integer.', expected: [] },
+  { name: 'an undocumented ID-named body key is not path-checked (createExperimentNote userId)', group: 'experiments', command: 'createExperimentNote',
+    params: { experimentId: 5, note: 'x', userId: 'ada@x.com' },
+    expected: [{ method: 'POST', url: '/experiments/5/activity', data: { note: 'x' } }] },
+  { name: 'a non-ID null passes through unchanged', group: 'events', command: 'listEvents', params: { validExposures: null, from: 1 },
+    expected: [{ method: 'POST', url: '/events', data: { filters: { from: 1, effective_exposures: null }, take: 100 } }] },
+  { name: 'a non-ID params-bag key loses quietly to the top level, as in 2.0', group: 'events', command: 'listEvents', params: { params: { from: 1 }, from: 2 },
+    expected: [{ method: 'POST', url: '/events', data: { filters: { from: 2 }, take: 100 } }] },
+  { name: 'an ID params-bag key that disagrees is an error', group: 'events', command: 'listEvents', params: { params: { experimentId: 1 }, experimentId: 2 },
+    expectedError: 'Param "experimentId" for events.listEvents is given both at the top level and in "params" with different values; pass it once.', expected: [] },
+  { name: 'empty ID lists are allowed (reorderCustomSections ids: [])', group: 'customsections', command: 'reorderCustomSections', params: { ids: [] },
+    expected: [{ method: 'PUT', url: '/experiment_custom_sections/order', data: { experiment_custom_sections: [] } }] },
+  { name: '2.0 shape: grantGoalAccessUser {goalId, userId} without role goes to the core', group: 'goals', command: 'grantGoalAccessUser', params: { goalId: 5, userId: 3 },
+    expected: [{ method: 'POST', url: '/goals/5/asset_role_users', data: { user_id: 3 } }] },
+  { name: '2.0 shape: testStorageConfig {configId, config} sends the config as is', group: 'storageconfigs', command: 'testStorageConfig',
+    params: { configId: 3, config: { type: 'S3', properties: { bucket: 'b' } } },
+    expected: [{ method: 'POST', url: '/storage_configs/test', data: { type: 'S3', properties: { bucket: 'b' } } }] },
   { name: 'screenshotId is not a path ID and passes through unchanged', group: 'experiments', command: 'updateExperiment',
     params: { experimentId: 5, changes: { name: 'n' }, screenshotId: ['0:12'] },
     select: (requests) => requests.slice(0, 1),
     expected: [{ method: 'GET', url: '/experiments/5' }] },
   { name: 'a documented required ID given as null is an error', group: 'experiments', command: 'startExperiment', params: { experimentId: null },
     expectedError: 'Param "experimentId" for experiments.startExperiment must be a positive integer ID.', expected: [] },
-  { name: 'a params-bag key that disagrees with the top level is an error', group: 'insights', command: 'getVelocityInsights',
-    params: { from: '2026-01-01', to: '2026-02-01', aggregation: 'week', params: { from: '2025-01-01' } },
-    expectedError: 'Param "from" for insights.getVelocityInsights is given both at the top level and in "params" with different values; pass it once.', expected: [] },
   { name: 'executeCommand rejects a multi-segment experimentId (6/full_on)', group: 'experiments', command: 'startExperiment', params: { experimentId: '6/full_on' },
     expectedError: 'Param "experimentId" for experiments.startExperiment must be a positive integer ID.', expected: [] },
   { name: 'executeCommand rejects a traversal segmentId', group: 'segments', command: 'deleteSegment', params: { segmentId: '../users/5' },
@@ -520,7 +545,9 @@ const CASES: Case[] = [
     expected: [{ method: 'GET', url: '/asset_roles', params: { items: '100', page: '1' } }, { method: 'DELETE', url: '/goals/12/asset_role_teams/4/1' }] },
   { name: 'revokeGoalAccessUser without role fails before any request', group: 'goals', command: 'revokeGoalAccessUser',
     params: { goalId: 12, userId: 2 },
-    expectedError: 'goals.revokeGoalAccessUser requires "role" (an asset role ID or name)', expected: [] },
+    // No role: the 2.0 shape goes to the core, which would build ".../undefined";
+    // the path guard refuses it before any request.
+    expectedError: 'Invalid ID undefined for revokeGoalAccessUser: a path ID must be a positive integer.', expected: [] },
   { name: 'restartExperiment passes state and reshuffle', group: 'experiments', command: 'restartExperiment',
     params: { experimentId: 3, reason: 'testing', state: 'development', reshuffle: true },
     select: (requests) => requests.map(({ method, url, data }) => {
@@ -560,14 +587,9 @@ const CASES: Case[] = [
   { name: 'testDatasource tests the stored datasource by id', group: 'datasources', command: 'testDatasource', params: { datasourceId: 2 },
     expected: [{ method: 'POST', url: '/datasources/test', data: { datasource_id: 2 } }] },
   { name: 'testDatasource merges unsaved edits but keeps the id', group: 'datasources', command: 'testDatasource',
+    // As in 2.0, a given config is the whole body.
     params: { datasourceId: 2, config: { type: 'clickhouse', properties: { host: 'ch.test' }, datasource_id: 99 } },
-    expected: [{ method: 'POST', url: '/datasources/test', data: { datasource_id: 2, type: 'clickhouse', properties: { host: 'ch.test' } } }] },
-  { name: 'testDatasource rejects a partial config instead of testing the stored one', group: 'datasources', command: 'testDatasource',
-    params: { datasourceId: 2, config: { properties: { host: 'ch.test' } } },
-    expectedError: 'datasources.testDatasource: "config" must be an object with "type" (string) and "properties" (object)', expected: [] },
-  { name: 'testDatasource rejects a non-object config', group: 'datasources', command: 'testDatasource',
-    params: { datasourceId: 2, config: 'clickhouse' },
-    expectedError: 'datasources.testDatasource: "config" must be an object with "type" (string) and "properties" (object)', expected: [] },
+    expected: [{ method: 'POST', url: '/datasources/test', data: { type: 'clickhouse', properties: { host: 'ch.test' }, datasource_id: 99 } }] },
   { name: 'introspectDatasource introspects the stored datasource by id', group: 'datasources', command: 'introspectDatasource', params: { datasourceId: 2 },
     expected: [{ method: 'POST', url: '/datasources/introspect', data: { datasource_id: 2 } }] },
   { name: 'validateDatasourceQuery sends the id and query', group: 'datasources', command: 'validateDatasourceQuery',
@@ -741,8 +763,8 @@ export default async function runTests() {
   {
     assertEquals(
       validateCommandParams(getCommandEntry('experiments', 'bulkStart')!, { ids: [] }),
-      ['Param "ids" for experiments.bulkStart must be a non-empty array of positive integer IDs.'],
-      'bulkStart: empty ids fail validation',
+      [],
+      'bulkStart: empty ids are allowed, as in 2.0',
     );
     assertEquals(
       validateCommandParams(getCommandEntry('experiments', 'startExperiment')!, { experimentId: '6/full_on' }),
@@ -762,8 +784,8 @@ export default async function runTests() {
     );
     assertEquals(
       validateCommandParams(getCommandEntry('teams', 'addTeamMembers')!, { teamId: 1, userIds: [] }),
-      ['Param "userIds" for teams.addTeamMembers must be a non-empty array of positive integer IDs.'],
-      'teams: an empty userIds fails validation',
+      [],
+      'teams: an empty userIds is allowed, as in 2.0',
     );
   }
 
@@ -813,7 +835,7 @@ export default async function runTests() {
     try { results = await compareWithRef(); } catch { results = undefined; }
     if (results) {
       for (const r of results) {
-        assertEquals(r.same || r.idRejection, true, `parity with origin/main: ${r.call.group}.${r.call.command} ${JSON.stringify(r.call.params)}`);
+        assertEquals(r.expected ? !r.same : r.same, true, `parity with origin/main: ${r.call.group}.${r.call.command} ${JSON.stringify(r.call.params)}${r.expected ? ` (expected difference: ${r.expected})` : ''}`);
       }
     } else {
       // origin/main is not available (e.g. a shallow checkout); the parity

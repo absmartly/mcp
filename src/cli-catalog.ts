@@ -3,6 +3,7 @@
 // All core functions follow the signature: (client: APIClient, params: object) => Promise<CommandResult<T>>
 
 import type { ApiClientLike } from "./api-client-like.js";
+import { withPathIdGuard } from "./path-id-guard.js";
 
 // Static imports for all core modules — required for Cloudflare Workers bundling.
 import * as coreExperiments from "@absmartly/cli/core/experiments";
@@ -1052,7 +1053,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
       createDatasource: { description: 'Create a data source', params: [{ name: 'data', type: 'object', required: true, description: 'Datasource config' }], returns: 'Created datasource' },
       updateDatasource: { description: 'Update a data source', params: [{ name: 'datasourceId', type: 'number', required: true, description: 'Datasource ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated datasource' },
       archiveDatasource: { description: 'Archive a data source', params: [{ name: 'datasourceId', type: 'number', required: true, description: 'Datasource ID' }], returns: 'Archive result', dangerous: true },
-      testDatasource: { description: 'Test a saved data source connection. Stored secrets are used server-side, so they never pass through MCP.', params: [{ name: 'datasourceId', type: 'number', required: false, description: 'Datasource ID. Omit to test an unsaved definition given whole in config' }, { name: 'config', type: 'object', required: false, description: 'Unsaved edits to test instead of the stored settings: { type, properties }. Omitted secret fields keep their stored value.' }], returns: 'Test result' },
+      testDatasource: { description: 'Test a saved data source connection. Stored secrets are used server-side, so they never pass through MCP.', params: [{ name: 'datasourceId', type: 'number', required: false, description: 'Datasource ID: tests the saved datasource with its stored secrets' }, { name: 'config', type: 'object', required: false, description: 'Instead of datasourceId: a whole datasource definition to test, sent as the request body. Include datasource_id in it to reuse stored secrets for fields left as "***".' }], returns: 'Test result' },
       introspectDatasource: { description: 'Introspect a saved data source schema (tables and columns)', params: [{ name: 'datasourceId', type: 'number', required: false, description: 'Datasource ID. Omit to introspect an unsaved definition given whole in config' }, { name: 'config', type: 'object', required: false, description: 'An unsaved datasource definition, used when datasourceId is omitted' }], returns: 'Schema data' },
       validateDatasourceQuery: { description: 'Validate a read-only SQL query against a saved data source', params: [{ name: 'datasourceId', type: 'number', required: false, description: 'Datasource ID. Omit to validate against an unsaved definition given whole in config' }, { name: 'query', type: 'string', required: false, description: 'SQL query to validate (required with datasourceId; otherwise put it in config)' }, { name: 'config', type: 'object', required: false, description: 'An unsaved datasource definition, used when datasourceId is omitted' }], returns: 'Validation result' },
     },
@@ -1204,21 +1205,10 @@ export function documentedParams(entry: CommandEntry): CommandParam[] {
 // positive integers (a numeric string is accepted): "../users/5" must never
 // reach a path template.
 const ID_PARAM_NAME = /Id\d*$/;
-// Undocumented keys the cores interpolate into a request path: "id" and the
-// path-ID names their params use. Not every core "...Id" is a path value
-// (updateExperiment's screenshotId is a list of "variant:uploadId" strings,
-// events' goalId and createExperiment's applicationId are body fields), so
-// only these are owned.
-const PATH_ID_KEYS = new Set([
-  'id', 'experimentId', 'experimentId1', 'experimentId2', 'metricId', 'goalId', 'segmentId', 'teamId', 'userId',
-  'noteId', 'alertId', 'actionId', 'annotationId', 'commentId', 'keyId', 'roleId', 'exportConfigId', 'historyId',
-]);
+// Any ID-named key, for the params-bag conflict rule.
+const ID_KEY = /^id$|Id\d*$/;
 const USER_REF_KEYS = ['userId', 'userRef'];
 const USER_REF_COMMANDS = new Set(['users.listUserApiKeys', 'users.createUserApiKey', 'users.deleteUserApiKey']);
-const NON_PATH_ID_KEYS = new Set(['screenshotId', 'applicationId', 'lastId', 'denominatorGoalId', 'primaryMetricId']);
-function isPathIdKey(key: string): boolean {
-  return PATH_ID_KEYS.has(key) && !NON_PATH_ID_KEYS.has(key);
-}
 const ID_LIST_PARAM = 'ids';
 // Digits only, after trimming; leading zeros are allowed ("05" is 5).
 const DIGITS = /^[0-9]+$/;
@@ -1240,7 +1230,6 @@ function idParams(entry: CommandEntry): CommandParam[] {
 // bulk commands must be non-empty (an empty batch is a mistake); a body list
 // like editTeamMemberRoles `roles` may be empty (it clears the roles).
 const ID_LIST_PARAMS = new Set([ID_LIST_PARAM, 'userIds', 'roles']);
-const NON_EMPTY_ID_LIST_PARAMS = new Set([ID_LIST_PARAM, 'userIds']);
 
 /** Params the execute_command tool layer adds itself (src/tools.ts); the audit ignores them too. */
 export const TOOL_INJECTED_PARAMS = {
@@ -1307,7 +1296,7 @@ function coreIdAliases(entry: CommandEntry): Record<string, string> {
     const marker = `__id_${p.name}`;
     const translated = normalizeCommandParams(entry.group, entry.command, { [p.name]: marker });
     for (const [key, value] of Object.entries(translated)) {
-      if (key !== p.name && value === marker && isPathIdKey(key)) aliases[key] = p.name;
+      if (key !== p.name && value === marker && ID_KEY.test(key)) aliases[key] = p.name;
     }
   }
   coreIdAliasCache.set(label, aliases);
@@ -1364,14 +1353,13 @@ export function normalizeIdParams(
     if (isRecord(bag) && PARAMS_PARAM in bag) {
       throw new IdParamError([`Param "${PARAMS_PARAM}" for ${label} must not contain a nested "${PARAMS_PARAM}".`]);
     }
-    // A key in both the bag and the top level must agree: the top level wins
-    // when flattening, so a different bag value would be silently ignored.
-    // Values are compared normalised; tool-injected defaults (paging) simply
-    // lose to the bag's own value.
+    // As in 2.0 the top level wins when flattening; for an ID key a
+    // disagreeing bag value is an error instead (a silently ignored ID could
+    // target the wrong entity). Tool-injected defaults (paging) lose to the
+    // bag's own value.
     if (isRecord(bag)) {
       const conflicts = Object.keys(bag).filter((key) =>
-        params[key] !== undefined && !TOOL_INJECTED_PARAM_NAMES.has(key)
-        && !sameParamValue(key, params[key], bag[key]));
+        params[key] !== undefined && ID_KEY.test(key) && !sameParamValue(key, params[key], bag[key]));
       if (conflicts.length > 0) {
         throw new IdParamError(conflicts.map((key) =>
           `Param "${key}" for ${label} is given both at the top level and in "${PARAMS_PARAM}" with different values; pass it once.`));
@@ -1386,23 +1374,12 @@ export function normalizeIdParams(
   const allCoreAliases = coreIdAliases(entry);
   const coreAliases = Object.fromEntries(Object.entries(allCoreAliases).filter(([alias]) => !(alias in documented)));
   const aliases: Record<string, string> = { ...coreAliases, ...documented };
-  // Every other key passes through unchanged, as in 2.0: only ID params are
-  // owned here. execute_command still rejects unknown keys up front
-  // (validateCommandParams); direct executeCommand callers may pass core-only
-  // options.
-  const documentedNames = new Set(entry.params.map((p) => p.name));
+  // Every other key passes through unchanged, as in 2.0. Whatever finally
+  // reaches a request path, by any route, is checked at the APIClient boundary
+  // (withPathIdGuard); execute_command also rejects unknown keys up front.
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input)) {
     if (!(key in aliases) && !(bagParam && key === PARAMS_PARAM)) out[key] = value;
-  }
-
-  // An undocumented ID-named key ("id", "fooId") is the one kind of extra key
-  // that can reach a request path, so it must be a positive integer too.
-  for (const [key, value] of Object.entries(out)) {
-    if (documentedNames.has(key) || !isPathIdKey(key) || value === undefined) continue;
-    const id = toPositiveInteger(value);
-    if (id === undefined) invalid.push(`Param "${key}" for ${label} must be a positive integer ID.`);
-    else out[key] = id;
   }
 
   // Canonical params whose alias was supplied: not reported as missing.
@@ -1453,7 +1430,7 @@ export function normalizeIdParams(
       invalid.push(`Param "${p.name}" for ${label} must be a positive integer ID.`);
       continue;
     }
-    if (out[p.name] === null && !p.required) delete out[p.name];
+    if (out[p.name] === null && !p.required && isIdParam) delete out[p.name];
     const value = out[p.name];
     if (value === undefined || value === null) {
       if (p.required && checkRequired && !aliasSupplied.has(p.name)) {
@@ -1466,11 +1443,10 @@ export function normalizeIdParams(
       if (id === undefined) invalid.push(`Param "${p.name}" for ${label} must be a positive integer ID.`);
       else out[p.name] = id;
     } else if (p.type === 'array' && ID_LIST_PARAMS.has(p.name)) {
+      // An empty list is allowed, as in 2.0: it cannot reach a path.
       const ids = Array.isArray(value) ? value.map(toPositiveInteger) : null;
-      const empty = ids !== null && ids.length === 0 && NON_EMPTY_ID_LIST_PARAMS.has(p.name);
-      if (ids === null || empty || ids.some((id) => id === undefined)) {
-        const what = NON_EMPTY_ID_LIST_PARAMS.has(p.name) ? 'a non-empty array' : 'an array';
-        invalid.push(`Param "${p.name}" for ${label} must be ${what} of positive integer IDs.`);
+      if (ids === null || ids.some((id) => id === undefined)) {
+        invalid.push(`Param "${p.name}" for ${label} must be an array of positive integer IDs.`);
       } else {
         out[p.name] = ids;
       }
@@ -1483,7 +1459,7 @@ export function normalizeIdParams(
 
 /** Equal once normalised: ID-named keys as integers, anything else structurally. */
 function sameParamValue(key: string, a: unknown, b: unknown): boolean {
-  if (isPathIdKey(key)) {
+  if (ID_KEY.test(key)) {
     const [ia, ib] = [toPositiveInteger(a), toPositiveInteger(b)];
     if (ia !== undefined || ib !== undefined) return ia === ib;
   }
@@ -2014,9 +1990,13 @@ async function resolveAssetRoleId(client: ApiClientLike, role: unknown): Promise
 function accessRunner(group: string, command: string, entityIdParam: string, coreIdParam: string): CommandRunner {
   return async (client, params) => {
     const { role, [entityIdParam]: entityId, ...rest } = params;
-    // The role becomes the asset_role_id (and, on revoke, a path segment), so
-    // it is required here; the message is 2.0.1's.
     if (role === undefined) {
+      // No role: the 2.0 shape. Commands that went straight to the core in
+      // 2.0 still do (with roleId as the core reads it, if given); 2.0.1's
+      // grant runners required role and still do.
+      if (ACCESS_COMMANDS_DIRECT_IN_2_0.has(`${group}.${command}`)) {
+        return CORE_MODULES[group][command](client, { ...rest, [coreIdParam]: entityId });
+      }
       throw new Error(`${group}.${command} requires "role" (an asset role ID or name)`);
     }
     const roleId = await resolveAssetRoleId(client, role);
@@ -2024,6 +2004,11 @@ function accessRunner(group: string, command: string, entityIdParam: string, cor
   };
 }
 
+// Access commands that went straight to the core in 2.0.1 (no runner).
+const ACCESS_COMMANDS_DIRECT_IN_2_0 = new Set([
+  'experiments.revokeExperimentAccessUser', 'experiments.revokeExperimentAccessTeam',
+  'goals.grantGoalAccessUser', 'goals.revokeGoalAccessUser', 'goals.grantGoalAccessTeam', 'goals.revokeGoalAccessTeam',
+]);
 const EXPERIMENT_ACCESS_COMMANDS = ['grantExperimentAccessUser', 'revokeExperimentAccessUser', 'grantExperimentAccessTeam', 'revokeExperimentAccessTeam'];
 const GOAL_ACCESS_COMMANDS = ['grantGoalAccessUser', 'revokeGoalAccessUser', 'grantGoalAccessTeam', 'revokeGoalAccessTeam'];
 
@@ -2037,25 +2022,20 @@ const DATASOURCE_CONFIG_COMMANDS = ['testDatasource', 'introspectDatasource', VA
 
 function datasourceRunner(command: string): CommandRunner {
   return async (client, params) => {
-    // Without a datasourceId, `config` is the whole request body (the 2.0
-    // behaviour: test an unsaved datasource definition).
+    // A given `config` is the whole request body, as in 2.0: the caller's own
+    // (unsaved) definition, sent as is.
+    if (params[CONFIG_PARAM] !== undefined) {
+      return CORE_MODULES.datasources[command](client, { config: params[CONFIG_PARAM] });
+    }
     if (params.datasourceId === undefined) {
-      if (!isRecord(params.config)) throw new Error(`datasources.${command} needs "datasourceId" or a "config" object`);
-      return CORE_MODULES.datasources[command](client, { config: params.config });
+      throw new Error(`datasources.${command} needs "datasourceId" or a "config" object`);
     }
     if (command === VALIDATE_DATASOURCE_QUERY_COMMAND && typeof params.query !== 'string') {
       throw new Error(`datasources.${command} requires "query" with "datasourceId"`);
     }
+    // The saved datasource by ID: the backend reads its stored config,
+    // including secrets, itself.
     const body: Record<string, unknown> = { datasource_id: params.datasourceId };
-    if (params.config !== undefined) {
-      // The backend tests the inline config only when it has both type and
-      // properties; anything less would silently test the stored config.
-      if (!isRecord(params.config) || typeof params.config.type !== 'string' || !isRecord(params.config.properties)) {
-        throw new Error(`datasources.${command}: "config" must be an object with "type" (string) and "properties" (object)`);
-      }
-      body.type = params.config.type;
-      body.properties = params.config.properties;
-    }
     if (params.query !== undefined) body.query = params.query;
     return CORE_MODULES.datasources[command](client, { config: body });
   };
@@ -2066,7 +2046,7 @@ async function resolvePlatformConfigId(client: ApiClientLike, configKey: unknown
   const id = toPositiveInteger(configKey);
   if (id !== undefined) return id;
   if (typeof configKey !== 'string' || configKey.trim() === '') {
-    throw new Error(`Platform config must be a positive integer ID or a config name: ${JSON.stringify(configKey)}`);
+    throw new Error(`Platform config must be a positive integer ID or a config name: ${JSON.stringify(configKey ?? null)}`);
   }
   const { data } = await CORE_MODULES.platformconfig.listPlatformConfigs(client) as { data: Array<{ id: number; name?: string }> };
   const match = data.find((c) => c.name === configKey);
@@ -2121,8 +2101,8 @@ const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
     // The backend merges only the stored secret key (by storage_config_id); the
     // exporter needs type and properties in the body, so read those first.
     testStorageConfig: async (client, params) => {
-      // 2.0 shape: no configId, the whole body in `config` (went straight to the core).
-      if (params.configId === undefined) {
+      // A given `config` is the whole request body, as in 2.0.
+      if (params[CONFIG_PARAM] !== undefined || params.configId === undefined) {
         return CORE_MODULES.storageconfigs.testStorageConfig(client, { config: params[CONFIG_PARAM] });
       }
       const { data: stored } = await CORE_MODULES.storageconfigs.getStorageConfig(client, { id: params.configId }) as { data: Record<string, unknown> };
@@ -2200,10 +2180,13 @@ export async function executeCommand(
   // aliases are mapped. Required catalog params are not checked here; that is
   // execute_command's validation (validateCommandParams), as in 2.0.
   const idSafeParams = normalizeIdParams(entry, params, { checkRequired: false });
+  // Whatever reaches a request path, by any route (top level, inside `data`,
+  // a core-name key), is checked where the APIClient builds the path.
+  const guardedClient = withPathIdGuard(client);
 
   const runner = COMMAND_RUNNERS[group]?.[command];
   if (runner) {
-    return runner(client, idSafeParams);
+    return runner(guardedClient, idSafeParams);
   }
 
   const fn = mod[command];
@@ -2211,5 +2194,5 @@ export async function executeCommand(
     throw new Error(`Function "${command}" not found in core module "${group}". Available: ${Object.keys(mod).filter(k => typeof mod[k] === 'function').join(', ')}`);
   }
 
-  return fn(client, normalizeCommandParams(group, command, idSafeParams));
+  return fn(guardedClient, normalizeCommandParams(group, command, idSafeParams));
 }

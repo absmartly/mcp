@@ -116,16 +116,20 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
         url.searchParams.get(ENDPOINT_QUERY_PARAM),
         c.req.header(ENDPOINT_HEADER),
       ]);
-      // A valid request source is used as is. Only when no request source
-      // parses does the client's stored mapping stand in, and then a rejected
-      // source is passed so consent shows the "was ignored" notice and does
-      // not auto-approve the stored substitute.
-      const fallbackEndpoint = requested.endpoint
-        ? null
-        : await safeKvGet(c.env.OAUTH_KV, `oauth_endpoint:client:${authRequest.clientId}`);
+      // Whenever a higher-priority request source was rejected, it is passed
+      // as the explicit endpoint, with the substitute (a valid lower-priority
+      // source, or else the stored mapping) as the fallback: consent then
+      // shows the "was ignored" notice and does not auto-approve.
+      const valid = requested.endpoint?.baseUrl ?? null;
+      const substitute = valid ?? await safeKvGet(c.env.OAUTH_KV, `oauth_endpoint:client:${authRequest.clientId}`);
 
       const outcome = await beginAuthorization(
-        { authRequest, endpoint: requested.endpoint?.baseUrl ?? requested.rejected, fallbackEndpoint, cookieHeader: c.req.header('Cookie') },
+        {
+          authRequest,
+          endpoint: requested.rejected ?? valid,
+          fallbackEndpoint: requested.rejected || !valid ? substitute : null,
+          cookieHeader: c.req.header('Cookie'),
+        },
         this.consentOptions(c),
       );
       return this.finishConsent(c, outcome);

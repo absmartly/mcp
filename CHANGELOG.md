@@ -1,0 +1,25 @@
+# Changelog
+
+## 2.1.0 (unreleased)
+
+### Catalog contract
+
+- 23 commands whose documented params did not match the CLI core now document what the core needs: `role` on access grant/revoke, `unitType` on `estimateParticipants`, `oldPassword`/`newPassword` on `resetMyPassword`, top-level filters on insights/activity/events, and more. `refreshFields` is removed. See the 2.1.0 PR for the full table.
+- Params the core never reads are deprecated: still accepted, hidden from `get_command_docs`.
+
+### Security
+
+- `FetchHttpClient` only sends requests under `<base>/v1/` or the root `/auth/current-user` paths. Dot segments in any encoding, backslashes, encoded separators, control characters and `undefined`/`null`/`NaN` path segments are refused before `fetch`.
+- ABsmartly endpoints are parsed by one function (`parseAbsmartlyEndpoint`) everywhere they enter: OAuth consent, API-key requests, the `/register` link, stored props and `FetchHttpClient`.
+- Every argument an APIClient method puts into a request path (`src/api-path-args.ts`, generated from the CLI build) must be a positive integer, whichever route it came by.
+
+### Behaviour changes for direct executeCommand callers
+
+`executeCommand` dispatches 2.0 core-shaped calls as 2.0.1 did. These are the intentional differences, each pinned by `npm run parity:main` (`scripts/parity-main.ts`, `EXPECTED_DIFFERENCES`):
+
+- A path ID that is not a positive integer is an error: `goalId: "1/../users"`, `experimentId: null`, an ID nested in `data` (`{ data: { id: "abc" } }`), and a missing one (2.0.1 sent `/experiments/undefined`).
+- `revokeExperimentAccessUser`/`Team` with `role`: the role is resolved to its asset role ID. 2.0.1 ignored `role` and sent `DELETE .../undefined`.
+- `listCustomFields` without `type` defaults to `"test"` (2.0.1 filtered on `undefined` and always returned no fields).
+- `generateTemplate` without `name`/`type` defaults to `"My Experiment"`/`"test"` (2.0.1 generated a template named `undefined`).
+- `platformconfig.getPlatformConfig {id: null}` and `updatePlatformConfig {id, value}` fail as in 2.0.1, with a message naming the config problem.
+- Declared aliases that disagree with their documented param (`roleId` vs `role`/`assetRoleId`, `id` vs the documented ID) are an error; 2.0.1 silently picked one.
