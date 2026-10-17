@@ -35,26 +35,43 @@ export function isPositiveIntegerId(value: unknown): boolean {
 }
 
 /**
- * The @absmartly/cli version actually installed, read at load time where it
- * can be resolved on disk (Node). Where it cannot (a Worker or other bundle),
- * the CLI was bundled at build time, so the version synced into version.ts
- * then is the one running.
+ * The @absmartly/cli version actually installed, read at load time.
+ *   - Where the package cannot be resolved on disk (a Worker or other bundle),
+ *     the CLI was bundled at build time, so the version synced into
+ *     version.ts then is the one running.
+ *   - Where it resolves but its package.json cannot be read or has no
+ *     version, the running version is unknown: "" (a mismatch, so the guard
+ *     fails closed).
  */
-function installedCliVersion(): string {
+export function detectCliVersion(
+  resolveEntry: () => string,
+  readPackageJson: (entry: string) => string,
+  bundledVersion: string = CLI_CORE_VERSION,
+): string {
+  let entry: string;
   try {
-    const getBuiltin = (globalThis as { process?: { getBuiltinModule?: (id: string) => any } }).process?.getBuiltinModule;
-    const moduleApi = getBuiltin?.("node:module");
-    const fs = getBuiltin?.("node:fs");
-    const path = getBuiltin?.("node:path");
-    if (!moduleApi?.createRequire || !fs || !path) return CLI_CORE_VERSION;
-    const require = moduleApi.createRequire(import.meta.url);
-    // The package does not export ./package.json: walk up from its api-client entry.
-    const entry: string = require.resolve("@absmartly/cli/api-client");
-    const pkg = JSON.parse(fs.readFileSync(path.join(path.dirname(entry), "..", "..", "package.json"), "utf-8"));
-    return typeof pkg.version === "string" ? pkg.version : "";
+    entry = resolveEntry();
   } catch {
-    return CLI_CORE_VERSION;
+    return bundledVersion;
   }
+  try {
+    const version = JSON.parse(readPackageJson(entry)).version;
+    return typeof version === "string" ? version : "";
+  } catch {
+    return "";
+  }
+}
+
+function installedCliVersion(): string {
+  const getBuiltin = (globalThis as { process?: { getBuiltinModule?: (id: string) => any } }).process?.getBuiltinModule;
+  const moduleApi = getBuiltin?.("node:module");
+  const fs = getBuiltin?.("node:fs");
+  const path = getBuiltin?.("node:path");
+  return detectCliVersion(
+    () => moduleApi.createRequire(import.meta.url).resolve("@absmartly/cli/api-client"),
+    // The package does not export ./package.json: walk up from its api-client entry.
+    (entry) => fs.readFileSync(path.join(path.dirname(entry), "..", "..", "package.json"), "utf-8"),
+  );
 }
 
 export type PathTable = Readonly<Record<string, { params: readonly string[]; path: readonly string[] }>>;
@@ -118,20 +135,22 @@ const guardedClients = new WeakMap<object, object>();
  *     characters and numbers that are not positive integers are refused.
  * Methods run with the proxy as `this`, so an APIClient method calling another
  * one (or request) is guarded too. Wrapping is idempotent: a client (or its
- * proxy) maps to one proxy, whose wrapped methods are cached. `table` is for
+ * proxy) maps to one proxy, whose wrapped methods are cached until reassigned. `table` is for
  * tests; a non-default table is never cached.
  */
 export function withPathIdGuard<T extends ApiClientLike>(client: T, table: PathTable = ACTIVE_PATH_TABLE): T {
   const cacheable = table === ACTIVE_PATH_TABLE;
   const existing = cacheable ? guardedClients.get(client) : undefined;
   if (existing) return existing as T;
-  const wrapped = new Map<string, Function>();
+  // prop -> the method it wrapped and its guarded form. Keyed on the method
+  // too, so a method reassigned after first access (a mock) is rewrapped.
+  const wrapped = new Map<string, { method: Function; guarded: Function }>();
   const proxy = new Proxy(client, {
     get(target, prop, receiver) {
       const value = Reflect.get(target, prop, receiver);
       if (typeof prop !== "string" || typeof value !== "function") return value;
       const cached = wrapped.get(prop);
-      if (cached) return cached;
+      if (cached?.method === value) return cached.guarded;
       const rawIndex = Object.hasOwn(RAW_PATH_ARG, prop) ? RAW_PATH_ARG[prop] : undefined;
       const info = Object.hasOwn(table, prop) ? table[prop] : undefined;
       const words = Object.hasOwn(NON_ID_PATH_PARAMS, prop) ? NON_ID_PATH_PARAMS[prop] : [];
@@ -149,7 +168,7 @@ export function withPathIdGuard<T extends ApiClientLike>(client: T, table: PathT
         }
         return value.apply(receiver, args);
       };
-      wrapped.set(prop, guarded);
+      wrapped.set(prop, { method: value, guarded });
       return guarded;
     },
   });

@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { APIClient } from '@absmartly/cli/api-client';
 import type { HttpClient, HttpRequestConfig, HttpResponse } from '@absmartly/cli/api-client';
-import { ACTIVE_PATH_TABLE, PathIdError, pathTableFor, withPathIdGuard } from '../../src/path-id-guard';
+import { ACTIVE_PATH_TABLE, detectCliVersion, PathIdError, pathTableFor, withPathIdGuard } from '../../src/path-id-guard';
 import type { PathTable } from '../../src/path-id-guard';
 import { API_PATH_METHODS, PATH_TABLE_CLI_VERSION } from '../../src/api-path-args';
 import { buildApiPathArgs, deriveApiPathArgs } from '../../scripts/endpoint-manifest';
@@ -48,6 +48,15 @@ export default async function runTests() {
   // A version mismatch trusts no mapping.
   assertEquals(pathTableFor(PATH_TABLE_CLI_VERSION) === API_PATH_METHODS, true, 'pathTableFor(pinned) is the generated table');
   assertEquals(pathTableFor('1.17.0'), {}, 'pathTableFor(another version) is empty: every method is unknown');
+
+  // Version detection: a bundle uses the build-time version; a read failure is a mismatch.
+  const fail = () => { throw new Error('x'); };
+  assertEquals(detectCliVersion(() => '/cli/dist/api-client/index.js', () => '{"version":"1.16.2"}', 'b'), '1.16.2', 'detect: the installed package.json version');
+  assertEquals(detectCliVersion(fail, fail, '1.16.2'), '1.16.2', 'detect: not resolvable (a bundle) -> the build-time version');
+  assertEquals(detectCliVersion(() => '/cli/x.js', fail, '1.16.2'), '', 'detect: resolvable but unreadable -> unknown (fails closed)');
+  assertEquals(detectCliVersion(() => '/cli/x.js', () => 'not json', '1.16.2'), '', 'detect: unparsable package.json -> unknown');
+  assertEquals(detectCliVersion(() => '/cli/x.js', () => '{}', '1.16.2'), '', 'detect: no version -> unknown');
+  assertEquals(pathTableFor(''), {}, 'an unknown version maps nothing');
 
   // ── Generator: what it maps, and what it leaves unknown. ──
   const derived = deriveApiPathArgs(`export class APIClient {
@@ -162,6 +171,14 @@ export default async function runTests() {
   assertEquals(withPathIdGuard(client) === real, true, 'wrapping a client twice returns the same proxy');
   assertEquals(withPathIdGuard(real) === real, true, 'wrapping a proxy returns it');
   assertEquals(real.getGoal === real.getGoal, true, 'wrapped methods are cached per proxy');
+  {
+    const mockable: any = { async getGoal(_id: unknown) { return 'original'; } };
+    const g = withPathIdGuard(mockable, table);
+    await g.getGoal(1);
+    mockable.getGoal = async (_id: unknown) => 'mocked';
+    assertEquals(await g.getGoal(1), 'mocked', 'a method reassigned after first access is used, not the cached original');
+    assertEquals(await errorOf(() => g.getGoal('a/b')), 'PathIdError', 'the reassigned method is still guarded');
+  }
   assertEquals(String(real), '[object Object]', 'inherited toString is not a raw-path mapping');
   assertEquals(real.valueOf() === real, true, 'inherited valueOf is not a raw-path mapping');
   assertEquals(real.hasOwnProperty('httpClient'), true, 'inherited hasOwnProperty is not a raw-path mapping');

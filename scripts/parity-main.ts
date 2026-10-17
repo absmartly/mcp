@@ -6,6 +6,9 @@
 // The baseline is pinned to the 2.0.1 commit, not origin/main: once this
 // branch merges, main is this branch and every difference would read as stale.
 // Usage: npx tsx scripts/parity-main.ts [git-ref]  (default: the 2.0.1 commit)
+//        npx tsx scripts/parity-main.ts --print-baseline  (prints the default ref)
+// CI-only gate (.github/workflows/ci.yml); not part of npm test, which must
+// run without the baseline commit fetched.
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -259,6 +262,11 @@ export async function compareWithRef(ref = REF) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  // CI fetches exactly this ref (its checkout is shallow), so the SHA lives here only.
+  if (ARGS.includes("--print-baseline")) {
+    console.log(PARITY_BASELINE);
+    process.exit(0);
+  }
   const results = await compareWithRef();
   if (ARGS.includes("--print")) {
     for (const r of results.filter((x) => x.expected)) console.log(`${JSON.stringify(callKey(r.call))}: ${JSON.stringify(r.branch)},`);

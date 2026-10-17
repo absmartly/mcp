@@ -60,11 +60,17 @@ function templateToPath(literal: string): string {
   return `${prefix}${path}`;
 }
 
-function parseApiClient(): Map<string, ApiMethodInfo> {
+/** The compiled APIClient class body from the installed CLI. */
+function readApiClientClassBody(): string {
   const source = readFileSync(API_CLIENT_FILE, "utf-8");
   const classStart = source.indexOf("export class APIClient");
   const classEnd = source.indexOf("\n}\n", classStart);
-  const classBody = source.slice(classStart, classEnd);
+  if (classStart < 0 || classEnd < 0) throw new Error(`APIClient class not found in ${API_CLIENT_FILE}`);
+  return source.slice(classStart, classEnd);
+}
+
+function parseApiClient(): Map<string, ApiMethodInfo> {
+  const classBody = readApiClientClassBody();
   const methods = new Map<string, ApiMethodInfo>();
   const headers = [...classBody.matchAll(/^ {4}(?:async )?(\w+)\(/gm)];
   headers.forEach((match, i) => {
@@ -275,9 +281,7 @@ const BARE_NAME = /^[\w$]+$/;
 export interface ApiPathMethod { params: string[]; path: string[] }
 
 export function buildApiPathArgs(): Record<string, ApiPathMethod> {
-  const source = readFileSync(API_CLIENT_FILE, "utf-8");
-  const classStart = source.indexOf("export class APIClient");
-  return deriveApiPathArgs(source.slice(classStart, source.indexOf("\n}\n", classStart)));
+  return deriveApiPathArgs(readApiClientClassBody());
 }
 
 /**

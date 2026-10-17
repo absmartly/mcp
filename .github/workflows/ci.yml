@@ -34,11 +34,11 @@ jobs:
 
       # executeCommand must dispatch as 2.0.1 did, apart from the listed
       # intentional differences (#66). The baseline is pinned to the 2.0.1
-      # commit (scripts/parity-main.ts PARITY_BASELINE), not main, so the gate
-      # stays meaningful after this merges.
+      # commit (scripts/parity-main.ts PARITY_BASELINE, printed by
+      # --print-baseline), not main, so the gate stays meaningful after merge.
       - name: Dispatch parity with 2.0.1
         run: |
-          git fetch --no-tags --depth=1 origin f8331b6d6dff803a8bdbafd6e943d125d6a09605
+          git fetch --no-tags --depth=1 origin "$(npx tsx scripts/parity-main.ts --print-baseline)"
           npm run parity:main
 
       - name: Build (ESM + CommonJS)
