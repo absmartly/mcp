@@ -58,11 +58,13 @@ export function registerServer(
   opts: RegisterServerOptions = {},
 ): void {
   // With a loader, entity lists are fetched on first use by a handler that
-  // needs them rather than up front — see createServerContextLoader.
+  // needs them rather than up front — see createServerContextLoader. The
+  // loader owns the memoization, so always ask it: an invalidated loader
+  // (stateful sessions) must not be shadowed by a stale copy here.
   let resolved: ServerContext | undefined = isServerContextLoader(source) ? undefined : source;
   const getCtx = async (): Promise<ServerContext> => {
-    if (!resolved) resolved = await (source as ServerContextLoader).load();
-    return resolved;
+    if (isServerContextLoader(source)) resolved = await source.load();
+    return resolved!;
   };
 
   const toolCtx: ToolContext = {

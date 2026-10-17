@@ -468,6 +468,30 @@ ChatGPT does not support one-click install deeplinks — you connect remote MCP 
 
 ---
 
+## Embedding the Node Streamable HTTP handler
+
+`createStreamableHttpHandler(buildContext, options?)` (from `@absmartly/mcp/node-http`) mounts the MCP endpoint in a Node server. The host authenticates the request and returns an `APIClient` from `buildContext`.
+
+**Stateless (default).** Each POST gets a fresh server; GET and DELETE return 405. Because nothing can push to the client, `resources.subscribe` and `listChanged` are *not* advertised.
+
+**Stateful (opt-in).** Pass `{ stateful: true }` (or a `StatefulOptions` object) to get `Mcp-Session-Id` sessions, a GET SSE stream for server-initiated notifications, DELETE to end a session, and `resources/subscribe` / `resources/unsubscribe`. Only in this mode are `resources.subscribe` and `listChanged` advertised.
+
+```ts
+const mcp = createStreamableHttpHandler(
+  async (req) => ({ apiClient, endpoint, authType, principal: user.id }), // principal is required when stateful
+  { stateful: { idleTtlMs: 30 * 60_000, maxSessions: 1000, maxSessionsPerPrincipal: 20 } },
+);
+// route POST/GET/DELETE /mcp to mcp.post / mcp.get / mcp.delete
+await mcp.notifyResourceUpdated('absmartly://entities/goals', { principal: user.id });
+await mcp.notifyListChanged('tools');
+await mcp.close(); // on shutdown
+```
+
+- Sessions are bound to the `principal` that created them; any other principal gets 404 (same as an unknown id). Always scope `notify*` with `{ principal }` for user-specific data.
+- Sessions are bounded: idle TTL (sessions with an open GET stream are exempt), absolute max age, max sessions, max per principal, and max subscriptions per session. The store is injectable (`sessionStore`).
+- **Caveat: sessions live in process memory.** With multiple replicas, route each session to the same replica (sticky routing on `Mcp-Session-Id`), and call `notify*` on the replica that owns the session. A request that lands on another replica gets 404 and the client must re-initialize.
+- The `APIClient` from the most recent request of a session is used for later tool calls, so refreshed credentials are picked up.
+
 ## Authorization Header Formats
 
 When using API key authentication, these header formats are all supported:
