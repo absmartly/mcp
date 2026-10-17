@@ -246,6 +246,13 @@ const CASES: Case[] = [
   { name: 'the deprecated params bag is filtered and ID-coerced like top-level params', group: 'events', command: 'listEvents',
     params: { params: { take: 5, url: '/admin' } },
     expected: [{ method: 'POST', url: '/events', data: { take: 5 } }] },
+  { name: 'a deprecated ignored ID never reaches the core, even if malformed', group: 'experiments', command: 'dismissAlert',
+    params: { alertId: 4, experimentId: '../x' },
+    expected: [{ method: 'PUT', url: '/experiment_alerts/4/dismiss' }] },
+  { name: 'a non-object params bag is rejected before any request', group: 'events', command: 'listEvents', params: { params: 'take=5' },
+    expectedError: 'Param "params" for events.listEvents must be an object.', expected: [] },
+  { name: 'a nested params bag is rejected before any request', group: 'events', command: 'listEvents', params: { params: { params: { take: 5 } } },
+    expectedError: 'Param "params" for events.listEvents must not contain a nested "params".', expected: [] },
   { name: 'an optional ID given as null is treated as absent', group: 'experiments', command: 'diffExperimentsCore',
     params: { experimentId1: 3, experimentId2: null },
     // Absent, so the core asks for it (not a "/experiments/null" request).

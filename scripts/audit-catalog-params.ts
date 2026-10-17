@@ -25,7 +25,7 @@ import ts from "typescript";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CLI_GROUPS, getGroupCommands, normalizeCommandParams, normalizeIdParams, hasCommandRunner, TOOL_INJECTED_PARAMS } from "../src/cli-catalog.js";
+import { CLI_GROUPS, getGroupCommands, normalizeCommandParams, normalizeIdParams, hasCommandRunner, isListCommand, TOOL_INJECTED_PARAMS } from "../src/cli-catalog.js";
 
 const require = createRequire(import.meta.url);
 
@@ -115,7 +115,7 @@ export function auditCatalogParams(): CatalogParamFinding[] {
       }
 
       const injected = new Set<string>(TOOL_INJECTED_PARAMS.always);
-      if (/^(list|search)/.test(entry.command)) TOOL_INJECTED_PARAMS.listCommands.forEach((p) => injected.add(p));
+      if (isListCommand(entry.command)) TOOL_INJECTED_PARAMS.listCommands.forEach((p) => injected.add(p));
       // The same pipeline executeCommand runs: IDs first, then the adapter.
       // Deprecated params are left out of the sample: they are aliases or
       // ignored, and an alias would otherwise compete with its canonical param.

@@ -1244,6 +1244,11 @@ export const TOOL_INJECTED_PARAMS = {
 } as const;
 const TOOL_INJECTED_PARAM_NAMES = new Set<string>([...TOOL_INJECTED_PARAMS.always, ...TOOL_INJECTED_PARAMS.listCommands]);
 
+/** Commands the tool layer gives default paging (TOOL_INJECTED_PARAMS.listCommands). */
+export function isListCommand(command: string): boolean {
+  return command.startsWith('list') || command.startsWith('search');
+}
+
 const ROLE_ALIAS = 'roleId';
 
 /**
@@ -1316,8 +1321,20 @@ export function normalizeIdParams(
   const checkRequired = options.checkRequired ?? true;
   const label = `${entry.group}.${entry.command}`;
   const errors: string[] = [];
+  // The deprecated `params` filter bag is flattened here, once, and removed:
+  // nothing downstream sees (or re-flattens) it.
   const bagParam = entry.params.find((p) => p.name === PARAMS_PARAM && p.deprecated);
-  const input = bagParam ? flatten(params, PARAMS_PARAM) : params;
+  let input = params;
+  if (bagParam && params[PARAMS_PARAM] !== undefined) {
+    const bag = params[PARAMS_PARAM];
+    if (bag !== null && !isRecord(bag)) {
+      throw new IdParamError([`Param "${PARAMS_PARAM}" for ${label} must be an object.`]);
+    }
+    if (isRecord(bag) && PARAMS_PARAM in bag) {
+      throw new IdParamError([`Param "${PARAMS_PARAM}" for ${label} must not contain a nested "${PARAMS_PARAM}".`]);
+    }
+    input = flatten(params, PARAMS_PARAM);
+  }
 
   const documented = documentedAliases(label);
   const coreAliases = Object.fromEntries(Object.entries(coreIdAliases(entry)).filter(([alias]) => !(alias in documented)));
@@ -1325,7 +1342,7 @@ export function normalizeIdParams(
   const known = new Set([...entry.params.map((p) => p.name), ...TOOL_INJECTED_PARAM_NAMES]);
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input)) {
-    if (known.has(key) && !(key in aliases)) out[key] = value;
+    if (known.has(key) && !(key in aliases) && !(bagParam && key === PARAMS_PARAM)) out[key] = value;
   }
 
   for (const [alias, canonical] of Object.entries(aliases)) {
@@ -1340,6 +1357,12 @@ export function normalizeIdParams(
     } else {
       out[canonical] = out[canonical] ?? id;
     }
+  }
+
+  // Deprecated params (ignored by the core, e.g. dismissAlert's experimentId)
+  // are dropped, so no unchecked value ever reaches it.
+  for (const p of entry.params) {
+    if (p.deprecated && out[p.name] !== undefined && !(p.name in aliases)) delete out[p.name];
   }
 
   for (const p of entry.params) {
@@ -1382,43 +1405,27 @@ export function validateCommandParams(
   entry: CommandEntry,
   provided: Record<string, unknown>
 ): string[] {
+  // normalizeIdParams owns the rules (required params, IDs, aliases, the
+  // deprecated params bag); this adds unknown-param hints on top, for keys it
+  // would silently drop.
   const errors: string[] = [];
-  const validNames = documentedParams(entry).map((p) => p.name);
-  const validSet = new Set(entry.params.map((p) => p.name));
-
-  // The deprecated `params` filter bag is flattened before dispatch, so check
-  // its fields as top-level params: they count as supplied, and a typo inside
-  // it is reported as unknown.
-  const bagParam = entry.params.find((p) => p.name === PARAMS_PARAM && p.deprecated);
-  let checked = provided;
-  // `params: null` means no filters, as it does at dispatch.
-  if (bagParam && provided[PARAMS_PARAM] === null) {
-    const { [PARAMS_PARAM]: _null, ...rest } = provided;
-    checked = rest;
-  } else if (bagParam && provided[PARAMS_PARAM] !== undefined) {
-    const bag = provided[PARAMS_PARAM];
-    if (!isRecord(bag)) {
-      return [`Param "${PARAMS_PARAM}" for ${entry.group}.${entry.command} must be an object.`];
-    }
-    if (PARAMS_PARAM in bag) {
-      return [`Param "${PARAMS_PARAM}" for ${entry.group}.${entry.command} must not contain a nested "${PARAMS_PARAM}".`];
-    }
-    checked = flatten(provided, PARAMS_PARAM);
+  try {
+    normalizeIdParams(entry, provided);
+  } catch (e) {
+    if (!(e instanceof IdParamError)) throw e;
+    errors.push(...e.problems);
   }
 
-  for (const key of Object.keys(checked)) {
+  const validNames = documentedParams(entry).map((p) => p.name);
+  const validSet = new Set(entry.params.map((p) => p.name));
+  const bag = provided[PARAMS_PARAM];
+  const usesBag = entry.params.some((p) => p.name === PARAMS_PARAM && p.deprecated) && isRecord(bag);
+  const keys = [...Object.keys(provided), ...(usesBag ? Object.keys(bag as Record<string, unknown>) : [])];
+  for (const key of keys) {
     if (validSet.has(key)) continue;
     const guess = suggestParam(key, validNames);
     const baseMsg = `Unknown param "${key}" for ${entry.group}.${entry.command}. Valid params: ${validNames.length > 0 ? validNames.join(', ') : '(none)'}.`;
     errors.push(guess ? `${baseMsg} Did you mean "${guess}"?` : baseMsg);
-  }
-
-  // Required params and ID rules: exactly what executeCommand enforces.
-  try {
-    normalizeIdParams(entry, checked);
-  } catch (e) {
-    if (!(e instanceof IdParamError)) throw e;
-    errors.push(...e.problems);
   }
 
   return errors;

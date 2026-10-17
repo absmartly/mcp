@@ -30,6 +30,7 @@ import { HTTP_STATUS_BAD_REQUEST, HTTP_STATUS_SERVICE_UNAVAILABLE } from "./http
 import { describeRedirectTarget, isAllowedRedirectUri, isLoopbackRedirectUri, isRegisteredRedirectUri, isSharedCallbackRedirectUri } from "./redirect-policy.js";
 
 const APPROVALS_STATE_KEY_PREFIX = "oauth:approvals:";
+const MESSAGE_REQUEST_ENDPOINT_REJECTED = "The ABsmartly URL in the request was not a valid ABsmartly URL, so it was ignored.";
 const ACTION_APPROVE = "approve";
 const ACTION_CANCEL = "cancel";
 const ACTION_SET_ENDPOINT = "set_endpoint";
@@ -235,9 +236,12 @@ export async function beginAuthorization<Req extends AuthorizationRequest>(
   const explicit = tryParseAbsmartlyEndpoint(params.endpoint)?.baseUrl ?? null;
   const fallback = tryParseAbsmartlyEndpoint(params.fallbackEndpoint)?.baseUrl ?? null;
   const endpoint = explicit ?? fallback;
-  const notice = params.endpoint && !explicit && fallback
-    ? `The ABsmartly URL in the request (${params.endpoint}) is not valid, so ${fallback} is used instead.`
-    : undefined;
+  // The rejected value comes from the request, so it is not echoed on this
+  // trusted page. The notice is shown whenever a supplied endpoint was refused.
+  const rejectedExplicit = !!params.endpoint && !explicit;
+  const notice = !rejectedExplicit ? undefined
+    : fallback ? `${MESSAGE_REQUEST_ENDPOINT_REJECTED} ${fallback} is used instead.`
+    : MESSAGE_REQUEST_ENDPOINT_REJECTED;
   const client = await options.lookupClient(authRequest.clientId);
   const invalid = validateAuthorizationRequest(authRequest, client);
   if (invalid || !client) return respond(invalid ?? textResult(HTTP_STATUS_BAD_REQUEST, MESSAGE_CLIENT_NOT_FOUND));
@@ -266,8 +270,8 @@ export async function beginAuthorization<Req extends AuthorizationRequest>(
   const bindingCookie = serializeHostCookie(consentCookieName(transactionId), browserBinding, CONSENT_TTL_SECONDS, options);
 
   if (!endpointReady) {
-    const rejected = params.endpoint && !explicit
-      ? `The ABsmartly URL in the request (${params.endpoint}) is not valid. Enter the https:// URL of your ABsmartly instance.`
+    const rejected = rejectedExplicit
+      ? `${MESSAGE_REQUEST_ENDPOINT_REJECTED} Enter the https:// URL of your ABsmartly instance.`
       : undefined;
     return respond(htmlResult(renderEndpointForm(options.formAction, transactionId, rejected), [bindingCookie]));
   }

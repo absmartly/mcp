@@ -1,7 +1,7 @@
 import type { HttpClient, HttpRequestConfig, HttpResponse } from '@absmartly/cli/api-client';
 import { debug } from './config.js';
 import { MCP_VERSION, CLI_CORE_VERSION } from './version.js';
-import { parseAbsmartlyEndpoint, PRINTABLE_ASCII } from './oauth/endpoint.js';
+import { decodeOrNull, DOT_SEGMENT, parseAbsmartlyEndpoint, PRINTABLE_ASCII } from './oauth/endpoint.js';
 
 export { InvalidEndpointError } from './oauth/endpoint.js';
 
@@ -20,16 +20,7 @@ const QUERY_FORBIDDEN = /[\\\u0000-\u001f\u007f]/;
 // A path segment: RFC 3986 unreserved characters, or percent-escapes of them.
 const PATH_SEGMENT = /^(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2})+$/;
 const UNRESERVED = /^[A-Za-z0-9._~-]+$/;
-const DOT_SEGMENT = /^\.{1,2}$/;
 const MESSAGE_INVALID_PATH = 'Invalid API path';
-
-function decodeSegment(segment: string): string | null {
-  try {
-    return decodeURIComponent(segment);
-  } catch {
-    return null;
-  }
-}
 
 /**
  * True when every segment of `path` (starting with "/") is unreserved
@@ -40,7 +31,7 @@ function isAllowedPathSuffix(path: string): boolean {
   const segments = path.split('/').slice(1);
   return segments.every((segment, i) => {
     if (segment === '') return i === segments.length - 1 && i > 0;
-    const decoded = PATH_SEGMENT.test(segment) ? decodeSegment(segment) : null;
+    const decoded = PATH_SEGMENT.test(segment) ? decodeOrNull(segment) : null;
     return decoded !== null && UNRESERVED.test(decoded) && !DOT_SEGMENT.test(decoded);
   });
 }

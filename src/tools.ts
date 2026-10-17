@@ -15,6 +15,7 @@ import {
   documentedParams,
   executeCommand,
   TOOL_INJECTED_PARAMS,
+  isListCommand,
   getTotalCommandCount,
   validateCommandParams,
 } from "./cli-catalog.js";
@@ -411,10 +412,9 @@ To create experiments, use group "experiments", command "createExperimentFromTem
           page: 1,
           apiEndpoint: ctx.endpoint || undefined,
         };
-        const isListCommand = params.command.startsWith('list') || params.command.startsWith('search');
         const injectedNames: readonly string[] = [
           ...TOOL_INJECTED_PARAMS.always,
-          ...(isListCommand ? TOOL_INJECTED_PARAMS.listCommands : []),
+          ...(isListCommand(params.command) ? TOOL_INJECTED_PARAMS.listCommands : []),
         ];
         for (const name of injectedNames) {
           if (commandParams[name] === undefined && injectedDefaults[name] !== undefined) {

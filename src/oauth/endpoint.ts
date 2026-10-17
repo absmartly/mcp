@@ -15,7 +15,9 @@ const TRAILING_SLASHES = /\/+$/;
 // In the operator's base path: anything URL parsing keeps, except an encoded
 // separator, and no "." / ".." segment in any encoding.
 const ENCODED_SEPARATOR = /%(?:2f|5c)/i;
-const DOT_SEGMENT = /^\.{1,2}$/;
+/** A path segment URL parsing treats as "." or ".." (once decoded). */
+export const DOT_SEGMENT = /^\.{1,2}$/;
+const DOUBLE_ENCODED = /%25/i;
 
 export const MESSAGE_INVALID_ENDPOINT = "Invalid ABsmartly endpoint";
 
@@ -45,7 +47,8 @@ export interface AbsmartlyEndpoint {
   apiUrl: string;
 }
 
-function decodeOrNull(segment: string): string | null {
+/** decodeURIComponent, or null for malformed percent-encoding. */
+export function decodeOrNull(segment: string): string | null {
   try {
     return decodeURIComponent(segment);
   } catch {
@@ -55,7 +58,12 @@ function decodeOrNull(segment: string): string | null {
 
 function isSafeBaseSegment(segment: string): boolean {
   const decoded = decodeOrNull(segment);
-  return decoded !== null && !ENCODED_SEPARATOR.test(segment) && !DOT_SEGMENT.test(decoded) && !decoded.includes("\\");
+  return decoded !== null
+    && !ENCODED_SEPARATOR.test(segment)
+    && !DOUBLE_ENCODED.test(segment)
+    && PRINTABLE_ASCII.test(decoded)
+    && !DOT_SEGMENT.test(decoded)
+    && !decoded.includes("\\");
 }
 
 /**
@@ -74,6 +82,9 @@ export function parseAbsmartlyEndpoint(raw: string): AbsmartlyEndpoint {
   // WHATWG URL treats "\\" as "/" and resolves what follows, so reject it
   // before parsing rather than letting "base\\..\\x" become "/x".
   if (trimmed.includes("\\")) throw new InvalidEndpointError(`backslashes are not allowed: ${raw}`);
+  // Even an empty "?" or "#" is refused: WHATWG drops it, and the written
+  // path below must be the whole path.
+  if (/[?#]/.test(trimmed)) throw new InvalidEndpointError(`a query or fragment is not allowed: ${raw}`);
   const withScheme = URL_SCHEME_PATTERN.test(trimmed) ? trimmed : `${HTTPS_SCHEME}${trimmed}`;
   let url: URL;
   try {

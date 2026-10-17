@@ -4,6 +4,8 @@ import { CORS_HEADERS, type ABsmartlyProps } from "./shared.js";
 import { HTTP_STATUS_SERVICE_UNAVAILABLE, HTTP_STATUS_UNAUTHORIZED, isTrustedCimdClientId, MESSAGE_INVALID_ENDPOINT, tryParseAbsmartlyEndpoint } from "./oauth/index.js";
 
 const REFRESH_GRANT_TYPE = 'refresh_token';
+const OAUTH_ERROR_INVALID_TOKEN = 'invalid_token';
+const CONTENT_TYPE_JSON = 'application/json';
 const OAUTH_ERROR_INVALID_GRANT = 'invalid_grant';
 const OAUTH_ERROR_TEMPORARILY_UNAVAILABLE = 'temporarily_unavailable';
 const OAUTH_ERROR_INVALID_CLIENT = 'invalid_client';
@@ -128,7 +130,7 @@ export async function rejectUntrustedCimdClient(request: Request, url: URL): Pro
     return new Response(JSON.stringify({
         error: OAUTH_ERROR_INVALID_CLIENT,
         error_description: 'This MCP client is not supported by this server',
-    }), { status: HTTP_STATUS_UNAUTHORIZED, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } });
+    }), { status: HTTP_STATUS_UNAUTHORIZED, headers: { 'Content-Type': CONTENT_TYPE_JSON, ...CORS_HEADERS } });
 }
 
 export function protectedResourceMetadataUrl(url: URL, pathPrefix: string): string {
@@ -201,12 +203,12 @@ export function withValidStoredEndpoint(handler: ApiHandler, pathPrefix: string)
             if (endpoint !== undefined && !tryParseAbsmartlyEndpoint(endpoint)) {
                 console.error(`${MESSAGE_INVALID_ENDPOINT} in stored grant props: ${endpoint}`);
                 const url = new URL(request.url);
-                return new Response(JSON.stringify({ error: 'invalid_token', error_description: `${MESSAGE_INVALID_ENDPOINT}. Please sign in again.` }), {
+                return new Response(JSON.stringify({ error: OAUTH_ERROR_INVALID_TOKEN, error_description: `${MESSAGE_INVALID_ENDPOINT}. Please sign in again.` }), {
                     status: HTTP_STATUS_UNAUTHORIZED,
                     headers: {
-                        'Content-Type': 'application/json',
+                        'Content-Type': CONTENT_TYPE_JSON,
                         ...CORS_HEADERS,
-                        'WWW-Authenticate': `Bearer error="invalid_token", error_description="${MESSAGE_INVALID_ENDPOINT}", resource_metadata="${protectedResourceMetadataUrl(url, pathPrefix)}"`,
+                        'WWW-Authenticate': `Bearer error="${OAUTH_ERROR_INVALID_TOKEN}", error_description="${MESSAGE_INVALID_ENDPOINT}", resource_metadata="${protectedResourceMetadataUrl(url, pathPrefix)}"`,
                     },
                 });
             }

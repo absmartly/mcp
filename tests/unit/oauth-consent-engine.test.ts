@@ -287,7 +287,8 @@ export default async function run() {
     if (begin.type !== 'respond') throw new Error('unreachable');
     const body = begin.response.body ?? '';
     assert.ok(body.includes('stored.absmartly.com') && !body.includes('name="absmartly_endpoint"'), 'consent is shown for the stored endpoint');
-    assert.ok(body.includes('role="status"') && body.includes('is not valid, so https://stored.absmartly.com is used instead'), 'with a notice that the supplied one was ignored');
+    assert.ok(body.includes('role="status"') && body.includes('was not a valid ABsmartly URL') && body.includes('https://stored.absmartly.com is used instead'), 'with a notice that the supplied one was ignored');
+    assert.ok(!body.includes('%2e%2e'), 'without echoing the rejected value');
     const plain = await beginAuthorization({ authRequest: request(), endpoint: null, fallbackEndpoint: 'https://stored.absmartly.com', cookieHeader: null }, options(store, extra));
     assert.ok(plain.type === 'respond' && !(plain.response.body ?? '').includes('role="status"'), 'no notice when no endpoint was supplied');
   });
@@ -315,9 +316,18 @@ export default async function run() {
     const begin = await beginAuthorization({ authRequest: request(), endpoint: 'ftp://bad.example', cookieHeader: null }, options(store, { requireEndpoint: true }));
     if (begin.type !== 'respond') throw new Error('unreachable');
     const body = begin.response.body ?? '';
-    assert.ok(body.includes('name="absmartly_endpoint"') && body.includes('role="alert"') && body.includes('ftp://bad.example') && body.includes('is not valid'), 'form with the rejection');
+    assert.ok(body.includes('name="absmartly_endpoint"') && body.includes('role="alert"') && body.includes('was not a valid ABsmartly URL'), 'form with the rejection');
+    assert.ok(!body.includes('bad.example'), 'without echoing the rejected value');
     const none = await beginAuthorization({ authRequest: request(), endpoint: null, cookieHeader: null }, options(store, { requireEndpoint: true }));
     assert.ok(none.type === 'respond' && !(none.response.body ?? '').includes('role="alert"'), 'no error when nothing was supplied');
+  });
+
+  await asyncTest('a refused endpoint shows a notice even when no endpoint is required (backend mode)', async () => {
+    const store = memoryStore();
+    const begin = await beginAuthorization({ authRequest: request(), endpoint: 'ftp://bad.example', cookieHeader: null }, options(store));
+    if (begin.type !== 'respond') throw new Error('unreachable');
+    const body = begin.response.body ?? '';
+    assert.ok(body.includes('role="status"') && body.includes('was not a valid ABsmartly URL') && !body.includes('bad.example'), 'notice, no echo');
   });
 
   return {
