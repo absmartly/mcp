@@ -152,3 +152,20 @@ export function normalizeEndpoint(raw: string): string {
   }
   return endpoint;
 }
+
+/**
+ * Picks an endpoint from candidate sources in priority order: the first one
+ * that parses, so an invalid higher-priority value never hides a valid
+ * lower-priority one. `rejected` is the first non-empty candidate that did not
+ * parse, if any (for a "was ignored" notice; it comes from the request, so do
+ * not echo it on a trusted page).
+ */
+export function firstValidEndpoint(candidates: Array<string | null | undefined>): { endpoint: string | null; rejected: string | null } {
+  let rejected: string | null = null;
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    if (tryParseAbsmartlyEndpoint(candidate)) return { endpoint: candidate, rejected };
+    rejected ??= candidate;
+  }
+  return { endpoint: null, rejected };
+}

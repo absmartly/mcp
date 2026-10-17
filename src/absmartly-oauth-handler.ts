@@ -18,6 +18,7 @@ import {
   type ConsentOutcome,
   type OAuthStateStore,
   HTTP_STATUS_BAD_REQUEST,
+  firstValidEndpoint,
   MESSAGE_INVALID_ENDPOINT,
   parseAbsmartlyEndpoint,
   tryParseAbsmartlyEndpoint,
@@ -108,17 +109,20 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
         return c.text('Invalid authorization request', HTTP_STATUS_BAD_REQUEST);
       }
 
-      const requestedEndpoint = this.extractEndpointFromResource(authRequest.resource) ||
-                                url.searchParams.get(ENDPOINT_QUERY_PARAM) ||
-                                c.req.header(ENDPOINT_HEADER) || null;
-      // The client's stored mapping is the fallback when the request names no
-      // endpoint or an invalid one; beginAuthorization picks and validates.
-      const storedEndpoint = tryParseAbsmartlyEndpoint(requestedEndpoint)
+      // The first request source that parses wins; an invalid one is reported
+      // (as rejected) without hiding a valid lower-priority source.
+      const requested = firstValidEndpoint([
+        this.extractEndpointFromResource(authRequest.resource),
+        url.searchParams.get(ENDPOINT_QUERY_PARAM),
+        c.req.header(ENDPOINT_HEADER),
+      ]);
+      // The client's stored mapping is the fallback when no request source parses.
+      const storedEndpoint = requested.endpoint
         ? null
         : await safeKvGet(c.env.OAUTH_KV, `oauth_endpoint:client:${authRequest.clientId}`);
 
       const outcome = await beginAuthorization(
-        { authRequest, endpoint: requestedEndpoint, fallbackEndpoint: storedEndpoint, cookieHeader: c.req.header('Cookie') },
+        { authRequest, endpoint: requested.endpoint ?? requested.rejected, fallbackEndpoint: storedEndpoint, cookieHeader: c.req.header('Cookie') },
         this.consentOptions(c),
       );
       return this.finishConsent(c, outcome);

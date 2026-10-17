@@ -1195,16 +1195,6 @@ function suggestParam(unknown: string, valid: string[]): string | undefined {
   return best?.name;
 }
 
-/**
- * Validate params against a command's schema. Returns an array of error
- * messages. Empty array means the params are valid.
- *
- * - Unknown params: rejected with "did you mean X?" if a close match exists.
- * - Missing required params: rejected with the list of expected params.
- * - Type checks are not enforced here — the underlying core/API functions
- *   still validate values, and string vs number is often coerced by
- *   JSON/MCP transports.
- */
 /** The params to show in docs: every param except deprecated ones, which are still accepted. */
 export function documentedParams(entry: CommandEntry): CommandParam[] {
   return entry.params.filter((p) => !p.deprecated);
@@ -1251,6 +1241,10 @@ export function isListCommand(command: string): boolean {
 }
 
 const ROLE_ALIAS = 'roleId';
+const ROLE_PARAM = 'role';
+const ASSET_ROLE_ID_PARAM = 'assetRoleId';
+const EXPERIMENT_ID_PARAM = 'experimentId';
+const GOAL_ID_PARAM = 'goalId';
 
 /**
  * Documented deprecated ID aliases (alias -> canonical), per command. Filled
@@ -1259,33 +1253,69 @@ const ROLE_ALIAS = 'roleId';
 let documentedIdAliases: Record<string, Record<string, string>> | undefined;
 function documentedAliases(label: string): Record<string, string> {
   documentedIdAliases ??= {
-    ...Object.fromEntries(EXPERIMENT_ACCESS_COMMANDS.map((c) => [`experiments.${c}`, { [ROLE_ALIAS]: 'role' }])),
-    ...Object.fromEntries(GOAL_ACCESS_COMMANDS.map((c) => [`goals.${c}`, { [ROLE_ALIAS]: 'role' }])),
-    ...Object.fromEntries([...METRIC_ACCESS_ROLE_COMMANDS].map((c) => [`metrics.${c}`, { [ROLE_ALIAS]: 'assetRoleId' }])),
+    ...Object.fromEntries(EXPERIMENT_ACCESS_COMMANDS.map((c) => [`experiments.${c}`, { [ROLE_ALIAS]: ROLE_PARAM }])),
+    ...Object.fromEntries(GOAL_ACCESS_COMMANDS.map((c) => [`goals.${c}`, { [ROLE_ALIAS]: ROLE_PARAM }])),
+    ...Object.fromEntries([...METRIC_ACCESS_ROLE_COMMANDS].map((c) => [`metrics.${c}`, { [ROLE_ALIAS]: ASSET_ROLE_ID_PARAM }])),
   };
   return documentedIdAliases[label] ?? {};
 }
 
 /**
- * Undocumented core-name aliases a 2.0 direct executeCommand caller could pass
- * (e.g. `id` where the core reads `id` for a documented `goalId`). Derived from
- * the adapters: a key an adapter renames a documented ID param to.
+ * Core names for ID params on commands now served by a runner, which the
+ * adapter-based derivation below cannot see. In 2.0 these commands went
+ * straight to the core, which read these names.
  */
-const coreIdAliasCache = new Map<string, Record<string, string>>();
+let runnerCoreIdAliases: Record<string, Record<string, string>> | undefined;
+function declaredCoreIdAliases(label: string): Record<string, string> {
+  runnerCoreIdAliases ??= Object.fromEntries(GOAL_ACCESS_COMMANDS.map((c) => [`goals.${c}`, { [ID_PARAM]: GOAL_ID_PARAM }]));
+  return runnerCoreIdAliases[label] ?? {};
+}
+
+/**
+ * For each documented param, the core's own names for it, derived from the
+ * adapter: a key the adapter writes the param's value to, directly or inside
+ * an array (editTeamMemberRoles userId -> userIds). Used to count a required
+ * param as supplied when a 2.0 caller passes the core's name instead.
+ */
+const coreEquivalentCache = new Map<string, Record<string, string[]>>();
+function coreEquivalents(entry: CommandEntry): Record<string, string[]> {
+  const label = `${entry.group}.${entry.command}`;
+  const cached = coreEquivalentCache.get(label);
+  if (cached) return cached;
+  const equivalents: Record<string, string[]> = {};
+  for (const p of entry.params) {
+    if (p.deprecated) continue;
+    const marker = `__core_${p.name}`;
+    const translated = normalizeCommandParams(entry.group, entry.command, { [p.name]: marker });
+    const names = Object.entries(translated)
+      .filter(([key, value]) => key !== p.name && (value === marker || (Array.isArray(value) && value.includes(marker))))
+      .map(([key]) => key);
+    if (names.length > 0) equivalents[p.name] = names;
+  }
+  for (const [alias, canonical] of Object.entries(declaredCoreIdAliases(label))) {
+    equivalents[canonical] = [...(equivalents[canonical] ?? []), alias];
+  }
+  coreEquivalentCache.set(label, equivalents);
+  return equivalents;
+}
+
+/**
+ * Undocumented core-name aliases for ID params a 2.0 direct executeCommand
+ * caller could pass (e.g. `id` for a documented `goalId`): a core equivalent
+ * that carries the value unchanged and is itself ID-named.
+ */
 function coreIdAliases(entry: CommandEntry): Record<string, string> {
   const label = `${entry.group}.${entry.command}`;
-  const cached = coreIdAliasCache.get(label);
-  if (cached) return cached;
-  const aliases: Record<string, string> = {};
+  const aliases: Record<string, string> = { ...declaredCoreIdAliases(label) };
+  const equivalents = coreEquivalents(entry);
   for (const p of idParams(entry)) {
     if (p.deprecated) continue;
     const marker = `__id_${p.name}`;
     const translated = normalizeCommandParams(entry.group, entry.command, { [p.name]: marker });
-    for (const [key, value] of Object.entries(translated)) {
-      if (value === marker && key !== p.name) aliases[key] = p.name;
+    for (const name of equivalents[p.name] ?? []) {
+      if (translated[name] === marker && UNDOCUMENTED_ID_KEY.test(name)) aliases[name] = p.name;
     }
   }
-  coreIdAliasCache.set(label, aliases);
   return aliases;
 }
 
@@ -1317,10 +1347,13 @@ function warnDeprecatedAlias(label: string, alias: string, canonical: string): v
 export function normalizeIdParams(
   entry: CommandEntry,
   params: Record<string, unknown>,
-  // The catalog audit probes partial param sets; it skips the required check.
-  options: { checkRequired?: boolean } = {},
+  // Which required params to check: 'all' (execute_command validation and
+  // runner commands), 'ids' (core-direct dispatch: only what a path needs,
+  // counting the core's own names, so 2.0 core-shaped calls still work), or
+  // 'none' (the catalog audit, which probes partial param sets).
+  options: { required?: RequiredCheck } = {},
 ): Record<string, unknown> {
-  const checkRequired = options.checkRequired ?? true;
+  const required = options.required ?? 'all';
   const label = `${entry.group}.${entry.command}`;
   const errors: string[] = [];
   // The deprecated `params` filter bag is flattened here, once, and removed:
@@ -1334,6 +1367,16 @@ export function normalizeIdParams(
     }
     if (isRecord(bag) && PARAMS_PARAM in bag) {
       throw new IdParamError([`Param "${PARAMS_PARAM}" for ${label} must not contain a nested "${PARAMS_PARAM}".`]);
+    }
+    // A key in both the bag and the top level must agree: the top level wins
+    // when flattening, so a different bag value would be silently ignored.
+    if (isRecord(bag)) {
+      const conflicts = Object.keys(bag).filter((key) =>
+        params[key] !== undefined && JSON.stringify(params[key]) !== JSON.stringify(bag[key]));
+      if (conflicts.length > 0) {
+        throw new IdParamError(conflicts.map((key) =>
+          `Param "${key}" for ${label} is given both at the top level and in "${PARAMS_PARAM}" with different values; pass it once.`));
+      }
     }
     input = flatten(params, PARAMS_PARAM);
   }
@@ -1386,7 +1429,10 @@ export function normalizeIdParams(
     if (out[p.name] === null && !p.required) delete out[p.name];
     const value = out[p.name];
     if (value === undefined || value === null) {
-      if (p.required && checkRequired) errors.push(`Missing required param "${p.name}" (${p.type}) for ${label}: ${p.description}`);
+      const isIdParam = (p.type === 'number' && ID_PARAM_NAME.test(p.name)) || (p.type === 'array' && ID_LIST_PARAMS.has(p.name));
+      const suppliedByCoreName = (coreEquivalents(entry)[p.name] ?? []).some((name) => input[name] !== undefined && input[name] !== null);
+      const check = required === 'all' || (required === 'ids' && isIdParam && !suppliedByCoreName);
+      if (p.required && check) errors.push(`Missing required param "${p.name}" (${p.type}) for ${label}: ${p.description}`);
       continue;
     }
     if (p.type === 'number' && ID_PARAM_NAME.test(p.name)) {
@@ -1409,6 +1455,8 @@ export function normalizeIdParams(
   return out;
 }
 
+type RequiredCheck = 'all' | 'ids' | 'none';
+
 /** Thrown by normalizeIdParams; `problems` lists each invalid or missing ID. */
 export class IdParamError extends Error {
   constructor(readonly problems: string[]) {
@@ -1417,13 +1465,22 @@ export class IdParamError extends Error {
   }
 }
 
+/**
+ * Validates execute_command params against a command's catalog entry and
+ * returns friendly error messages (empty when valid). The rules (required
+ * params, IDs, aliases, the deprecated params bag) are normalizeIdParams'
+ * with the full required check; unknown keys get "did you mean" hints.
+ */
 export function validateCommandParams(
   entry: CommandEntry,
   provided: Record<string, unknown>
 ): string[] {
   // normalizeIdParams owns the rules (required params, IDs, aliases, the
-  // deprecated params bag); this adds unknown-param hints on top, for keys it
-  // would silently drop.
+  // deprecated params bag); this adds unknown-param hints on top, since
+  // execute_command (unlike direct executeCommand callers) accepts only
+  // catalog params. executeCommand runs normalizeIdParams again on the final
+  // params (with tool defaults added) in its narrower 'ids' mode: a separate,
+  // cheap check, not duplicated work.
   const errors: string[] = [];
   try {
     normalizeIdParams(entry, provided);
@@ -1653,7 +1710,6 @@ const renameTo = (from: string, to: string): ParamAdapter => (p) => rename(p, fr
 const withDefault = (key: string, value: unknown): ParamAdapter => (p) => (p[key] === undefined ? { ...p, [key]: value } : p);
 const idFrom = (from: string): ParamAdapter => renameTo(from, ID_PARAM);
 const flattenData: ParamAdapter = (p) => flatten(p, DATA_PARAM);
-const flattenParams: ParamAdapter = (p) => flatten(p, PARAMS_PARAM);
 const aliases = (map: Record<string, string>): ParamAdapter => (p) => aliasFields(p, map);
 /** Core functions that forward a raw API body read it from `config`. */
 const dataAsConfig: ParamAdapter = renameTo(DATA_PARAM, CONFIG_PARAM);
@@ -1801,12 +1857,6 @@ const PARAM_ADAPTERS: Record<string, Record<string, ParamAdapter>> = {
     update: ['updateAssetRole'],
   }),
   favorites: { addFavorite: FAVORITE_TARGET, removeFavorite: FAVORITE_TARGET },
-  insights: {
-    getVelocityInsights: flattenParams,
-    getVelocityInsightsDetail: flattenParams,
-    getDecisionInsights: flattenParams,
-    getDecisionInsightsHistory: flattenParams,
-  },
   cors: entityAdapters('originId', { byId: ['getCorsOrigin', 'deleteCorsOrigin'], create: ['createCorsOrigin'], update: ['updateCorsOrigin'] }),
   datasources: configEntityAdapters('datasourceId', {
     byId: ['getDatasource', 'archiveDatasource'],
@@ -1831,9 +1881,7 @@ const PARAM_ADAPTERS: Record<string, Record<string, ParamAdapter>> = {
     }),
     reorderCustomSections: sectionOrder,
   },
-  activity: { listActivity: flattenParams },
   statistics: { getPowerMatrix: renameTo(PARAMS_PARAM, CONFIG_PARAM) },
-  events: { listEvents: flattenParams, listEventsHistory: flattenParams },
   storageconfigs: configEntityAdapters('configId', {
     byId: ['getStorageConfig'],
     create: ['createStorageConfig'],
@@ -1985,7 +2033,7 @@ const EXPERIMENT_RUNNERS: Record<string, CommandRunner> = {
     return warnings?.length ? { ...result, warnings: [...(result.warnings ?? []), ...warnings] } : result;
   },
   ...Object.fromEntries(BULK_COMMANDS.map((c) => [c, bulkRunner(c)])),
-  ...Object.fromEntries(EXPERIMENT_ACCESS_COMMANDS.map((c) => [c, accessRunner('experiments', c, 'experimentId', 'experimentId')])),
+  ...Object.fromEntries(EXPERIMENT_ACCESS_COMMANDS.map((c) => [c, accessRunner('experiments', c, EXPERIMENT_ID_PARAM, EXPERIMENT_ID_PARAM)])),
   // core createAnnotation/updateAnnotation forward only `type`; the API takes the whole annotation.
   createAnnotation: async (client, params) => ({
     data: await client.createAnnotation({ ...userFields(params.data), experiment_id: params.experimentId } as any),
@@ -1993,6 +2041,23 @@ const EXPERIMENT_RUNNERS: Record<string, CommandRunner> = {
   updateAnnotation: async (client, params) => ({
     data: await client.updateAnnotation(params.annotationId as any, userFields(params.data) as any),
   }),
+};
+
+/**
+ * Runner commands whose 2.0 core shape still goes straight to the core (the
+ * 2.0 behaviour) when the caller supplies it instead of the catalog shape.
+ * Commands that were broken in 2.0 (bulk*, cloneExperiment) have none.
+ */
+const CORE_SHAPE_FALLBACKS: Record<string, (params: Record<string, unknown>) => boolean> = {
+  'experiments.createExperiment': (p) => p[DATA_PARAM] === undefined,
+  'experiments.createAnnotation': (p) => p[DATA_PARAM] === undefined,
+  'experiments.updateAnnotation': (p) => p[DATA_PARAM] === undefined,
+  'users.createUser': (p) => p[DATA_PARAM] === undefined,
+  'users.updateUser': (p) => p[DATA_PARAM] === undefined && p.userId === undefined,
+  'platformconfig.getPlatformConfig': (p) => p.configKey === undefined && p[ID_PARAM] !== undefined,
+  'platformconfig.updatePlatformConfig': (p) => p.configKey === undefined && p[ID_PARAM] !== undefined,
+  ...Object.fromEntries(DATASOURCE_CONFIG_COMMANDS.map((c) => [`datasources.${c}`, (p: Record<string, unknown>) => p.datasourceId === undefined && p[CONFIG_PARAM] !== undefined])),
+  'storageconfigs.testStorageConfig': (p) => p.configId === undefined && p[CONFIG_PARAM] !== undefined,
 };
 
 const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
@@ -2006,7 +2071,7 @@ const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
       return { data: { id: params.userId } };
     },
   },
-  goals: Object.fromEntries(GOAL_ACCESS_COMMANDS.map((c) => [c, accessRunner('goals', c, 'goalId', ID_PARAM)])),
+  goals: Object.fromEntries(GOAL_ACCESS_COMMANDS.map((c) => [c, accessRunner('goals', c, GOAL_ID_PARAM, ID_PARAM)])),
   datasources: Object.fromEntries(DATASOURCE_CONFIG_COMMANDS.map((c) => [c, datasourceRunner(c)])),
   storageconfigs: {
     // The backend merges only the stored secret key (by storage_config_id); the
@@ -2082,18 +2147,26 @@ export async function executeCommand(
     throw new Error(`Unknown group: "${group}". Available: ${CLI_GROUPS.join(', ')}`);
   }
 
-  // Entity IDs are normalised before any adapter, runner or core sees them.
-  const idSafeParams = normalizeIdParams(entry, params);
+  const fn = mod[command];
+  const label = `${group}.${command}`;
 
+  // Entity IDs are normalised before any adapter, runner or core sees them.
+  // A runner takes the catalog shape, so it gets the full required check;
+  // unless the caller used the command's 2.0 core shape, which (as in 2.0)
+  // goes straight to the core.
   const runner = COMMAND_RUNNERS[group]?.[command];
   if (runner) {
-    return runner(client, idSafeParams);
+    const coreShaped = CORE_SHAPE_FALLBACKS[label]?.(params) && typeof fn === 'function';
+    const idSafeParams = normalizeIdParams(entry, params, { required: coreShaped ? 'ids' : 'all' });
+    return coreShaped ? fn(client, idSafeParams) : runner(client, idSafeParams);
   }
 
-  const fn = mod[command];
   if (typeof fn !== 'function') {
     throw new Error(`Function "${command}" not found in core module "${group}". Available: ${Object.keys(mod).filter(k => typeof mod[k] === 'function').join(', ')}`);
   }
 
+  // Core-direct dispatch checks only the required IDs a path needs (counting
+  // the core's own names); other keys pass through unchanged, as in 2.0.
+  const idSafeParams = normalizeIdParams(entry, params, { required: 'ids' });
   return fn(client, normalizeCommandParams(group, command, idSafeParams));
 }

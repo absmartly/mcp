@@ -39,6 +39,7 @@ import {
     HTTP_STATUS_BAD_REQUEST,
     HTTP_STATUS_SERVICE_UNAVAILABLE,
     HTTP_STATUS_UNAUTHORIZED,
+    firstValidEndpoint,
     MESSAGE_INVALID_ENDPOINT,
     tryParseAbsmartlyEndpoint,
 } from "./oauth/index.js";
@@ -710,14 +711,16 @@ async function handleMcpTransportRequest(
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
         debug(`No valid Authorization header on ${route.pathPrefix}, returning 401 to trigger OAuth flow`);
 
-        const requestedEndpoint = url.searchParams.get('absmartly-endpoint') ||
-            extractEndpointFromResourceParam(url.searchParams.get('resource')) ||
-            request.headers.get('x-absmartly-endpoint') ||
-            extractEndpointFromPath(url.pathname, route.pathPrefix) ||
-            endpoint;
-        // Only a valid endpoint is remembered for the coming /register; an
-        // invalid one is dropped, so consent asks for it instead.
-        const pendingEndpoint = tryParseAbsmartlyEndpoint(requestedEndpoint)?.baseUrl;
+        // Only a valid endpoint is remembered for the coming /register: the
+        // first source that parses, so an invalid one never hides a valid one.
+        const requested = firstValidEndpoint([
+            url.searchParams.get('absmartly-endpoint'),
+            extractEndpointFromResourceParam(url.searchParams.get('resource')),
+            request.headers.get('x-absmartly-endpoint'),
+            extractEndpointFromPath(url.pathname, route.pathPrefix),
+            endpoint,
+        ]);
+        const pendingEndpoint = tryParseAbsmartlyEndpoint(requested.endpoint)?.baseUrl;
         if (pendingEndpoint) {
             await safeKvPut(env.OAUTH_KV, `oauth_endpoint_pending:${clientFingerprint}`, pendingEndpoint, {
                 expirationTtl: OAUTH_STATE_TTL_SECONDS,

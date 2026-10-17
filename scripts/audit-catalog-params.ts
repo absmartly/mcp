@@ -120,7 +120,7 @@ export function auditCatalogParams(): CatalogParamFinding[] {
       // Deprecated params are left out of the sample: they are aliases or
       // ignored, and an alias would otherwise compete with its canonical param.
       const translate = (params: Record<string, unknown>) =>
-        normalizeCommandParams(group, entry.command, normalizeIdParams(entry, structuredClone(params), { checkRequired: false }));
+        normalizeCommandParams(group, entry.command, normalizeIdParams(entry, structuredClone(params), { required: 'none' }));
 
       const sample: Record<string, unknown> = {};
       entry.params.forEach((p, i) => { if (!p.deprecated) sample[p.name] = sampleValue(p.type, SAMPLE_BASE + 2 * i); });

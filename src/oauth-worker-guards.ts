@@ -32,11 +32,12 @@ export async function checkBackendSessionOnRefresh(options: TokenExchangeCallbac
     // Checked before the JWT early return: a grant with a bad stored endpoint
     // must end here, or refreshing would keep it alive while every MCP call
     // is turned away (withValidStoredEndpoint).
-    if (props?.absmartly_endpoint !== undefined && !tryParseAbsmartlyEndpoint(props.absmartly_endpoint)) {
+    const parsedEndpoint = props?.absmartly_endpoint !== undefined ? tryParseAbsmartlyEndpoint(props.absmartly_endpoint) : null;
+    if (props?.absmartly_endpoint !== undefined && !parsedEndpoint) {
         throw new OAuthErrorImpl(OAUTH_ERROR_INVALID_GRANT, { description: `${MESSAGE_INVALID_ENDPOINT}: ${props.absmartly_endpoint}. Please sign in again.` });
     }
-    if (!props?.oauth_jwt || !props.absmartly_endpoint) return;
-    const baseUrl = tryParseAbsmartlyEndpoint(props.absmartly_endpoint)!.baseUrl;
+    if (!props?.oauth_jwt || !parsedEndpoint) return;
+    const baseUrl = parsedEndpoint.baseUrl;
     let response: Response;
     try {
         response = await fetch(`${baseUrl}${USERINFO_PATH}`, {

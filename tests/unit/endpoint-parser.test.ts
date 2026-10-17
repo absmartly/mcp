@@ -1,6 +1,6 @@
 // parseAbsmartlyEndpoint is the one parser every endpoint entry point uses
 // (OAuth consent, API-key requests, stored props, FetchHttpClient).
-import { canonicalizeEndpoint, InvalidEndpointError, isValidAbsmartlyEndpoint, normalizeEndpoint, parseAbsmartlyEndpoint, tryParseAbsmartlyEndpoint } from '../../src/oauth/index.js';
+import { canonicalizeEndpoint, firstValidEndpoint, InvalidEndpointError, isValidAbsmartlyEndpoint, normalizeEndpoint, parseAbsmartlyEndpoint, tryParseAbsmartlyEndpoint } from '../../src/oauth/index.js';
 
 export default async function runTests() {
   let passed = 0;
@@ -50,6 +50,11 @@ export default async function runTests() {
   ]) {
     assertEquals(normalizeEndpoint(input), expected, `normalizeEndpoint (2.0 behaviour) ${JSON.stringify(input)}`);
   }
+
+  // firstValidEndpoint: an invalid higher-priority source never hides a valid one.
+  assertEquals(firstValidEndpoint(['bad host', null, 'acme.absmartly.com']), { endpoint: 'acme.absmartly.com', rejected: 'bad host' }, 'firstValidEndpoint skips an invalid source');
+  assertEquals(firstValidEndpoint([undefined, 'https://a.absmartly.com', 'ftp://x']), { endpoint: 'https://a.absmartly.com', rejected: null }, 'firstValidEndpoint takes the first valid one');
+  assertEquals(firstValidEndpoint(['ftp://x', '']), { endpoint: null, rejected: 'ftp://x' }, 'firstValidEndpoint reports a rejection with no valid source');
 
   return { success: failed === 0, message: `${passed} passed, ${failed} failed`, testCount: passed + failed, details };
 }
