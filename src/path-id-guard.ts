@@ -77,21 +77,47 @@ function installedCliVersion(): string {
 export type PathTable = Readonly<Record<string, { params: readonly string[]; path: readonly string[] }>>;
 
 /**
- * The path table for a loaded @absmartly/cli version. The generated table
- * describes exactly one build (the version the package pins); for any other
- * version no mapping is trusted, so the table is empty and every method is
- * treated as unknown.
+ * The table used when the loaded @absmartly/cli is not the build the table was
+ * generated from: no mapping is trusted, so every method is unknown. Unknown
+ * methods then refuse unsafe strings and numbers but let plain objects and
+ * arrays through (they are bodies and options), so a host on another 1.x keeps
+ * working. Leftover risk: a newer CLI method that builds a path from a field
+ * of an object argument (e.g. `/x/${opts.id}`) is not checked on such an
+ * install. request/rawRequest are always checked.
  */
+export const MISMATCHED_PATH_TABLE: PathTable = Object.freeze({});
+
+/** The path table for a loaded @absmartly/cli version: the generated one only for the build it describes. */
 export function pathTableFor(cliVersion: string): PathTable {
-  return cliVersion === PATH_TABLE_CLI_VERSION ? API_PATH_METHODS : {};
+  return cliVersion === PATH_TABLE_CLI_VERSION ? API_PATH_METHODS : MISMATCHED_PATH_TABLE;
 }
 
+const mismatchWarned = { done: false };
+
+/** Warns, once per process (or per `state`), that the loaded CLI is not the one the table describes. */
+export function warnCliVersionMismatch(
+  installed: string,
+  warn: (message: string) => void = console.warn,
+  state: { done: boolean } = mismatchWarned,
+): boolean {
+  if (installed === PATH_TABLE_CLI_VERSION || state.done) return false;
+  state.done = true;
+  warn(`@absmartly/mcp: @absmartly/cli ${installed || "(unknown version)"} is loaded, but the path guard table was generated from ${PATH_TABLE_CLI_VERSION}. `
+    + "Path arguments are checked by type only (unsafe strings and numbers are refused); install @absmartly/cli "
+    + `${PATH_TABLE_CLI_VERSION} for exact checks.`);
+  return true;
+}
+
+const INSTALLED_CLI_VERSION = installedCliVersion();
+warnCliVersionMismatch(INSTALLED_CLI_VERSION);
+
 /** The table the guard uses: the generated one if the installed CLI matches it, else none. */
-export const ACTIVE_PATH_TABLE = pathTableFor(installedCliVersion());
+export const ACTIVE_PATH_TABLE = pathTableFor(INSTALLED_CLI_VERSION);
 
 /** Unknown method, or a mapped non-ID path argument: refuse anything that could carry a path. */
-function checkFailClosed(method: string, index: number, arg: unknown, rule: string): void {
+function checkFailClosed(method: string, index: number, arg: unknown, rule: string, allowObjects = false): void {
   if (arg === undefined || typeof arg === "boolean") return;
+  if (allowObjects && arg !== null && typeof arg === "object") return;
   if (typeof arg === "string" && !PATH_CHARS.test(arg)) return;
   if (typeof arg === "number" && isPositiveIntegerId(arg)) return;
   throw new PathIdError(method, index, arg, rule);
@@ -130,9 +156,11 @@ const guardedClients = new WeakMap<object, object>();
  *   - a mapped non-ID path argument (uploadFile's `usage`) must be free of
  *     path characters;
  *   - request/rawRequest always validate their path argument;
- *   - any other method (unmapped, or every method when another CLI version is
- *     loaded) fails closed: non-primitive arguments, strings with path
- *     characters and numbers that are not positive integers are refused.
+ *   - any other method fails closed: strings with path characters and
+ *     numbers that are not positive integers are refused, and so are
+ *     non-primitive arguments, except when another CLI version is loaded
+ *     (MISMATCHED_PATH_TABLE: every method is unknown, and plain objects and
+ *     arrays pass so that bodies and options keep working).
  * Methods run with the proxy as `this`, so an APIClient method calling another
  * one (or request) is guarded too. Wrapping is idempotent: a client (or its
  * proxy) maps to one proxy, whose wrapped methods are cached until reassigned. `table` is for
@@ -140,6 +168,7 @@ const guardedClients = new WeakMap<object, object>();
  */
 export function withPathIdGuard<T extends ApiClientLike>(client: T, table: PathTable = ACTIVE_PATH_TABLE): T {
   const cacheable = table === ACTIVE_PATH_TABLE;
+  const mismatched = table === MISMATCHED_PATH_TABLE;
   const existing = cacheable ? guardedClients.get(client) : undefined;
   if (existing) return existing as T;
   // prop -> the method it wrapped and its guarded form. Keyed on the method
@@ -164,7 +193,7 @@ export function withPathIdGuard<T extends ApiClientLike>(client: T, table: PathT
             else if (!isPositiveIntegerId(args[index])) throw new PathIdError(prop, index, args[index]);
           }
         } else {
-          args.forEach((arg, index) => checkFailClosed(prop, index, arg, RULE_FAIL_CLOSED));
+          args.forEach((arg, index) => checkFailClosed(prop, index, arg, RULE_FAIL_CLOSED, mismatched));
         }
         return value.apply(receiver, args);
       };

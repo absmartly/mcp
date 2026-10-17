@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { APIClient } from '@absmartly/cli/api-client';
 import type { HttpClient, HttpRequestConfig, HttpResponse } from '@absmartly/cli/api-client';
-import { ACTIVE_PATH_TABLE, detectCliVersion, PathIdError, pathTableFor, withPathIdGuard } from '../../src/path-id-guard';
+import { ACTIVE_PATH_TABLE, detectCliVersion, MISMATCHED_PATH_TABLE, PathIdError, pathTableFor, warnCliVersionMismatch, withPathIdGuard } from '../../src/path-id-guard';
 import type { PathTable } from '../../src/path-id-guard';
 import { API_PATH_METHODS, PATH_TABLE_CLI_VERSION } from '../../src/api-path-args';
 import { buildApiPathArgs, deriveApiPathArgs } from '../../scripts/endpoint-manifest';
@@ -35,7 +35,7 @@ export default async function runTests() {
   // ── The table: generated from the pinned CLI, and the pin is exact. ──
   const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf-8'));
   assertEquals(pkg.devDependencies['@absmartly/cli'], PATH_TABLE_CLI_VERSION, 'devDependency pins the exact CLI version the table was generated from');
-  assertEquals(pkg.peerDependencies['@absmartly/cli'], PATH_TABLE_CLI_VERSION, 'peerDependency pins the same exact version');
+  assertEquals(pkg.peerDependencies['@absmartly/cli'], '>=1.7.0 <2', 'peerDependency keeps the 2.0 range (a mismatch degrades, it does not block install)');
   assertEquals(ACTIVE_PATH_TABLE === API_PATH_METHODS, true, 'the installed CLI matches the table, so it is used');
   assertEquals(buildApiPathArgs(), API_PATH_METHODS, 'the committed table is what the generator reads from the installed CLI');
   assertEquals(API_PATH_METHODS.revokeGoalAccessUser?.path, ['id', 'userId', 'assetRoleId'], 'revokeGoalAccessUser: three path IDs, by name');
@@ -57,6 +57,17 @@ export default async function runTests() {
   assertEquals(detectCliVersion(() => '/cli/x.js', () => 'not json', '1.16.2'), '', 'detect: unparsable package.json -> unknown');
   assertEquals(detectCliVersion(() => '/cli/x.js', () => '{}', '1.16.2'), '', 'detect: no version -> unknown');
   assertEquals(pathTableFor(''), {}, 'an unknown version maps nothing');
+
+  // The mismatch warning names both versions and fires once.
+  {
+    const messages: string[] = [];
+    const state = { done: false };
+    assertEquals(warnCliVersionMismatch(PATH_TABLE_CLI_VERSION, (m) => messages.push(m), state), false, 'warn: no warning for the pinned version');
+    assertEquals(warnCliVersionMismatch('1.9.0', (m) => messages.push(m), state), true, 'warn: a mismatch warns');
+    assertEquals(warnCliVersionMismatch('1.9.0', (m) => messages.push(m), state), false, 'warn: only once');
+    assertEquals(messages.length, 1, 'warn: exactly one message');
+    assertEquals(messages[0].includes('1.9.0') && messages[0].includes(PATH_TABLE_CLI_VERSION), true, 'warn: names both versions');
+  }
 
   // ── Generator: what it maps, and what it leaves unknown. ──
   const derived = deriveApiPathArgs(`export class APIClient {
@@ -110,6 +121,7 @@ export default async function runTests() {
     async directCall(id: unknown) { sent.push(`/direct/${id}`); return {}; },
     async futureMethod(this: any, ref: unknown) { return this.request('GET', `/f/${ref}`); },
     async updateThing(this: any, id: unknown) { return this.getGoal(id); },
+    async createThing(this: any, data: unknown) { return this.request('POST', '/things', { data }); },
   };
   const table: PathTable = {
     getGoal: { params: ['id'], path: ['id'] },
@@ -159,7 +171,14 @@ export default async function runTests() {
 
   // A mismatched CLI version: the empty table makes every method unknown.
   const mismatched = withPathIdGuard(fake, pathTableFor('9.9.9'));
-  assertEquals(await errorOf(() => mismatched.getGoal({})), 'PathIdError', 'version mismatch: an object argument is refused');
+  assertEquals(pathTableFor('9.9.9') === MISMATCHED_PATH_TABLE, true, 'another version selects the mismatch table');
+  assertEquals(await errorOf(() => mismatched.createThing({ name: 'a/b.c' })), undefined, 'version mismatch: a plain-object argument (a body) is allowed');
+  assertEquals(await errorOf(() => mismatched.createThing(['x/y'])), undefined, 'version mismatch: an array argument is allowed');
+  assertEquals(await errorOf(() => guarded.createThing({ name: 'x' })), 'PathIdError', 'matching version: an unknown method still refuses an object argument');
+  assertEquals(await errorOf(() => mismatched.futureMethod({ id: 1 })), 'PathIdError', 'version mismatch: an object reaching a path is still refused by the request check');
+  assertEquals(await errorOf(() => mismatched.createThing(null)), 'PathIdError', 'version mismatch: null is still refused');
+  assertEquals(await errorOf(() => mismatched.uploadFile('../users', {})), 'PathIdError', 'version mismatch: a path string beside an object is refused');
+  assertEquals(await errorOf(() => mismatched.rawRequest('/goals/..')), 'PathIdError', 'version mismatch: rawRequest still validates its path');
   assertEquals(await errorOf(() => mismatched.getGoal(-3)), 'PathIdError', 'version mismatch: a non-positive number is refused');
   assertEquals(await errorOf(() => mismatched.getGoal('1/../x')), 'PathIdError', 'version mismatch: a path string is refused');
   assertEquals(await errorOf(() => mismatched.request('GET', '/a/%2E%2E/b')), 'PathIdError', 'version mismatch: request still validates its path');
