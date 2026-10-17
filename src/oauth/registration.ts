@@ -1,3 +1,4 @@
+import { HTTP_STATUS_BAD_REQUEST, HTTP_STATUS_PAYLOAD_TOO_LARGE } from "./http-status.js";
 import {
   CLIENT_ID_LENGTH,
   CLIENT_SECRET_LENGTH,
@@ -15,8 +16,6 @@ import {
 import { isAllowedRedirectUri } from "./redirect-policy.js";
 import { randomString, sha256Hex } from "./crypto.js";
 
-const HTTP_STATUS_BAD_REQUEST = 400;
-const HTTP_STATUS_PAYLOAD_TOO_LARGE = 413;
 const MESSAGE_REDIRECT_URIS_REQUIRED = "At least one redirect URI is required";
 const MESSAGE_INVALID_JSON = "Invalid JSON payload";
 const MESSAGE_UNSUPPORTED_AUTH_METHOD = "Unsupported token_endpoint_auth_method";

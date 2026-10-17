@@ -207,15 +207,28 @@ export default async function run() {
     assert.strictEqual(seen.length, 2, 'onApprove must be called again on retry');
   });
 
-  await asyncTest('an invalid endpoint entering consent is rejected with 400 "Invalid ABsmartly endpoint"', async () => {
+  await asyncTest('an invalid stored endpoint mapping shows the endpoint form, and a corrected one works', async () => {
     const store = memoryStore();
     const extra: Partial<ConsentOptions> = { requireEndpoint: true };
-    for (const endpoint of ['https://acme.absmartly.com/v2', 'ftp://acme.absmartly.com', 'https://u:p@acme.absmartly.com', 'https://acme.absmartly.com/?x=1']) {
+    for (const endpoint of ['https://acme.absmartly.com/%2e%2e', 'ftp://acme.absmartly.com', 'https://u:p@acme.absmartly.com', 'https://acme.absmartly.com/?x=1']) {
       const begin = await beginAuthorization({ authRequest: request(), endpoint, cookieHeader: null }, options(store, extra));
-      assert.ok(begin.type === 'respond' && begin.response.status === 400 && begin.response.body === 'Invalid ABsmartly endpoint', `begin: ${endpoint}`);
+      assert.ok(begin.type === 'respond' && begin.response.status === 200 && (begin.response.body ?? '').includes('name="absmartly_endpoint"'), `begin with ${endpoint} shows the endpoint form`);
     }
+    const begin = await beginAuthorization({ authRequest: request(), endpoint: 'ftp://acme.absmartly.com', cookieHeader: null }, options(store, extra));
+    if (begin.type !== 'respond') throw new Error('unreachable');
+    const transactionId = (begin.response.body ?? '').match(/name="transaction_id" value="([^"]+)"/)?.[1] || '';
+    const cookie = cookiePair(begin.response.setCookies[0] || '');
+    const fixed = await submitConsent({ form: { action: 'set_endpoint', transactionId, endpoint: 'acme.absmartly.com' }, cookieHeader: cookie }, options(store, extra));
+    assert.ok(fixed.type === 'respond' && fixed.response.status === 200 && (fixed.response.body ?? '').includes('acme.absmartly.com'), 'the corrected endpoint reaches the consent page');
+    const approved = await submitConsent({ form: { action: 'approve', transactionId }, cookieHeader: cookie }, options(store, extra));
+    assert.ok(approved.type === 'approved' && approved.endpoint === 'https://acme.absmartly.com', 'and approval carries the canonical endpoint');
+  });
+
+  await asyncTest('an invalid endpoint typed into the form is rejected with 400 "Invalid ABsmartly endpoint"', async () => {
+    const store = memoryStore();
+    const extra: Partial<ConsentOptions> = { requireEndpoint: true };
     const { transactionId, cookie } = await start(store, extra);
-    const set = await submitConsent({ form: { action: 'set_endpoint', transactionId, endpoint: 'https://acme.absmartly.com/v3' }, cookieHeader: cookie }, options(store, extra));
+    const set = await submitConsent({ form: { action: 'set_endpoint', transactionId, endpoint: 'https://acme.absmartly.com/%2e%2e' }, cookieHeader: cookie }, options(store, extra));
     assert.ok(set.type === 'respond' && set.response.status === 400 && set.response.body === 'Invalid ABsmartly endpoint', 'set_endpoint rejects an invalid endpoint');
     const empty = await submitConsent({ form: { action: 'set_endpoint', transactionId, endpoint: '  ' }, cookieHeader: cookie }, options(store, extra));
     assert.ok(empty.type === 'respond' && empty.response.status === 400 && empty.response.body === 'ABsmartly endpoint is required', 'an empty endpoint is still "required"');
@@ -228,6 +241,37 @@ export default async function run() {
     await submitConsent({ form: { action: 'set_endpoint', transactionId, endpoint: ' acme.absmartly.com/v1/ ' }, cookieHeader: cookie }, options(store, extra));
     const stored = JSON.parse(store.data.get(`oauth:consent:${transactionId}`) ?? [...store.data.values()].find((v) => v.includes('absmartlyEndpoint')) ?? '{}');
     assert.strictEqual(stored.absmartlyEndpoint, 'https://acme.absmartly.com');
+  });
+
+  await asyncTest('a pre-validation transaction with a bad endpoint is rejected before onApprove persists it', async () => {
+    const store = memoryStore();
+    const persisted: unknown[] = [];
+    const extra: Partial<ConsentOptions> = { requireEndpoint: true, onApprove: async (_r, endpoint) => { persisted.push(endpoint); } };
+    const { transactionId, cookie } = await start(store, extra);
+    const key = [...store.data.keys()].find((k) => k.includes(transactionId))!;
+    const tx = JSON.parse(store.data.get(key)!);
+    tx.absmartlyEndpoint = 'https://acme.absmartly.com/%2e%2e/admin';
+    store.data.set(key, JSON.stringify(tx));
+    const outcome = await submitConsent({ form: { action: 'approve', transactionId }, cookieHeader: cookie }, options(store, extra));
+    assert.ok(outcome.type === 'respond' && outcome.response.status === 400 && outcome.response.body === 'Invalid ABsmartly endpoint', 'rejected with 400');
+    assert.deepStrictEqual(persisted, [], 'onApprove never ran');
+  });
+
+  await asyncTest('approvals stored before canonicalisation (with /v1 or an upper-case host) still match', async () => {
+    const store = memoryStore();
+    const extra: Partial<ConsentOptions> = { requireEndpoint: true, rememberApprovals: true };
+    const first = await beginAuthorization({ authRequest: request(), endpoint: 'https://acme.absmartly.com', cookieHeader: null }, options(store, extra));
+    if (first.type !== 'respond') throw new Error('unreachable');
+    const transactionId = (first.response.body ?? '').match(/name="transaction_id" value="([^"]+)"/)?.[1] || '';
+    const cookie = cookiePair(first.response.setCookies[0] || '');
+    const approved = await submitConsent({ form: { action: 'approve', transactionId }, cookieHeader: cookie }, options(store, extra));
+    if (approved.type !== 'approved') throw new Error('expected approval');
+    const approvalsCookie = cookiePair(approved.setCookies.find((c) => c.includes('approv')) ?? '');
+    // Rewrite the stored approval into the pre-2.1 shape.
+    const approvalsKey = [...store.data.keys()].find((k) => k.startsWith('oauth:approvals:'))!;
+    store.data.set(approvalsKey, JSON.stringify([JSON.stringify([CIMD_CLIENT, 'https://ACME.absmartly.com/v1/'])]));
+    const again = await beginAuthorization({ authRequest: request(), endpoint: 'https://acme.absmartly.com/v1', cookieHeader: approvalsCookie }, options(store, extra));
+    assert.strictEqual(again.type, 'approved', 'the legacy-shaped approval still skips consent');
   });
 
   return {

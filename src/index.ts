@@ -34,10 +34,14 @@ import {
     detectApiKey,
     safeKvPut,
     safeKvGet,
-    HTTP_STATUS_BAD_REQUEST,
-    VERIFY_ERROR_INVALID_ENDPOINT,
 } from "./shared.js";
-import { InvalidEndpointError, MESSAGE_INVALID_ENDPOINT, parseAbsmartlyEndpoint } from "./oauth/endpoint.js";
+import {
+    HTTP_STATUS_BAD_REQUEST,
+    HTTP_STATUS_SERVICE_UNAVAILABLE,
+    HTTP_STATUS_UNAUTHORIZED,
+    MESSAGE_INVALID_ENDPOINT,
+    tryParseAbsmartlyEndpoint,
+} from "./oauth/index.js";
 
 const ENTITY_LIST_PAGE_SIZE = 100;
 const VERIFY_ERROR_SERVER = 'server_error';
@@ -45,8 +49,6 @@ const VERIFY_ERROR_NETWORK = 'network_error';
 const VERIFY_ERROR_UNAUTHORIZED = 'unauthorized';
 const MESSAGE_SERVICE_UNAVAILABLE = 'ABsmartly service temporarily unavailable';
 const MESSAGE_UNAUTHORIZED = 'Unauthorized';
-const HTTP_STATUS_UNAUTHORIZED = 401;
-const HTTP_STATUS_SERVICE_UNAVAILABLE = 503;
 const ENTITY_LIST_FIRST_PAGE = 1;
 const ACCESS_TOKEN_TTL_SECONDS = 3600;
 // workers-oauth-provider 0.10.x defaults both of these; pin them explicitly (at the
@@ -561,7 +563,6 @@ async function verifyApiKey(apiKey: string, endpoint: string): Promise<{ ok: boo
     } catch (error: any) {
         const msg = error.message || String(error);
         console.error('API key verification error:', msg);
-        if (error instanceof InvalidEndpointError) return { ok: false, error: VERIFY_ERROR_INVALID_ENDPOINT };
         if (msg.includes('HTTP 5')) return { ok: false, error: VERIFY_ERROR_SERVER };
         if (msg.includes('Network error') || msg.includes('timed out')) return { ok: false, error: VERIFY_ERROR_NETWORK };
         return { ok: false, error: VERIFY_ERROR_UNAUTHORIZED };
@@ -643,19 +644,14 @@ async function handleMcpTransportRequest(
 
         try {
             // Parse the endpoint where it enters, and store the canonical form.
-            let apiUrl: string;
-            try {
-                apiUrl = parseAbsmartlyEndpoint(endpoint || DEFAULT_ABSMARTLY_ENDPOINT).apiUrl;
-            } catch (error) {
-                console.error(`Rejected API key request: ${(error as Error).message}`);
+            const parsed = tryParseAbsmartlyEndpoint(endpoint || DEFAULT_ABSMARTLY_ENDPOINT);
+            if (!parsed) {
+                console.error(`Rejected API key request: ${MESSAGE_INVALID_ENDPOINT}: ${endpoint}`);
                 return new Response(MESSAGE_INVALID_ENDPOINT, { status: HTTP_STATUS_BAD_REQUEST, headers: CORS_HEADERS });
             }
+            const apiUrl = parsed.apiUrl;
 
             const verifyResult = await verifyApiKey(apiKey, apiUrl);
-
-            if (!verifyResult.ok && verifyResult.error === VERIFY_ERROR_INVALID_ENDPOINT) {
-                return new Response(MESSAGE_INVALID_ENDPOINT, { status: HTTP_STATUS_BAD_REQUEST, headers: CORS_HEADERS });
-            }
 
             if (!verifyResult.ok) {
                 const isTransient = verifyResult.error === VERIFY_ERROR_SERVER || verifyResult.error === VERIFY_ERROR_NETWORK;
@@ -718,8 +714,11 @@ async function handleMcpTransportRequest(
             request.headers.get('x-absmartly-endpoint') ||
             extractEndpointFromPath(url.pathname, route.pathPrefix) ||
             endpoint;
-        if (requestedEndpoint) {
-            await safeKvPut(env.OAUTH_KV, `oauth_endpoint_pending:${clientFingerprint}`, requestedEndpoint, {
+        // Only a valid endpoint is remembered for the coming /register; an
+        // invalid one is dropped, so consent asks for it instead.
+        const pendingEndpoint = tryParseAbsmartlyEndpoint(requestedEndpoint)?.baseUrl;
+        if (pendingEndpoint) {
+            await safeKvPut(env.OAUTH_KV, `oauth_endpoint_pending:${clientFingerprint}`, pendingEndpoint, {
                 expirationTtl: OAUTH_STATE_TTL_SECONDS,
             });
         }
@@ -818,7 +817,9 @@ export default {
         }
 
         if (url.pathname === '/register' && request.method === 'POST') {
-            const pendingEndpoint = await safeKvGet(env.OAUTH_KV, `oauth_endpoint_pending:${clientFingerprint}`);
+            const pendingEndpoint = tryParseAbsmartlyEndpoint(
+                await safeKvGet(env.OAUTH_KV, `oauth_endpoint_pending:${clientFingerprint}`),
+            )?.baseUrl;
             const response = await oauthProvider.fetch(request, env, ctx);
 
             if (response.ok && pendingEndpoint) {

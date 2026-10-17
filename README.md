@@ -665,7 +665,7 @@ The package has separate entry points, so a Node host does not install or load t
 | Import | What it is | Formats |
 |---|---|---|
 | `@absmartly/mcp` (alias `@absmartly/mcp/node-http`) | `createStreamableHttpHandler`, `FetchHttpClient`, `registerServer`/`setupTools`, the command catalog, `ApiClientLike`, manifest types | ESM + CommonJS |
-| `@absmartly/mcp/oauth` | OAuth policy primitives (redirect policy, PKCE, registration, CIMD, consent) | ESM + CommonJS |
+| `@absmartly/mcp/oauth` | OAuth policy primitives (redirect policy, PKCE, registration, CIMD, consent, endpoint parsing: `parseAbsmartlyEndpoint`, `tryParseAbsmartlyEndpoint`, `canonicalizeEndpoint`; `normalizeEndpoint` is deprecated and keeps its 2.0 behaviour) | ESM + CommonJS |
 | `@absmartly/mcp/endpoint-manifest.json` | Every backend endpoint each tool/command can call | JSON |
 | `@absmartly/mcp/worker` | The Cloudflare Worker (`default` fetch handler, `ABsmartlyMCP` Durable Object) | ESM |
 

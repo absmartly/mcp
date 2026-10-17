@@ -202,7 +202,26 @@ const CASES: Case[] = [
     respond: (config) => (config.url === '/configs' ? { configs: [{ id: 1000, name: 'other' }] } : { config: {} }),
     expectedError: 'Platform config "1e3" not found', expected: [{ method: 'GET', url: '/configs' }] },
   { name: 'bulkStart rejects non-integer ids before any request', group: 'experiments', command: 'bulkStart', params: { ids: [1, '2.5'] },
-    expectedError: 'experiments.bulkStart: "ids" must be positive integer experiment IDs', expected: [] },
+    expectedError: 'experiments.bulkStart: "ids" must be a non-empty array of positive integer experiment IDs', expected: [] },
+  { name: 'bulkArchive rejects an empty ids array before any request', group: 'experiments', command: 'bulkArchive', params: { ids: [] },
+    expectedError: 'experiments.bulkArchive: "ids" must be a non-empty array of positive integer experiment IDs', expected: [] },
+  { name: 'bulkArchive rejects a non-array ids before any request', group: 'experiments', command: 'bulkArchive', params: { ids: '5' },
+    expectedError: 'experiments.bulkArchive: "ids" must be a non-empty array of positive integer experiment IDs', expected: [] },
+  // The ID rule runs in executeCommand, so direct Node callers are covered too.
+  { name: 'executeCommand rejects a multi-segment experimentId (6/full_on)', group: 'experiments', command: 'startExperiment', params: { experimentId: '6/full_on' },
+    expectedError: 'Param "experimentId" for experiments.startExperiment must be a positive integer ID.', expected: [] },
+  { name: 'executeCommand rejects a traversal segmentId', group: 'segments', command: 'deleteSegment', params: { segmentId: '../users/5' },
+    expectedError: 'Param "segmentId" for segments.deleteSegment must be a positive integer ID.', expected: [] },
+  { name: 'executeCommand rejects a traversal goalId on a runner command', group: 'goals', command: 'grantGoalAccessUser', params: { goalId: '1/../2', userId: 2, role: 5 },
+    expectedError: 'Param "goalId" for goals.grantGoalAccessUser must be a positive integer ID.', expected: [] },
+  { name: 'executeCommand accepts a padded numeric-string ID', group: 'segments', command: 'deleteSegment', params: { segmentId: ' 07 ' },
+    select: (requests) => requests.map(({ method }) => ({ method, url: 'DELETE /segments/<id>' })),
+    expected: [{ method: 'DELETE', url: 'DELETE /segments/<id>' }] },
+  { name: 'role accepts " 05 " as asset role 5', group: 'experiments', command: 'grantExperimentAccessUser',
+    params: { experimentId: 3, userId: 2, role: ' 05 ' },
+    expected: [{ method: 'POST', url: '/experiments/3/asset_role_users', data: { user_id: 2, asset_role_id: 5 } }] },
+  { name: 'configKey accepts "012" as config 12', group: 'platformconfig', command: 'getPlatformConfig', params: { configKey: '012' },
+    expected: [{ method: 'GET', url: '/configs/12' }] },
   { name: 'grantExperimentAccessUser without role fails before any request', group: 'experiments', command: 'grantExperimentAccessUser',
     params: { experimentId: 3, userId: 2 },
     expectedError: 'experiments.grantExperimentAccessUser requires "role" (an asset role ID or name)', expected: [] },
@@ -606,6 +625,20 @@ export default async function runTests() {
       validateCommandParams(getCommandEntry('experiments', 'diffExperimentsCore')!, { experimentId1: 1, experimentId2: '../2' }),
       ['Param "experimentId2" for experiments.diffExperimentsCore must be a positive integer ID.'],
       'numbered ID params are checked too',
+    );
+  }
+
+  // Validation gives the same ID and ids errors as dispatch, as friendly messages.
+  {
+    assertEquals(
+      validateCommandParams(getCommandEntry('experiments', 'bulkStart')!, { ids: [] }),
+      ['Param "ids" for experiments.bulkStart must be a non-empty array of positive integer IDs.'],
+      'bulkStart: empty ids fail validation',
+    );
+    assertEquals(
+      validateCommandParams(getCommandEntry('experiments', 'startExperiment')!, { experimentId: '6/full_on' }),
+      ['Param "experimentId" for experiments.startExperiment must be a positive integer ID.'],
+      'startExperiment: a multi-segment ID fails validation',
     );
   }
 

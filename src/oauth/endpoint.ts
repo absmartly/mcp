@@ -6,12 +6,16 @@
 const API_VERSION_PREFIX = "/v1";
 // An endpoint given with its API version (".../v1", ".../V1/") is accepted.
 const API_VERSION_SUFFIX = /\/v1$/i;
-const OTHER_API_VERSION_SUFFIX = /\/v\d+$/i;
 const ALLOWED_PROTOCOLS = ["http:", "https:"];
-const DEFAULT_SCHEME = "https://";
+const HTTP_SCHEME = "http://";
+const HTTPS_SCHEME = "https://";
 const URL_SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:\/\//i;
 const REPEATED_SLASHES = /\/{2,}/g;
 const TRAILING_SLASHES = /\/+$/;
+// In the operator's base path: anything URL parsing keeps, except an encoded
+// separator, and no "." / ".." segment in any encoding.
+const ENCODED_SEPARATOR = /%(?:2f|5c)/i;
+const DOT_SEGMENT = /^\.{1,2}$/;
 
 export const MESSAGE_INVALID_ENDPOINT = "Invalid ABsmartly endpoint";
 
@@ -25,7 +29,7 @@ export class InvalidEndpointError extends Error {
 
 export interface AbsmartlyEndpoint {
   origin: string;
-  /** The operator's base path, without the API version and trailing "/" ("" for none). */
+  /** The operator's base path, without "/v1" and trailing "/" ("" for none). */
   basePath: string;
   /** origin + basePath, e.g. "https://acme.absmartly.com". */
   baseUrl: string;
@@ -33,16 +37,30 @@ export interface AbsmartlyEndpoint {
   apiUrl: string;
 }
 
+function decodeOrNull(segment: string): string | null {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
+}
+
+function isSafeBaseSegment(segment: string): boolean {
+  const decoded = decodeOrNull(segment);
+  return decoded !== null && !ENCODED_SEPARATOR.test(segment) && !DOT_SEGMENT.test(decoded) && !decoded.includes("\\");
+}
+
 /**
  * Parses an ABsmartly endpoint. A scheme-less endpoint ("acme.absmartly.com")
- * means https. A trailing "/v1" is optional; another API version, a non-http(s)
- * scheme, credentials, a query or a fragment are rejected. The base path is the
- * operator's choice, so only empty segments are collapsed.
+ * means https. A trailing "/v1" is optional and stripped; any other path
+ * (including a proxy prefix like "/absmartly/v2") is the operator's base path.
+ * Rejected: non-http(s) schemes, credentials, a query or fragment, and a base
+ * path with an encoded separator or a "."/".." segment in any encoding.
  */
 export function parseAbsmartlyEndpoint(raw: string): AbsmartlyEndpoint {
   const trimmed = raw.trim();
   if (!trimmed) throw new InvalidEndpointError("empty");
-  const withScheme = URL_SCHEME_PATTERN.test(trimmed) ? trimmed : `${DEFAULT_SCHEME}${trimmed}`;
+  const withScheme = URL_SCHEME_PATTERN.test(trimmed) ? trimmed : `${HTTPS_SCHEME}${trimmed}`;
   let url: URL;
   try {
     url = new URL(withScheme);
@@ -55,24 +73,57 @@ export function parseAbsmartlyEndpoint(raw: string): AbsmartlyEndpoint {
   if (url.username || url.password || url.search || url.hash) {
     throw new InvalidEndpointError(`credentials, query and fragment are not allowed: ${raw}`);
   }
+  // URL parsing resolves dot segments, encoded ("%2e%2e") or not, so check
+  // the path as written for those; check the parsed path for separators.
+  const writtenPath = withScheme.slice(withScheme.indexOf("//") + 2).replace(/^[^/]*/, "");
+  if (writtenPath.split("/").slice(1).some((segment) => DOT_SEGMENT.test(decodeOrNull(segment) ?? segment))) {
+    throw new InvalidEndpointError(`dot segments are not allowed in the path: ${raw}`);
+  }
   const basePath = url.pathname
     .replace(REPEATED_SLASHES, "/")
     .replace(TRAILING_SLASHES, "")
     .replace(API_VERSION_SUFFIX, "")
     .replace(TRAILING_SLASHES, "");
-  if (OTHER_API_VERSION_SUFFIX.test(basePath)) {
-    throw new InvalidEndpointError(`only API ${API_VERSION_PREFIX} is supported: ${raw}`);
+  if (!basePath.split("/").slice(1).every(isSafeBaseSegment)) {
+    throw new InvalidEndpointError(`encoded separators and dot segments are not allowed in the path: ${raw}`);
   }
   const baseUrl = `${url.origin}${basePath}`;
   return { origin: url.origin, basePath, baseUrl, apiUrl: `${baseUrl}${API_VERSION_PREFIX}` };
 }
 
+/** parseAbsmartlyEndpoint, or null for an invalid endpoint. */
+export function tryParseAbsmartlyEndpoint(raw: string | null | undefined): AbsmartlyEndpoint | null {
+  if (!raw) return null;
+  try {
+    return parseAbsmartlyEndpoint(raw);
+  } catch {
+    return null;
+  }
+}
+
 /** True when `raw` parses as an ABsmartly endpoint. */
 export function isValidAbsmartlyEndpoint(raw: string): boolean {
-  try {
-    parseAbsmartlyEndpoint(raw);
-    return true;
-  } catch {
-    return false;
+  return tryParseAbsmartlyEndpoint(raw) !== null;
+}
+
+/**
+ * The canonical form of an ABsmartly endpoint (origin + base path, no API
+ * version), or "" when it is empty or invalid.
+ */
+export function canonicalizeEndpoint(raw: string): string {
+  return tryParseAbsmartlyEndpoint(raw)?.baseUrl ?? "";
+}
+
+/**
+ * Trims the endpoint, removes trailing "/" and adds "https://" when there is
+ * no http(s) scheme. Does not validate.
+ * @deprecated Kept for compatibility with @absmartly/mcp 2.0. Use
+ * canonicalizeEndpoint, which also validates and drops "/v1".
+ */
+export function normalizeEndpoint(raw: string): string {
+  let endpoint = raw.trim().replace(TRAILING_SLASHES, "");
+  if (endpoint && !endpoint.startsWith(HTTP_SCHEME) && !endpoint.startsWith(HTTPS_SCHEME)) {
+    endpoint = HTTPS_SCHEME + endpoint;
   }
+  return endpoint;
 }

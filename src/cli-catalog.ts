@@ -1206,11 +1206,33 @@ export function documentedParams(entry: CommandEntry): CommandParam[] {
 // positive integers (a numeric string is accepted): "../users/5" must never
 // reach a path template.
 const ID_PARAM_NAME = /Id\d*$/;
-const POSITIVE_INTEGER = /^[1-9][0-9]*$/;
+const ID_LIST_PARAM = 'ids';
+// Digits only, after trimming; leading zeros are allowed ("05" is 5).
+const DIGITS = /^[0-9]+$/;
 
-function isPositiveIntegerId(value: unknown): boolean {
-  return (typeof value === 'number' && Number.isSafeInteger(value) && value > 0)
-    || (typeof value === 'string' && POSITIVE_INTEGER.test(value) && Number.isSafeInteger(Number(value)));
+/** A positive integer, from a number or a digit string (" 05 " is 5); otherwise undefined. */
+function toPositiveInteger(value: unknown): number | undefined {
+  const text = typeof value === 'string' ? value.trim() : undefined;
+  const n = typeof value === 'number' ? value : text !== undefined && DIGITS.test(text) ? Number(text) : NaN;
+  return Number.isSafeInteger(n) && n > 0 ? n : undefined;
+}
+
+/** Documented numeric entity-ID params; each is interpolated into a request path. */
+function idParams(entry: CommandEntry): CommandParam[] {
+  return entry.params.filter((p) => p.type === 'number' && !p.deprecated && ID_PARAM_NAME.test(p.name));
+}
+
+/**
+ * Throws when an entity-ID param is not a positive integer. Runs in
+ * executeCommand, so every entry point (execute_command and direct Node
+ * callers) is covered: "6/full_on" or "../users/5" never reaches a path.
+ */
+function assertIdParams(entry: CommandEntry, params: Record<string, unknown>): void {
+  for (const p of idParams(entry)) {
+    if (params[p.name] !== undefined && toPositiveInteger(params[p.name]) === undefined) {
+      throw new Error(`Param "${p.name}" for ${entry.group}.${entry.command} must be a positive integer ID.`);
+    }
+  }
 }
 
 export function validateCommandParams(
@@ -1252,8 +1274,18 @@ export function validateCommandParams(
     if (p.required && checked[p.name] === undefined) {
       errors.push(`Missing required param "${p.name}" (${p.type}) for ${entry.group}.${entry.command}: ${p.description}`);
     }
-    if (p.type === 'number' && !p.deprecated && ID_PARAM_NAME.test(p.name) && checked[p.name] !== undefined && !isPositiveIntegerId(checked[p.name])) {
+  }
+  for (const p of idParams(entry)) {
+    if (checked[p.name] !== undefined && toPositiveInteger(checked[p.name]) === undefined) {
       errors.push(`Param "${p.name}" for ${entry.group}.${entry.command} must be a positive integer ID.`);
+    }
+  }
+  // Bulk commands take their IDs as an array.
+  const idList = entry.params.find((p) => p.name === ID_LIST_PARAM && p.type === 'array');
+  if (idList && checked[ID_LIST_PARAM] !== undefined) {
+    const ids = checked[ID_LIST_PARAM];
+    if (!Array.isArray(ids) || ids.length === 0 || ids.some((id) => toPositiveInteger(id) === undefined)) {
+      errors.push(`Param "${ID_LIST_PARAM}" for ${entry.group}.${entry.command} must be a non-empty array of positive integer IDs.`);
     }
   }
 
@@ -1499,12 +1531,6 @@ function configEntityAdapters(entityIdParam: string, commands: {
   return out;
 }
 
-/** A positive integer, from a number or a plain digit string ("12"); otherwise undefined. */
-function toPositiveInteger(value: unknown): number | undefined {
-  const n = typeof value === 'number' ? value : typeof value === 'string' && POSITIVE_INTEGER.test(value) ? Number(value) : NaN;
-  return Number.isSafeInteger(n) && n > 0 ? n : undefined;
-}
-
 /** users.*ApiKey core functions resolve a user by `userRef` (an ID string or an email). */
 const userRefFromUserId: ParamAdapter = (p) => {
   if (p.userId === undefined || p.userRef !== undefined) return p;
@@ -1698,8 +1724,8 @@ function bulkRunner(command: typeof BULK_COMMANDS[number]): CommandRunner {
       throw new Error(`experiments.${command} requires "${required}"`);
     }
     const ids = Array.isArray(params.ids) ? params.ids.map(toPositiveInteger) : [];
-    if (ids.some((id) => id === undefined)) {
-      throw new Error(`experiments.${command}: "ids" must be positive integer experiment IDs`);
+    if (ids.length === 0 || ids.some((id) => id === undefined)) {
+      throw new Error(`experiments.${command}: "ids" must be a non-empty array of positive integer experiment IDs`);
     }
     const extra = BULK_EXTRA_ARGS[command].map((name) => params[name]);
     return experimentsCore[command](client, ids, new Map(), ...extra);
@@ -1765,6 +1791,8 @@ const GOAL_ACCESS_COMMANDS = ['grantGoalAccessUser', 'revokeGoalAccessUser', 'gr
  * reads the stored config itself, including secrets that GET would mask. The
  * core only forwards a `config` body, so build that body from the ID.
  */
+const DATASOURCE_CONFIG_COMMANDS = ['testDatasource', 'introspectDatasource', 'validateDatasourceQuery'];
+
 function datasourceRunner(command: string): CommandRunner {
   return async (client, params) => {
     const body: Record<string, unknown> = { datasource_id: params.datasourceId };
@@ -1838,7 +1866,7 @@ const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
     },
   },
   goals: Object.fromEntries(GOAL_ACCESS_COMMANDS.map((c) => [c, accessRunner('goals', c, 'goalId', 'id')])),
-  datasources: Object.fromEntries(['testDatasource', 'introspectDatasource', 'validateDatasourceQuery'].map((c) => [c, datasourceRunner(c)])),
+  datasources: Object.fromEntries(DATASOURCE_CONFIG_COMMANDS.map((c) => [c, datasourceRunner(c)])),
   storageconfigs: {
     // The backend merges only the stored secret key (by storage_config_id); the
     // exporter needs type and properties in the body, so read those first.
@@ -1912,6 +1940,8 @@ export async function executeCommand(
   if (!mod) {
     throw new Error(`Unknown group: "${group}". Available: ${CLI_GROUPS.join(', ')}`);
   }
+
+  assertIdParams(entry, params);
 
   const runner = COMMAND_RUNNERS[group]?.[command];
   if (runner) {

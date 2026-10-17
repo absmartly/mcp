@@ -17,8 +17,10 @@ import {
   type ConsentOptions,
   type ConsentOutcome,
   type OAuthStateStore,
+  HTTP_STATUS_BAD_REQUEST,
   MESSAGE_INVALID_ENDPOINT,
   parseAbsmartlyEndpoint,
+  tryParseAbsmartlyEndpoint,
 } from './oauth/index.js';
 
 type OAuthBindings = Env & { OAUTH_PROVIDER: OAuthHelpers };
@@ -30,7 +32,6 @@ const HOST_COOKIE_PREFIX = 'host';
 // One cookie per upstream login, named after its state token, so parallel logins in the
 // same browser don't overwrite each other's binding.
 const CALLBACK_COOKIE_NAME_PREFIX = 'absmartly-oauth-cb-';
-const HTTP_STATUS_BAD_REQUEST = 400;
 const ENDPOINT_QUERY_PARAM = 'absmartly-endpoint';
 const ENDPOINT_HEADER = 'x-absmartly-endpoint';
 // 0.10.x defaults completeAuthorization to revoking every other grant for the same
@@ -199,12 +200,8 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
         debug('No absmartlyEndpoint in stored state');
         return c.text('Missing ABsmartly endpoint in OAuth state', 400);
       }
-      let parsedEndpoint;
-      try {
-        parsedEndpoint = parseAbsmartlyEndpoint(absmartlyEndpoint);
-      } catch {
-        return c.text(MESSAGE_INVALID_ENDPOINT, HTTP_STATUS_BAD_REQUEST);
-      }
+      const parsedEndpoint = tryParseAbsmartlyEndpoint(absmartlyEndpoint);
+      if (!parsedEndpoint) return c.text(MESSAGE_INVALID_ENDPOINT, HTTP_STATUS_BAD_REQUEST);
       const cleanEndpoint = parsedEndpoint.baseUrl;
       const tokenUrl = `${cleanEndpoint}/auth/oauth/token`;
       const tokenBody = new URLSearchParams({

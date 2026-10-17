@@ -7,9 +7,8 @@ import {
   DEFAULT_API_KEY_USER_EMAIL,
   DEFAULT_API_KEY_USER_NAME,
   detectApiKey,
-  HTTP_STATUS_BAD_REQUEST,
 } from "./shared.js";
-import { MESSAGE_INVALID_ENDPOINT, isValidAbsmartlyEndpoint, parseAbsmartlyEndpoint } from "./oauth/endpoint.js";
+import { HTTP_STATUS_BAD_REQUEST, MESSAGE_INVALID_ENDPOINT, tryParseAbsmartlyEndpoint } from "./oauth/index.js";
 
 export class SessionProvider {
   private apiHandler: any;
@@ -39,14 +38,15 @@ export class SessionProvider {
       });
     }
 
-    if (!isValidAbsmartlyEndpoint(endpoint)) {
+    const parsedEndpoint = tryParseAbsmartlyEndpoint(endpoint);
+    if (!parsedEndpoint) {
       return new Response(MESSAGE_INVALID_ENDPOINT, { status: HTTP_STATUS_BAD_REQUEST, headers: CORS_HEADERS });
     }
 
     const props: ABsmartlyProps = {
       email: DEFAULT_API_KEY_USER_EMAIL,
       name: DEFAULT_API_KEY_USER_NAME,
-      absmartly_endpoint: parseAbsmartlyEndpoint(endpoint).apiUrl,
+      absmartly_endpoint: parsedEndpoint.apiUrl,
       absmartly_api_key: apiKey,
       user_id: DEFAULT_API_KEY_USER_EMAIL,
     };

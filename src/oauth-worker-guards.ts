@@ -1,14 +1,12 @@
 import type { OAuthError, TokenExchangeCallbackOptions } from "@cloudflare/workers-oauth-provider";
 import { debug } from "./config.js";
 import { CORS_HEADERS, type ABsmartlyProps } from "./shared.js";
-import { isTrustedCimdClientId, parseAbsmartlyEndpoint, InvalidEndpointError } from "./oauth/index.js";
+import { HTTP_STATUS_SERVICE_UNAVAILABLE, HTTP_STATUS_UNAUTHORIZED, isTrustedCimdClientId, MESSAGE_INVALID_ENDPOINT, tryParseAbsmartlyEndpoint } from "./oauth/index.js";
 
 const REFRESH_GRANT_TYPE = 'refresh_token';
 const OAUTH_ERROR_INVALID_GRANT = 'invalid_grant';
 const OAUTH_ERROR_TEMPORARILY_UNAVAILABLE = 'temporarily_unavailable';
 const OAUTH_ERROR_INVALID_CLIENT = 'invalid_client';
-const HTTP_STATUS_UNAUTHORIZED = 401;
-const HTTP_STATUS_SERVICE_UNAVAILABLE = 503;
 const USERINFO_PATH = '/auth/oauth/userinfo';
 const TOKEN_PATH = '/token';
 const AUTHORIZE_PATH = '/authorize';
@@ -30,12 +28,9 @@ export async function checkBackendSessionOnRefresh(options: TokenExchangeCallbac
     if (options.grantType !== REFRESH_GRANT_TYPE) return;
     const props = options.props as ABsmartlyProps;
     if (!props?.oauth_jwt || !props.absmartly_endpoint) return;
-    let baseUrl: string;
-    try {
-        baseUrl = parseAbsmartlyEndpoint(props.absmartly_endpoint).baseUrl;
-    } catch (e) {
-        if (!(e instanceof InvalidEndpointError)) throw e;
-        throw new OAuthErrorImpl(OAUTH_ERROR_INVALID_GRANT, { description: `${e.message}. Please sign in again.` });
+    const baseUrl = tryParseAbsmartlyEndpoint(props.absmartly_endpoint)?.baseUrl;
+    if (!baseUrl) {
+        throw new OAuthErrorImpl(OAUTH_ERROR_INVALID_GRANT, { description: `${MESSAGE_INVALID_ENDPOINT}: ${props.absmartly_endpoint}. Please sign in again.` });
     }
     let response: Response;
     try {

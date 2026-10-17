@@ -413,10 +413,13 @@ export default async function runTests() {
       ['sandbox.absmartly.com/v1', 'https://sandbox.absmartly.com/v1'],
       ['https://example.com//tenant//', 'https://example.com/tenant/v1'],
       ['https://example.com/a;b/%7Eops', 'https://example.com/a;b/%7Eops/v1'],
+      ['https://corp.example/absmartly/v2', 'https://corp.example/absmartly/v2/v1'],
+      ['https://corp.example/absmartly/v2/v1', 'https://corp.example/absmartly/v2/v1'],
     ]) {
       assertEquals(new FetchHttpClient(input, { authToken: 't', authType: 'jwt' }).getBaseUrl(), expected, `Base URL: ${input}`);
     }
-    for (const bad of ['https://example.com/?x=1', 'https://example.com/#f', 'https://u:p@example.com', 'ftp://example.com', 'https://example.com/v2', 'https://example.com/V3/', 'https://']) {
+    for (const bad of ['https://example.com/?x=1', 'https://example.com/#f', 'https://u:p@example.com', 'ftp://example.com', 'https://',
+      'https://example.com/a%2f..%2fadmin', 'https://example.com/%2e%2e/admin', 'https://example.com/a%5cb', 'https://example.com/.%2E/x']) {
       let error: any;
       try { new FetchHttpClient(bad, { authToken: 't', authType: 'jwt' }); } catch (e) { error = e; }
       ok(error?.name === 'InvalidEndpointError', `Base URL: ${bad} rejected with InvalidEndpointError`, String(error));

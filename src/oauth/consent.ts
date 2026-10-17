@@ -25,12 +25,11 @@ import {
 } from "./http.js";
 import { renderConsentPage, renderEndpointForm } from "./pages.js";
 import { hasRequiredPkce } from "./pkce.js";
-import { isValidAbsmartlyEndpoint, MESSAGE_INVALID_ENDPOINT, parseAbsmartlyEndpoint } from "./endpoint.js";
+import { canonicalizeEndpoint, MESSAGE_INVALID_ENDPOINT, tryParseAbsmartlyEndpoint } from "./endpoint.js";
+import { HTTP_STATUS_BAD_REQUEST, HTTP_STATUS_SERVICE_UNAVAILABLE } from "./http-status.js";
 import { describeRedirectTarget, isAllowedRedirectUri, isLoopbackRedirectUri, isRegisteredRedirectUri, isSharedCallbackRedirectUri } from "./redirect-policy.js";
 
 const APPROVALS_STATE_KEY_PREFIX = "oauth:approvals:";
-const HTTP_STATUS_BAD_REQUEST = 400;
-const HTTP_STATUS_SERVICE_UNAVAILABLE = 503;
 const ACTION_APPROVE = "approve";
 const ACTION_CANCEL = "cancel";
 const ACTION_SET_ENDPOINT = "set_endpoint";
@@ -101,13 +100,6 @@ function respond<Req extends AuthorizationRequest>(response: OAuthHttpResult): C
   return { type: "respond", response };
 }
 
-/**
- * The canonical form of an ABsmartly endpoint (origin + base path, no API
- * version), or "" when it is empty or invalid. See parseAbsmartlyEndpoint.
- */
-export function normalizeEndpoint(raw: string): string {
-  return isValidAbsmartlyEndpoint(raw) ? parseAbsmartlyEndpoint(raw).baseUrl : "";
-}
 
 // Checks an authorization request against its client. The provider libraries only check
 // redirect_uri when one is supplied, and codes must never reach a redirect outside the
@@ -127,7 +119,25 @@ export function validateAuthorizationRequest(authRequest: AuthorizationRequest, 
 // Remembered approvals are keyed by client_id AND ABsmartly endpoint, so approving a
 // client for one ABsmartly instance does not skip consent for another.
 function approvalKey(clientId: string, endpoint: string): string {
-  return JSON.stringify([clientId, endpoint.replace(/\/+$/, "")]);
+  return JSON.stringify([clientId, canonicalizeEndpoint(endpoint) || endpoint.replace(/\/+$/, "")]);
+}
+
+/**
+ * Whether `approvals` holds an approval for this client and endpoint. Keys
+ * written before endpoints were canonicalised (e.g. with "/v1", or an
+ * upper-case host) are canonicalised before comparing, so they still match.
+ */
+function hasApproval(approvals: string[], clientId: string, endpoint: string): boolean {
+  const wanted = approvalKey(clientId, endpoint);
+  return approvals.some((stored) => {
+    if (stored === wanted) return true;
+    try {
+      const [storedClient, storedEndpoint] = JSON.parse(stored) as [string, string];
+      return typeof storedEndpoint === "string" && approvalKey(storedClient, storedEndpoint) === wanted;
+    } catch {
+      return false;
+    }
+  });
 }
 
 async function getApprovals(cookieHeader: string | null | undefined, options: ConsentOptions): Promise<string[]> {
@@ -213,10 +223,9 @@ export async function beginAuthorization<Req extends AuthorizationRequest>(
   const { authRequest, cookieHeader } = params;
   // An endpoint from the request or a stored client mapping is validated here,
   // where it enters consent, and kept in its canonical form.
-  if (params.endpoint && !isValidAbsmartlyEndpoint(params.endpoint)) {
-    return respond(textResult(HTTP_STATUS_BAD_REQUEST, MESSAGE_INVALID_ENDPOINT));
-  }
-  const endpoint = params.endpoint ? normalizeEndpoint(params.endpoint) : null;
+  // An endpoint that does not parse (e.g. a stale stored mapping) is treated
+  // as absent, so the user is asked for it instead of being stuck on a 400.
+  const endpoint = tryParseAbsmartlyEndpoint(params.endpoint)?.baseUrl ?? null;
   const client = await options.lookupClient(authRequest.clientId);
   const invalid = validateAuthorizationRequest(authRequest, client);
   if (invalid || !client) return respond(invalid ?? textResult(HTTP_STATUS_BAD_REQUEST, MESSAGE_CLIENT_NOT_FOUND));
@@ -226,7 +235,7 @@ export async function beginAuthorization<Req extends AuthorizationRequest>(
   // so without one there is nothing meaningful to match against.
   if (endpointReady && options.rememberApprovals && endpoint) {
     const approvals = await getApprovals(cookieHeader, options);
-    if (approvals.includes(approvalKey(authRequest.clientId, endpoint))) {
+    if (hasApproval(approvals, authRequest.clientId, endpoint)) {
       return { type: "approved", authRequest, client, endpoint, setCookies: [] };
     }
   }
@@ -277,7 +286,7 @@ export async function submitConsent<Req extends AuthorizationRequest>(
 
   if (form.action === ACTION_SET_ENDPOINT) {
     if (!(form.endpoint || "").trim()) return respond(textResult(HTTP_STATUS_BAD_REQUEST, MESSAGE_ENDPOINT_REQUIRED));
-    const endpoint = normalizeEndpoint(form.endpoint || "");
+    const endpoint = canonicalizeEndpoint(form.endpoint || "");
     if (!endpoint) return respond(textResult(HTTP_STATUS_BAD_REQUEST, MESSAGE_INVALID_ENDPOINT));
     transaction.absmartlyEndpoint = endpoint;
     try {
@@ -291,7 +300,11 @@ export async function submitConsent<Req extends AuthorizationRequest>(
 
   if (form.action !== ACTION_APPROVE) return respond(textResult(HTTP_STATUS_BAD_REQUEST, MESSAGE_INVALID_ACTION));
 
-  const endpoint = transaction.absmartlyEndpoint;
+  // A transaction stored before endpoints were validated may hold a bad one:
+  // reject it here, before onApprove persists it anywhere.
+  const storedEndpoint = transaction.absmartlyEndpoint;
+  const endpoint = storedEndpoint ? canonicalizeEndpoint(storedEndpoint) : storedEndpoint;
+  if (storedEndpoint && !endpoint) return respond(textResult(HTTP_STATUS_BAD_REQUEST, MESSAGE_INVALID_ENDPOINT));
   if (options.requireEndpoint && !endpoint) return respond(textResult(HTTP_STATUS_BAD_REQUEST, MESSAGE_ENDPOINT_REQUIRED));
 
   if (options.onApprove) {
