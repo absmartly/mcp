@@ -3,6 +3,7 @@
 // All core functions follow the signature: (client: APIClient, params: object) => Promise<CommandResult<T>>
 
 import type { ApiClientLike } from "./api-client-like.js";
+import { withPathIdGuard } from "./path-id-guard.js";
 
 // Static imports for all core modules — required for Cloudflare Workers bundling.
 import * as coreExperiments from "@absmartly/cli/core/experiments";
@@ -82,6 +83,8 @@ export interface CommandParam {
   type: string;
   required: boolean;
   description: string;
+  /** Still accepted for backward compatibility; documented replacements are preferred. */
+  deprecated?: boolean;
 }
 
 export interface CommandEntry {
@@ -129,15 +132,15 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         example: { state: 'running', items: 10 },
       },
       searchExperiments: {
-        description: 'Search experiments by name with pagination',
+        description: 'Search experiments by name',
         params: [
           { name: 'search', type: 'string', required: true, description: 'Search query' },
-          { name: 'items', type: 'number', required: false, description: 'Results per page (default: 20)' },
-          { name: 'page', type: 'number', required: false, description: 'Page number (default: 1)' },
-          { name: 'show', type: 'array', required: false, description: 'Extra fields to include' },
-          { name: 'exclude', type: 'array', required: false, description: 'Fields to exclude' },
+          { name: 'items', type: 'number', required: false, description: 'Maximum number of results (default: 20)' },
+          { name: 'page', type: 'number', required: false, description: 'Ignored; accepted for backward compatibility', deprecated: true },
+          { name: 'show', type: 'array', required: false, description: 'Ignored; accepted for backward compatibility', deprecated: true },
+          { name: 'exclude', type: 'array', required: false, description: 'Ignored; accepted for backward compatibility', deprecated: true },
         ],
-        returns: 'Array of matching experiment summaries',
+        returns: 'Array of matching experiments',
       },
       getExperiment: {
         description: 'Get detailed information about a specific experiment',
@@ -210,14 +213,16 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         dangerous: true,
       },
       restartExperiment: {
-        description: 'Restart a stopped experiment with optional changes',
+        description: 'Restart a stopped experiment as a new iteration',
         params: [
           { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
           { name: 'reason', type: 'string', required: true, description: 'Restart reason (required by backend). Same enum as stopExperiment: hypothesis_rejected, hypothesis_iteration, user_feedback, data_issue, implementation_issue, experiment_setup_issue, guardrail_metric_impact, secondary_metric_impact, operational_decision, performance_issue, testing, tracking_issue, code_cleaned_up, other' },
-          { name: 'type', type: 'string', required: false, description: 'Restart type' },
+          { name: 'type', type: 'string', required: false, description: 'Restart as a different type: feature or experiment' },
+          { name: 'state', type: 'string', required: false, description: 'State of the new iteration: running or development' },
+          { name: 'reshuffle', type: 'boolean', required: false, description: 'Reshuffle variant assignment for the new iteration' },
           { name: 'note', type: 'string', required: false, description: 'Optional note' },
         ],
-        returns: 'Restart result',
+        returns: 'Restart result with the new iteration ID',
         dangerous: true,
       },
       developmentExperiment: {
@@ -261,25 +266,29 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         returns: 'Array of differences between experiments',
       },
       exportExperiment: {
-        description: 'Export experiment data',
+        description: 'Start a data export for an experiment (creates an export config)',
         params: [
           { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
-          { name: 'format', type: 'string', required: false, description: 'Export format' },
+          { name: 'format', type: 'string', required: false, description: 'Ignored; accepted for backward compatibility', deprecated: true },
         ],
-        returns: 'Exported experiment data',
+        returns: 'Experiment ID and the created export config ID',
       },
       generateTemplate: {
-        description: 'Generate a markdown template from an experiment',
+        description: 'Generate a blank markdown experiment template to fill in and pass to createExperimentFromTemplate. To start from an existing experiment, use cloneExperiment instead.',
         params: [
-          { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
-          { name: 'apiEndpoint', type: 'string', required: false, description: 'API endpoint (auto-filled)' },
+          { name: 'name', type: 'string', required: false, description: 'Experiment name to put in the template (default: My Experiment)' },
+          { name: 'type', type: 'string', required: false, description: 'Experiment type: test or feature (default: test)' },
+          { name: 'experimentId', type: 'number', required: false, description: 'Ignored: use cloneExperiment to start from an existing experiment', deprecated: true },
         ],
         returns: 'Markdown template string',
       },
       estimateParticipants: {
-        description: 'Estimate required participants for an experiment',
+        description: 'Estimate how many units are available for a new experiment, from recent exposures',
         params: [
-          { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
+          { name: 'unitType', type: 'string', required: true, description: 'Unit type name or ID (e.g. user_id)' },
+          { name: 'application', type: 'array', required: false, description: 'Application names or IDs to restrict to' },
+          { name: 'from', type: 'string', required: false, description: 'Look-back start: relative (30d, 2w), ISO date, or epoch ms (default: 30d)' },
+          { name: 'audience', type: 'string', required: false, description: 'Audience filter as a JSON string, e.g. {"filter":{"and":[...]}}' },
         ],
         returns: 'Participant estimation data',
       },
@@ -336,11 +345,11 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         returns: 'Updated experiment metrics',
       },
       confirmMetricImpact: {
-        description: 'Confirm expected metric impact direction',
+        description: 'Confirm the observed impact of a metric on an experiment',
         params: [
           { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
           { name: 'metricId', type: 'number', required: true, description: 'Metric ID' },
-          { name: 'impact', type: 'string', required: true, description: 'Expected impact direction' },
+          { name: 'impact', type: 'string', required: false, description: 'Ignored; accepted for backward compatibility', deprecated: true },
         ],
         returns: 'Confirmation result',
       },
@@ -413,7 +422,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
       dismissAlert: {
         description: 'Dismiss an experiment alert',
         params: [
-          { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
+          { name: 'experimentId', type: 'number', required: false, description: 'Ignored; accepted for backward compatibility', deprecated: true },
           { name: 'alertId', type: 'number', required: true, description: 'Alert ID' },
         ],
         returns: 'Dismissal result',
@@ -428,7 +437,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
       dismissRecommendedAction: {
         description: 'Dismiss a recommended action',
         params: [
-          { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
+          { name: 'experimentId', type: 'number', required: false, description: 'Ignored; accepted for backward compatibility', deprecated: true },
           { name: 'actionId', type: 'number', required: true, description: 'Action ID' },
         ],
         returns: 'Dismissal result',
@@ -465,7 +474,8 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         params: [
           { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
           { name: 'userId', type: 'number', required: true, description: 'User ID' },
-          { name: 'role', type: 'string', required: false, description: 'Access role' },
+          { name: 'role', type: 'string', required: true, description: 'Asset role: its ID, or its name (e.g. Editor). See assetroles.listAssetRoles' },
+          { name: 'roleId', type: 'number', required: false, description: 'Deprecated alias of role (an asset role ID)', deprecated: true },
         ],
         returns: 'Grant result',
       },
@@ -474,6 +484,8 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         params: [
           { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
           { name: 'userId', type: 'number', required: true, description: 'User ID' },
+          { name: 'role', type: 'string', required: true, description: 'Asset role: its ID, or its name (e.g. Editor). See assetroles.listAssetRoles' },
+          { name: 'roleId', type: 'number', required: false, description: 'Deprecated alias of role (an asset role ID)', deprecated: true },
         ],
         returns: 'Revocation result',
       },
@@ -489,7 +501,8 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         params: [
           { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
           { name: 'teamId', type: 'number', required: true, description: 'Team ID' },
-          { name: 'role', type: 'string', required: false, description: 'Access role' },
+          { name: 'role', type: 'string', required: true, description: 'Asset role: its ID, or its name (e.g. Editor). See assetroles.listAssetRoles' },
+          { name: 'roleId', type: 'number', required: false, description: 'Deprecated alias of role (an asset role ID)', deprecated: true },
         ],
         returns: 'Grant result',
       },
@@ -498,6 +511,8 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         params: [
           { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
           { name: 'teamId', type: 'number', required: true, description: 'Team ID' },
+          { name: 'role', type: 'string', required: true, description: 'Asset role: its ID, or its name (e.g. Editor). See assetroles.listAssetRoles' },
+          { name: 'roleId', type: 'number', required: false, description: 'Deprecated alias of role (an asset role ID)', deprecated: true },
         ],
         returns: 'Revocation result',
       },
@@ -529,8 +544,9 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
       archiveAnnotation: {
         description: 'Archive an annotation',
         params: [
-          { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
+          { name: 'experimentId', type: 'number', required: false, description: 'Ignored; accepted for backward compatibility', deprecated: true },
           { name: 'annotationId', type: 'number', required: true, description: 'Annotation ID' },
+          { name: 'unarchive', type: 'boolean', required: false, description: 'Set true to unarchive instead' },
         ],
         returns: 'Archive result',
         dangerous: true,
@@ -585,8 +601,10 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
       },
       // Custom fields (experiment-level)
       listCustomFields: {
-        description: 'List custom fields for experiments',
-        params: [],
+        description: 'List custom field definitions for one experiment type',
+        params: [
+          { name: 'type', type: 'string', required: false, description: 'Custom section type: test or feature (default: test)' },
+        ],
         returns: 'Array of custom field definitions',
       },
       getCustomField: {
@@ -618,11 +636,6 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         ],
         returns: 'Archive result',
         dangerous: true,
-      },
-      refreshFields: {
-        description: 'Refresh custom fields cache for experiments',
-        params: [],
-        returns: 'Refresh result',
       },
     },
   },
@@ -748,6 +761,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           { name: 'metricId', type: 'number', required: true, description: 'Metric ID' },
           { name: 'userId', type: 'number', required: true, description: 'User ID' },
           { name: 'assetRoleId', type: 'number', required: true, description: 'Asset role ID' },
+          { name: 'roleId', type: 'number', required: false, description: 'Deprecated alias of assetRoleId', deprecated: true },
         ],
         returns: 'Grant result',
       },
@@ -757,6 +771,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           { name: 'metricId', type: 'number', required: true, description: 'Metric ID' },
           { name: 'userId', type: 'number', required: true, description: 'User ID' },
           { name: 'assetRoleId', type: 'number', required: true, description: 'Asset role ID' },
+          { name: 'roleId', type: 'number', required: false, description: 'Deprecated alias of assetRoleId', deprecated: true },
         ],
         returns: 'Revocation result',
       },
@@ -771,6 +786,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           { name: 'metricId', type: 'number', required: true, description: 'Metric ID' },
           { name: 'teamId', type: 'number', required: true, description: 'Team ID' },
           { name: 'assetRoleId', type: 'number', required: true, description: 'Asset role ID' },
+          { name: 'roleId', type: 'number', required: false, description: 'Deprecated alias of assetRoleId', deprecated: true },
         ],
         returns: 'Grant result',
       },
@@ -780,6 +796,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           { name: 'metricId', type: 'number', required: true, description: 'Metric ID' },
           { name: 'teamId', type: 'number', required: true, description: 'Team ID' },
           { name: 'assetRoleId', type: 'number', required: true, description: 'Asset role ID' },
+          { name: 'roleId', type: 'number', required: false, description: 'Deprecated alias of assetRoleId', deprecated: true },
         ],
         returns: 'Revocation result',
       },
@@ -796,11 +813,11 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
       followGoal: { description: 'Follow a goal', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }], returns: 'Follow result' },
       unfollowGoal: { description: 'Unfollow a goal', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }], returns: 'Unfollow result' },
       listGoalAccessUsers: { description: 'List users with goal access', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }], returns: 'Array of user access entries' },
-      grantGoalAccessUser: { description: 'Grant user goal access', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }, { name: 'userId', type: 'number', required: true, description: 'User ID' }], returns: 'Grant result' },
-      revokeGoalAccessUser: { description: 'Revoke user goal access', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }, { name: 'userId', type: 'number', required: true, description: 'User ID' }], returns: 'Revocation result' },
+      grantGoalAccessUser: { description: 'Grant user goal access', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }, { name: 'userId', type: 'number', required: true, description: 'User ID' }, { name: 'role', type: 'string', required: true, description: 'Asset role: its ID, or its name (e.g. Editor). See assetroles.listAssetRoles' }, { name: 'roleId', type: 'number', required: false, description: 'Deprecated alias of role (an asset role ID)', deprecated: true }], returns: 'Grant result' },
+      revokeGoalAccessUser: { description: 'Revoke user goal access', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }, { name: 'userId', type: 'number', required: true, description: 'User ID' }, { name: 'role', type: 'string', required: true, description: 'Asset role: its ID, or its name (e.g. Editor). See assetroles.listAssetRoles' }, { name: 'roleId', type: 'number', required: false, description: 'Deprecated alias of role (an asset role ID)', deprecated: true }], returns: 'Revocation result' },
       listGoalAccessTeams: { description: 'List teams with goal access', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }], returns: 'Array of team access entries' },
-      grantGoalAccessTeam: { description: 'Grant team goal access', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }, { name: 'teamId', type: 'number', required: true, description: 'Team ID' }], returns: 'Grant result' },
-      revokeGoalAccessTeam: { description: 'Revoke team goal access', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }, { name: 'teamId', type: 'number', required: true, description: 'Team ID' }], returns: 'Revocation result' },
+      grantGoalAccessTeam: { description: 'Grant team goal access', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }, { name: 'teamId', type: 'number', required: true, description: 'Team ID' }, { name: 'role', type: 'string', required: true, description: 'Asset role: its ID, or its name (e.g. Editor). See assetroles.listAssetRoles' }, { name: 'roleId', type: 'number', required: false, description: 'Deprecated alias of role (an asset role ID)', deprecated: true }], returns: 'Grant result' },
+      revokeGoalAccessTeam: { description: 'Revoke team goal access', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }, { name: 'teamId', type: 'number', required: true, description: 'Team ID' }, { name: 'role', type: 'string', required: true, description: 'Asset role: its ID, or its name (e.g. Editor). See assetroles.listAssetRoles' }, { name: 'roleId', type: 'number', required: false, description: 'Deprecated alias of role (an asset role ID)', deprecated: true }], returns: 'Revocation result' },
     },
   },
 
@@ -839,9 +856,9 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
       updateUser: { description: 'Update a user', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated user' },
       archiveUser: { description: 'Archive a user', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }], returns: 'Archive result', dangerous: true },
       resetUserPassword: { description: 'Reset a user password', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }], returns: 'Reset result', dangerous: true },
-      listUserApiKeys: { description: 'List API keys for a user', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }], returns: 'Array of API keys' },
-      createUserApiKey: { description: 'Create an API key for a user', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }, { name: 'data', type: 'object', required: false, description: 'Key data' }], returns: 'Created API key' },
-      deleteUserApiKey: { description: 'Delete a user API key', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }, { name: 'keyId', type: 'number', required: true, description: 'API key ID' }], returns: 'Deletion result', dangerous: true },
+      listUserApiKeys: { description: 'List API keys for a user', params: [{ name: 'userId', type: 'string', required: true, description: 'User ID or email' }], returns: 'Array of API keys' },
+      createUserApiKey: { description: 'Create an API key for a user', params: [{ name: 'userId', type: 'string', required: true, description: 'User ID or email' }, { name: 'data', type: 'object', required: false, description: 'Key data' }], returns: 'Created API key' },
+      deleteUserApiKey: { description: 'Delete a user API key', params: [{ name: 'userId', type: 'string', required: true, description: 'User ID or email' }, { name: 'keyId', type: 'number', required: true, description: 'API key ID' }], returns: 'Deletion result', dangerous: true },
     },
   },
 
@@ -931,7 +948,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
       createAuthApiKey: { description: 'Create an API key for yourself', params: [{ name: 'data', type: 'object', required: false, description: 'Key data' }], returns: 'Created API key' },
       updateAuthApiKey: { description: 'Update one of your API keys', params: [{ name: 'keyId', type: 'number', required: true, description: 'API key ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated API key' },
       deleteAuthApiKey: { description: 'Delete one of your API keys', params: [{ name: 'keyId', type: 'number', required: true, description: 'API key ID' }], returns: 'Deletion result', dangerous: true },
-      resetMyPassword: { description: 'Reset your own password', params: [], returns: 'Reset result', dangerous: true },
+      resetMyPassword: { description: 'Change your own password', params: [{ name: 'oldPassword', type: 'string', required: true, description: 'Current password' }, { name: 'newPassword', type: 'string', required: true, description: 'New password' }], returns: 'Reset result', dangerous: true },
     },
   },
 
@@ -1010,10 +1027,10 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   insights: {
     description: 'Analytics insights',
     commands: {
-      getVelocityInsights: { description: 'Get experiment velocity insights', params: [{ name: 'params', type: 'object', required: false, description: 'Filter parameters' }], returns: 'Velocity insights data' },
-      getVelocityInsightsDetail: { description: 'Get detailed velocity insights', params: [{ name: 'params', type: 'object', required: false, description: 'Filter parameters' }], returns: 'Detailed velocity data' },
-      getDecisionInsights: { description: 'Get decision-making insights', params: [{ name: 'params', type: 'object', required: false, description: 'Filter parameters' }], returns: 'Decision insights data' },
-      getDecisionInsightsHistory: { description: 'Get decision insights history', params: [{ name: 'params', type: 'object', required: false, description: 'Filter parameters' }], returns: 'Decision insights history' },
+      getVelocityInsights: { description: 'Get experiment velocity insights', params: [{ name: 'from', type: 'string', required: true, description: 'Period start date, e.g. 2026-01-01 or 2026-01-01T00:00:00Z' }, { name: 'to', type: 'string', required: true, description: 'Period end date' }, { name: 'aggregation', type: 'string', required: true, description: 'Bucket size: day, week or month' }, { name: 'unitTypes', type: 'string', required: false, description: 'Unit type names or IDs (comma-separated)' }, { name: 'teams', type: 'string', required: false, description: 'Team names or IDs (comma-separated)' }, { name: 'owners', type: 'string', required: false, description: 'Owner emails or IDs (comma-separated)' }, { name: 'params', type: 'object', required: false, description: 'Deprecated: the same fields nested in one object', deprecated: true }], returns: 'Velocity insights data' },
+      getVelocityInsightsDetail: { description: 'Get detailed velocity insights', params: [{ name: 'from', type: 'string', required: true, description: 'Period start date, e.g. 2026-01-01 or 2026-01-01T00:00:00Z' }, { name: 'to', type: 'string', required: true, description: 'Period end date' }, { name: 'aggregation', type: 'string', required: true, description: 'Bucket size: day, week or month' }, { name: 'teams', type: 'string', required: false, description: 'Team names or IDs (comma-separated)' }, { name: 'applications', type: 'string', required: false, description: 'Application names or IDs (comma-separated)' }, { name: 'params', type: 'object', required: false, description: 'Deprecated: the same fields nested in one object', deprecated: true }], returns: 'Detailed velocity data' },
+      getDecisionInsights: { description: 'Get decision-making insights', params: [{ name: 'from', type: 'string', required: true, description: 'Period start date, e.g. 2026-01-01 or 2026-01-01T00:00:00Z' }, { name: 'to', type: 'string', required: true, description: 'Period end date' }, { name: 'aggregation', type: 'string', required: true, description: 'Bucket size: day, week or month' }, { name: 'unitTypes', type: 'string', required: false, description: 'Unit type names or IDs (comma-separated)' }, { name: 'teams', type: 'string', required: false, description: 'Team names or IDs (comma-separated)' }, { name: 'owners', type: 'string', required: false, description: 'Owner emails or IDs (comma-separated)' }, { name: 'params', type: 'object', required: false, description: 'Deprecated: the same fields nested in one object', deprecated: true }], returns: 'Decision insights data' },
+      getDecisionInsightsHistory: { description: 'Get decision insights history', params: [{ name: 'from', type: 'string', required: true, description: 'Period start date, e.g. 2026-01-01 or 2026-01-01T00:00:00Z' }, { name: 'to', type: 'string', required: true, description: 'Period end date' }, { name: 'aggregation', type: 'string', required: true, description: 'Bucket size: day, week or month' }, { name: 'teams', type: 'string', required: false, description: 'Team names or IDs (comma-separated)' }, { name: 'applications', type: 'string', required: false, description: 'Application names or IDs (comma-separated)' }, { name: 'params', type: 'object', required: false, description: 'Deprecated: the same fields nested in one object', deprecated: true }], returns: 'Decision insights history' },
     },
   },
 
@@ -1036,9 +1053,9 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
       createDatasource: { description: 'Create a data source', params: [{ name: 'data', type: 'object', required: true, description: 'Datasource config' }], returns: 'Created datasource' },
       updateDatasource: { description: 'Update a data source', params: [{ name: 'datasourceId', type: 'number', required: true, description: 'Datasource ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated datasource' },
       archiveDatasource: { description: 'Archive a data source', params: [{ name: 'datasourceId', type: 'number', required: true, description: 'Datasource ID' }], returns: 'Archive result', dangerous: true },
-      testDatasource: { description: 'Test a data source connection', params: [{ name: 'datasourceId', type: 'number', required: true, description: 'Datasource ID' }], returns: 'Test result' },
-      introspectDatasource: { description: 'Introspect a data source schema', params: [{ name: 'datasourceId', type: 'number', required: true, description: 'Datasource ID' }], returns: 'Schema information' },
-      validateDatasourceQuery: { description: 'Validate a datasource query', params: [{ name: 'datasourceId', type: 'number', required: true, description: 'Datasource ID' }, { name: 'query', type: 'string', required: true, description: 'SQL query to validate' }], returns: 'Validation result' },
+      testDatasource: { description: 'Test a saved data source connection. Stored secrets are used server-side, so they never pass through MCP.', params: [{ name: 'datasourceId', type: 'number', required: false, description: 'Datasource ID: tests the saved datasource with its stored secrets' }, { name: 'config', type: 'object', required: false, description: 'Instead of datasourceId: a whole datasource definition to test, sent as the request body. Include datasource_id in it to reuse stored secrets for fields left as "***".' }], returns: 'Test result' },
+      introspectDatasource: { description: 'Introspect a saved data source schema (tables and columns)', params: [{ name: 'datasourceId', type: 'number', required: false, description: 'Datasource ID. Omit to introspect an unsaved definition given whole in config' }, { name: 'config', type: 'object', required: false, description: 'An unsaved datasource definition, used when datasourceId is omitted' }], returns: 'Schema data' },
+      validateDatasourceQuery: { description: 'Validate a read-only SQL query against a saved data source', params: [{ name: 'datasourceId', type: 'number', required: false, description: 'Datasource ID. Omit to validate against an unsaved definition given whole in config' }, { name: 'query', type: 'string', required: false, description: 'SQL query to validate (required with datasourceId; otherwise put it in config)' }, { name: 'config', type: 'object', required: false, description: 'An unsaved datasource definition, used when datasourceId is omitted' }], returns: 'Validation result' },
     },
   },
 
@@ -1081,15 +1098,15 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
     description: 'Platform configuration',
     commands: {
       listPlatformConfigs: { description: 'List platform configurations', params: [], returns: 'Array of platform configs' },
-      getPlatformConfig: { description: 'Get platform config', params: [{ name: 'configKey', type: 'string', required: true, description: 'Config key' }], returns: 'Config value' },
-      updatePlatformConfig: { description: 'Update platform config', params: [{ name: 'configKey', type: 'string', required: true, description: 'Config key' }, { name: 'data', type: 'object', required: true, description: 'New config value' }], returns: 'Updated config', dangerous: true },
+      getPlatformConfig: { description: 'Get platform config', params: [{ name: 'configKey', type: 'string', required: true, description: 'Config ID or name (e.g. experiment_form_team_visibility)' }], returns: 'Config value' },
+      updatePlatformConfig: { description: 'Update platform config', params: [{ name: 'configKey', type: 'string', required: true, description: 'Config ID or name (e.g. experiment_form_team_visibility)' }, { name: 'data', type: 'object', required: true, description: 'New config value' }], returns: 'Updated config', dangerous: true },
     },
   },
 
   activity: {
     description: 'Activity feed',
     commands: {
-      listActivity: { description: 'List activity feed entries', params: [{ name: 'params', type: 'object', required: false, description: 'Filter parameters' }], returns: 'Array of activity entries' },
+      listActivity: { description: 'List activity feed entries across recent experiments', params: [{ name: 'experiments', type: 'number', required: false, description: 'Number of recent experiments to scan (default: 50)' }, { name: 'limit', type: 'number', required: false, description: 'Maximum entries to return (default: 20)' }, { name: 'since', type: 'number', required: false, description: 'Only entries after this time, epoch ms' }, { name: 'state', type: 'string', required: false, description: 'Only experiments in this state' }, { name: 'search', type: 'string', required: false, description: 'Only experiments whose name matches' }, { name: 'sort', type: 'string', required: false, description: 'Sort experiments by updated_at or created_at' }, { name: 'includeNotes', type: 'boolean', required: false, description: 'Include note text and resolve user/entity names' }, { name: 'params', type: 'object', required: false, description: 'Deprecated: the same fields nested in one object', deprecated: true }], returns: 'Array of activity entries' },
     },
   },
 
@@ -1103,8 +1120,8 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   events: {
     description: 'Event management',
     commands: {
-      listEvents: { description: 'List events', params: [{ name: 'params', type: 'object', required: false, description: 'Filter parameters' }], returns: 'Array of events' },
-      listEventsHistory: { description: 'List event history', params: [{ name: 'params', type: 'object', required: false, description: 'Filter parameters' }], returns: 'Array of event history entries' },
+      listEvents: { description: 'List events', params: [{ name: 'from', type: 'number', required: false, description: 'Start time, epoch ms' }, { name: 'to', type: 'number', required: false, description: 'End time, epoch ms' }, { name: 'applications', type: 'array', required: false, description: 'Application IDs' }, { name: 'unitTypes', type: 'array', required: false, description: 'Unit type IDs' }, { name: 'eventTypes', type: 'array', required: false, description: 'Event types, e.g. exposure, goal' }, { name: 'eventNames', type: 'array', required: false, description: 'Event (goal or experiment) names' }, { name: 'unitUids', type: 'array', required: false, description: 'Unit UIDs' }, { name: 'environmentTypes', type: 'array', required: false, description: 'Environment types, e.g. production' }, { name: 'validExposures', type: 'boolean', required: false, description: 'true for only valid (effective) exposures, false for only invalid ones' }, { name: 'take', type: 'number', required: false, description: 'Number of events to return' }, { name: 'skip', type: 'number', required: false, description: 'Number of events to skip' }, { name: 'params', type: 'object', required: false, description: 'Deprecated: the same fields nested in one object', deprecated: true }], returns: 'Array of events' },
+      listEventsHistory: { description: 'List event history', params: [{ name: 'from', type: 'number', required: false, description: 'Start time, epoch ms' }, { name: 'to', type: 'number', required: false, description: 'End time, epoch ms' }, { name: 'applications', type: 'array', required: false, description: 'Application IDs' }, { name: 'unitTypes', type: 'array', required: false, description: 'Unit type IDs' }, { name: 'eventTypes', type: 'array', required: false, description: 'Event types, e.g. exposure, goal' }, { name: 'eventNames', type: 'array', required: false, description: 'Event (goal or experiment) names' }, { name: 'unitUids', type: 'array', required: false, description: 'Unit UIDs' }, { name: 'environmentTypes', type: 'array', required: false, description: 'Environment types, e.g. production' }, { name: 'period', type: 'string', required: false, description: 'Bucket size, e.g. hour, day' }, { name: 'tzOffset', type: 'number', required: false, description: 'Timezone offset in minutes' }, { name: 'params', type: 'object', required: false, description: 'Deprecated: the same fields nested in one object', deprecated: true }], returns: 'Event counts over time' },
     },
   },
 
@@ -1115,7 +1132,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
       getStorageConfig: { description: 'Get storage config details', params: [{ name: 'configId', type: 'number', required: true, description: 'Config ID' }], returns: 'Storage config details' },
       createStorageConfig: { description: 'Create a storage configuration', params: [{ name: 'data', type: 'object', required: true, description: 'Storage config data' }], returns: 'Created storage config' },
       updateStorageConfig: { description: 'Update a storage configuration', params: [{ name: 'configId', type: 'number', required: true, description: 'Config ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated storage config' },
-      testStorageConfig: { description: 'Test a storage configuration', params: [{ name: 'configId', type: 'number', required: true, description: 'Config ID' }], returns: 'Test result' },
+      testStorageConfig: { description: 'Test a saved storage configuration (bucket access). The stored secret key is used server-side.', params: [{ name: 'configId', type: 'number', required: true, description: 'Storage config ID' }], returns: 'Test result' },
     },
   },
 
@@ -1179,35 +1196,324 @@ function suggestParam(unknown: string, valid: string[]): string | undefined {
   return best?.name;
 }
 
+/** The params to show in docs: every param except deprecated ones, which are still accepted. */
+export function documentedParams(entry: CommandEntry): CommandParam[] {
+  return entry.params.filter((p) => !p.deprecated);
+}
+
+// Entity IDs are interpolated into request paths, so they must be plain
+// positive integers (a numeric string is accepted): "../users/5" must never
+// reach a path template.
+const ID_PARAM_NAME = /Id\d*$/;
+// Any ID-named key, for the params-bag conflict rule.
+const ID_KEY = /^id$|Id\d*$/;
+const USER_REF_KEYS = ['userId', 'userRef'];
+const USER_REF_COMMANDS = new Set(['users.listUserApiKeys', 'users.createUserApiKey', 'users.deleteUserApiKey']);
+const ID_LIST_PARAM = 'ids';
+// Digits only, after trimming; leading zeros are allowed ("05" is 5).
+const DIGITS = /^[0-9]+$/;
+
+/** A positive integer, from a number or a digit string (" 05 " is 5); otherwise undefined. */
+function toPositiveInteger(value: unknown): number | undefined {
+  const text = typeof value === 'string' ? value.trim() : undefined;
+  const n = typeof value === 'number' ? value : text !== undefined && DIGITS.test(text) ? Number(text) : NaN;
+  return Number.isSafeInteger(n) && n > 0 ? n : undefined;
+}
+
+/** Documented numeric entity-ID params; each is interpolated into a request path. */
+function idParams(entry: CommandEntry): CommandParam[] {
+  return entry.params.filter((p) => p.type === 'number' && ID_PARAM_NAME.test(p.name));
+}
+
+// Array params whose items are entity IDs. Other arrays (show, exclude,
+// metrics objects, event filters) are not IDs and are left alone. `ids` on
+// bulk commands must be non-empty (an empty batch is a mistake); a body list
+// like editTeamMemberRoles `roles` may be empty (it clears the roles).
+const ID_LIST_PARAMS = new Set([ID_LIST_PARAM, 'userIds', 'roles']);
+
+/** Params the execute_command tool layer adds itself (src/tools.ts); the audit ignores them too. */
+export const TOOL_INJECTED_PARAMS = {
+  always: ['apiEndpoint'],
+  listCommands: ['items', 'page'],
+} as const;
+const TOOL_INJECTED_PARAM_NAMES = new Set<string>([...TOOL_INJECTED_PARAMS.always, ...TOOL_INJECTED_PARAMS.listCommands]);
+
+/** Commands the tool layer gives default paging (TOOL_INJECTED_PARAMS.listCommands). */
+export function isListCommand(command: string): boolean {
+  return command.startsWith('list') || command.startsWith('search');
+}
+
+const ROLE_ALIAS = 'roleId';
+const ROLE_PARAM = 'role';
+const ASSET_ROLE_ID_PARAM = 'assetRoleId';
+const EXPERIMENT_ID_PARAM = 'experimentId';
+const GOAL_ID_PARAM = 'goalId';
+const USER_ID_PARAM = 'userId';
+
 /**
- * Validate params against a command's schema. Returns an array of error
- * messages. Empty array means the params are valid.
- *
- * - Unknown params: rejected with "did you mean X?" if a close match exists.
- * - Missing required params: rejected with the list of expected params.
- * - Type checks are not enforced here — the underlying core/API functions
- *   still validate values, and string vs number is often coerced by
- *   JSON/MCP transports.
+ * Documented deprecated ID aliases (alias -> canonical), per command. Filled
+ * lazily (the access-command lists are declared further down).
+ */
+let documentedIdAliases: Record<string, Record<string, string>> | undefined;
+function documentedAliases(label: string): Record<string, string> {
+  documentedIdAliases ??= {
+    ...Object.fromEntries(EXPERIMENT_ACCESS_COMMANDS.map((c) => [`experiments.${c}`, { [ROLE_ALIAS]: ROLE_PARAM }])),
+    ...Object.fromEntries(GOAL_ACCESS_COMMANDS.map((c) => [`goals.${c}`, { [ROLE_ALIAS]: ROLE_PARAM }])),
+    ...Object.fromEntries([...METRIC_ACCESS_ROLE_COMMANDS].map((c) => [`metrics.${c}`, { [ROLE_ALIAS]: ASSET_ROLE_ID_PARAM }])),
+  };
+  return documentedIdAliases[label] ?? {};
+}
+
+/**
+ * Core names for ID params on commands now served by a runner, which the
+ * adapter-based derivation below cannot see. In 2.0 these commands went
+ * straight to the core, which read these names.
+ */
+let runnerCoreIdAliases: Record<string, Record<string, string>> | undefined;
+function declaredCoreIdAliases(label: string): Record<string, string> {
+  runnerCoreIdAliases ??= {
+    ...Object.fromEntries(GOAL_ACCESS_COMMANDS.map((c) => [`goals.${c}`, { [ID_PARAM]: GOAL_ID_PARAM }])),
+    'users.updateUser': { [ID_PARAM]: USER_ID_PARAM },
+  };
+  return runnerCoreIdAliases[label] ?? {};
+}
+
+/**
+ * Undocumented core-name aliases for ID params a 2.0 direct executeCommand
+ * caller could pass (e.g. `id` for a documented `goalId`): an ID-named key the
+ * adapter writes the documented ID to unchanged, plus the declared aliases for
+ * runner commands, which the adapter-based derivation cannot see. Cached per
+ * command; it depends only on the static catalog.
+ */
+const coreIdAliasCache = new Map<string, Record<string, string>>();
+function coreIdAliases(entry: CommandEntry): Record<string, string> {
+  const label = `${entry.group}.${entry.command}`;
+  const cached = coreIdAliasCache.get(label);
+  if (cached) return cached;
+  const aliases: Record<string, string> = { ...declaredCoreIdAliases(label) };
+  for (const p of idParams(entry)) {
+    if (p.deprecated) continue;
+    const marker = `__id_${p.name}`;
+    const translated = normalizeCommandParams(entry.group, entry.command, { [p.name]: marker });
+    for (const [key, value] of Object.entries(translated)) {
+      if (key !== p.name && value === marker && ID_KEY.test(key)) aliases[key] = p.name;
+    }
+  }
+  coreIdAliasCache.set(label, aliases);
+  return aliases;
+}
+
+const warnedAliases = new Set<string>();
+function warnDeprecatedAlias(label: string, alias: string, canonical: string): void {
+  const key = `${label}:${alias}`;
+  if (warnedAliases.has(key)) return;
+  warnedAliases.add(key);
+  console.warn(`@absmartly/mcp: "${alias}" for ${label} is deprecated; pass "${canonical}" instead.`);
+}
+
+/**
+ * The one owner of entity-ID params, run at the top of executeCommand (and by
+ * validateCommandParams for friendly errors). Returns new params where:
+ * - the deprecated `params` filter bag is flattened, so its keys go through
+ *   the same rules;
+ * - every documented *Id param and ID array is a positive integer (" 05 " is
+ *   5), so the value the core interpolates into a path is that integer; an
+ *   optional ID given as null is treated as absent;
+ * - a deprecated alias (documented, like roleId, or a 2.0 core name, like
+ *   `id`) is validated and moved to its canonical param, and conflicts with a
+ *   different canonical value; a core-name alias logs a one-time warning;
+ * - any other key passes through unchanged (as in 2.0); an undocumented key
+ *   that reaches a request path is checked where the APIClient builds the
+ *   path (withPathIdGuard), not here;
+ * - a required param that is missing (counting aliases) is reported, so no
+ *   path is built with "undefined".
+ * Throws an IdParamError listing every problem.
+ */
+export function normalizeIdParams(
+  entry: CommandEntry,
+  params: Record<string, unknown>,
+  options: {
+    // executeCommand and the catalog audit skip the required check; only
+    // execute_command validation makes catalog params required.
+    checkRequired?: boolean;
+  } = {},
+): Record<string, unknown> {
+  const checkRequired = options.checkRequired ?? true;
+  const label = `${entry.group}.${entry.command}`;
+  const invalid: string[] = [];
+  const missing: string[] = [];
+  // The deprecated `params` filter bag is flattened here, once, and removed:
+  // nothing downstream sees (or re-flattens) it.
+  const bagParam = entry.params.find((p) => p.name === PARAMS_PARAM && p.deprecated);
+  let input = params;
+  if (bagParam && params[PARAMS_PARAM] !== undefined) {
+    const bag = params[PARAMS_PARAM];
+    if (bag !== null && !isRecord(bag)) {
+      throw new IdParamError([`Param "${PARAMS_PARAM}" for ${label} must be an object.`]);
+    }
+    if (isRecord(bag) && PARAMS_PARAM in bag) {
+      throw new IdParamError([`Param "${PARAMS_PARAM}" for ${label} must not contain a nested "${PARAMS_PARAM}".`]);
+    }
+    // As in 2.0 the top level wins when flattening; for an ID key a
+    // disagreeing bag value is an error instead (a silently ignored ID could
+    // target the wrong entity). Tool-injected defaults (paging) lose to the
+    // bag's own value.
+    if (isRecord(bag)) {
+      const conflicts = Object.keys(bag).filter((key) =>
+        params[key] !== undefined && ID_KEY.test(key) && !sameParamValue(key, params[key], bag[key]));
+      if (conflicts.length > 0) {
+        throw new IdParamError(conflicts.map((key) =>
+          `Param "${key}" for ${label} is given both at the top level and in "${PARAMS_PARAM}" with different values; pass it once.`));
+      }
+    }
+    const injectedOverridden = isRecord(bag) ? Object.keys(bag).filter((key) => TOOL_INJECTED_PARAM_NAMES.has(key)) : [];
+    const withoutInjected = Object.fromEntries(Object.entries(params).filter(([key]) => !injectedOverridden.includes(key)));
+    input = flatten(withoutInjected, PARAMS_PARAM);
+  }
+
+  const documented = documentedAliases(label);
+  const allCoreAliases = coreIdAliases(entry);
+  const coreAliases = Object.fromEntries(Object.entries(allCoreAliases).filter(([alias]) => !(alias in documented)));
+  const aliases: Record<string, string> = { ...coreAliases, ...documented };
+  // Every other key passes through unchanged, as in 2.0. Whatever finally
+  // reaches a request path, by any route, is checked at the APIClient boundary
+  // (withPathIdGuard); execute_command also rejects unknown keys up front.
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (!(key in aliases) && !(bagParam && key === PARAMS_PARAM)) out[key] = value;
+  }
+
+  // Canonical params whose alias was supplied: not reported as missing.
+  const aliasSupplied = new Set<string>();
+  for (const [alias, canonical] of Object.entries(aliases)) {
+    const value = input[alias];
+    if (value === undefined) continue;
+    aliasSupplied.add(canonical);
+    if (alias in coreAliases) warnDeprecatedAlias(label, alias, canonical);
+    const id = toPositiveInteger(value);
+    if (id === undefined) {
+      invalid.push(`Param "${alias}" for ${label} must be a positive integer ID.`);
+    } else if (out[canonical] !== undefined && out[canonical] !== null && toPositiveInteger(out[canonical]) !== id) {
+      invalid.push(`Params "${alias}" and "${canonical}" for ${label} disagree; pass only "${canonical}".`);
+    } else {
+      out[canonical] = out[canonical] ?? id;
+    }
+  }
+
+  // A user ref (users.*ApiKey userId, or the core's userRef) is an ID or an
+  // email; the core turns a numeric one into a path segment, so a numeric one
+  // must be a positive integer ("-5" or "0" is refused, an email passes).
+  for (const key of USER_REF_KEYS) {
+    if (!(key in out) || !USER_REF_COMMANDS.has(label)) continue;
+    const value = out[key];
+    if (value === null || (typeof value !== 'string' && typeof value !== 'number')) {
+      invalid.push(`Param "${key}" for ${label} must be a user ID or email.`);
+    } else if (/^\s*[-+]?\d+\s*$/.test(String(value))) {
+      const id = toPositiveInteger(String(value).trim().replace(/^\+/, ''));
+      if (id === undefined) invalid.push(`Param "${key}" for ${label} must be a positive integer user ID or an email.`);
+      else out[key] = String(id);
+    }
+  }
+
+  // Deprecated ID params the core ignores (e.g. dismissAlert's experimentId)
+  // are dropped, so no unchecked ID ever reaches it. Other deprecated params
+  // pass through.
+  for (const p of entry.params) {
+    if (p.deprecated && ID_PARAM_NAME.test(p.name) && out[p.name] !== undefined && !(p.name in aliases)) delete out[p.name];
+  }
+
+  for (const p of entry.params) {
+    if (p.deprecated) continue;
+    const isIdParam = (p.type === 'number' && ID_PARAM_NAME.test(p.name)) || (p.type === 'array' && ID_LIST_PARAMS.has(p.name));
+    // A required ID given as null would become "/null" in a path: always an
+    // error, whether or not required params are checked. An optional null is absent.
+    if (out[p.name] === null && p.required && isIdParam && !aliasSupplied.has(p.name)) {
+      invalid.push(`Param "${p.name}" for ${label} must be a positive integer ID.`);
+      continue;
+    }
+    if (out[p.name] === null && !p.required && isIdParam) delete out[p.name];
+    const value = out[p.name];
+    if (value === undefined || value === null) {
+      if (p.required && checkRequired && !aliasSupplied.has(p.name)) {
+        missing.push(`Missing required param "${p.name}" (${p.type}) for ${label}: ${p.description}`);
+      }
+      continue;
+    }
+    if (p.type === 'number' && ID_PARAM_NAME.test(p.name)) {
+      const id = toPositiveInteger(value);
+      if (id === undefined) invalid.push(`Param "${p.name}" for ${label} must be a positive integer ID.`);
+      else out[p.name] = id;
+    } else if (p.type === 'array' && ID_LIST_PARAMS.has(p.name)) {
+      // An empty list is allowed, as in 2.0: it cannot reach a path.
+      const ids = Array.isArray(value) ? value.map(toPositiveInteger) : null;
+      if (ids === null || ids.some((id) => id === undefined)) {
+        invalid.push(`Param "${p.name}" for ${label} must be an array of positive integer IDs.`);
+      } else {
+        out[p.name] = ids;
+      }
+    }
+  }
+
+  if (invalid.length > 0 || missing.length > 0) throw new IdParamError(invalid, missing);
+  return out;
+}
+
+/** Equal once normalised: ID-named keys as integers, anything else structurally. */
+function sameParamValue(key: string, a: unknown, b: unknown): boolean {
+  if (ID_KEY.test(key)) {
+    const [ia, ib] = [toPositiveInteger(a), toPositiveInteger(b)];
+    if (ia !== undefined || ib !== undefined) return ia === ib;
+  }
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
+ * Thrown by normalizeIdParams: `invalid` lists values that are not valid IDs
+ * (or conflict), `missing` the required catalog params that are absent;
+ * `problems` is both.
+ */
+export class IdParamError extends Error {
+  readonly problems: string[];
+  constructor(readonly invalid: string[], readonly missing: string[] = []) {
+    const problems = [...invalid, ...missing];
+    super(problems.join(' '));
+    this.problems = problems;
+    this.name = 'IdParamError';
+  }
+}
+
+/**
+ * Validates execute_command params against a command's catalog entry and
+ * returns friendly error messages (empty when valid). The rules (required
+ * params, IDs, aliases, the deprecated params bag) are normalizeIdParams'
+ * with the full required check; unknown keys get "did you mean" hints.
  */
 export function validateCommandParams(
   entry: CommandEntry,
   provided: Record<string, unknown>
 ): string[] {
+  // normalizeIdParams owns the rules (required params, IDs, aliases, the
+  // deprecated params bag); this adds unknown-param hints on top, since
+  // execute_command (unlike direct executeCommand callers) accepts only
+  // catalog params and requires the catalog's required params.
   const errors: string[] = [];
-  const validNames = entry.params.map((p) => p.name);
-  const validSet = new Set(validNames);
+  try {
+    normalizeIdParams(entry, provided);
+  } catch (e) {
+    if (!(e instanceof IdParamError)) throw e;
+    errors.push(...e.problems);
+  }
 
-  for (const key of Object.keys(provided)) {
+  const validNames = documentedParams(entry).map((p) => p.name);
+  const validSet = new Set(entry.params.map((p) => p.name));
+  const bag = provided[PARAMS_PARAM];
+  const usesBag = entry.params.some((p) => p.name === PARAMS_PARAM && p.deprecated) && isRecord(bag);
+  const keys = [...Object.keys(provided), ...(usesBag ? Object.keys(bag as Record<string, unknown>) : [])];
+  for (const key of keys) {
     if (validSet.has(key)) continue;
     const guess = suggestParam(key, validNames);
     const baseMsg = `Unknown param "${key}" for ${entry.group}.${entry.command}. Valid params: ${validNames.length > 0 ? validNames.join(', ') : '(none)'}.`;
     errors.push(guess ? `${baseMsg} Did you mean "${guess}"?` : baseMsg);
-  }
-
-  for (const p of entry.params) {
-    if (p.required && provided[p.name] === undefined) {
-      errors.push(`Missing required param "${p.name}" (${p.type}) for ${entry.group}.${entry.command}: ${p.description}`);
-    }
   }
 
   return errors;
@@ -1383,6 +1689,7 @@ const PARAMS_PARAM = 'params';
 const CONFIG_PARAM = 'config';
 const ID_PARAM = 'id';
 const DEFAULT_EXPERIMENT_TYPE = 'test';
+const DEFAULT_TEMPLATE_NAME = 'My Experiment';
 
 /** Moves `from` to `to` when `to` is not already set. */
 function rename(params: Record<string, unknown>, from: string, to: string): Record<string, unknown> {
@@ -1394,6 +1701,10 @@ function rename(params: Record<string, unknown>, from: string, to: string): Reco
 /** Spreads a nested object param into the top level. Top-level keys win. */
 function flatten(params: Record<string, unknown>, key: string): Record<string, unknown> {
   const nested = params[key];
+  if (nested === null) {
+    const { [key]: _null, ...rest } = params;
+    return rest;
+  }
   if (!isRecord(nested)) return params;
   const { [key]: _nested, ...rest } = params;
   return { ...nested, ...rest };
@@ -1411,9 +1722,9 @@ function compose(...adapters: ParamAdapter[]): ParamAdapter {
 }
 
 const renameTo = (from: string, to: string): ParamAdapter => (p) => rename(p, from, to);
+const withDefault = (key: string, value: unknown): ParamAdapter => (p) => (p[key] === undefined ? { ...p, [key]: value } : p);
 const idFrom = (from: string): ParamAdapter => renameTo(from, ID_PARAM);
 const flattenData: ParamAdapter = (p) => flatten(p, DATA_PARAM);
-const flattenParams: ParamAdapter = (p) => flatten(p, PARAMS_PARAM);
 const aliases = (map: Record<string, string>): ParamAdapter => (p) => aliasFields(p, map);
 /** Core functions that forward a raw API body read it from `config`. */
 const dataAsConfig: ParamAdapter = renameTo(DATA_PARAM, CONFIG_PARAM);
@@ -1444,10 +1755,6 @@ function configEntityAdapters(entityIdParam: string, commands: {
   for (const c of commands.create ?? []) out[c] = dataAsConfig;
   for (const c of commands.update ?? []) out[c] = compose(idFrom(entityIdParam), dataAsConfig);
   return out;
-}
-
-function toNumberIfNumeric(value: unknown): unknown {
-  return typeof value === 'string' && value.trim() !== '' && !Number.isNaN(Number(value)) ? Number(value) : value;
 }
 
 /** users.*ApiKey core functions resolve a user by `userRef` (an ID string or an email). */
@@ -1490,7 +1797,12 @@ const FAVORITE_TARGET = compose(renameTo('entityType', 'type'), renameTo('entity
 const PARAM_ADAPTERS: Record<string, Record<string, ParamAdapter>> = {
   experiments: {
     searchExperiments: searchQuery,
-    restartExperiment: renameTo('type', 'asType'),
+    // RestartExperimentParams types defaultType as required, but core
+    // restartExperiment never reads it (only buildRestartChanges does), so it
+    // is filled in, not documented.
+    restartExperiment: compose(renameTo('type', 'asType'), withDefault('defaultType', DEFAULT_EXPERIMENT_TYPE)),
+    generateTemplate: compose(withDefault('name', DEFAULT_TEMPLATE_NAME), withDefault('type', DEFAULT_EXPERIMENT_TYPE)),
+    listCustomFields: withDefault('type', DEFAULT_EXPERIMENT_TYPE),
     createExperimentNote: NOTE_TEXT,
     editExperimentNote: NOTE_TEXT,
     replyToExperimentNote: NOTE_TEXT,
@@ -1504,7 +1816,7 @@ const PARAM_ADAPTERS: Record<string, Record<string, ParamAdapter>> = {
     }),
   },
   goals: entityAdapters('goalId', {
-    byId: ['getGoal', 'followGoal', 'unfollowGoal', 'listGoalAccessUsers', 'grantGoalAccessUser', 'revokeGoalAccessUser', 'listGoalAccessTeams', 'grantGoalAccessTeam', 'revokeGoalAccessTeam'],
+    byId: ['getGoal', 'followGoal', 'unfollowGoal', 'listGoalAccessUsers', 'listGoalAccessTeams'],
     create: ['createGoal'],
     update: ['updateGoal'],
   }),
@@ -1560,12 +1872,6 @@ const PARAM_ADAPTERS: Record<string, Record<string, ParamAdapter>> = {
     update: ['updateAssetRole'],
   }),
   favorites: { addFavorite: FAVORITE_TARGET, removeFavorite: FAVORITE_TARGET },
-  insights: {
-    getVelocityInsights: flattenParams,
-    getVelocityInsightsDetail: flattenParams,
-    getDecisionInsights: flattenParams,
-    getDecisionInsightsHistory: flattenParams,
-  },
   cors: entityAdapters('originId', { byId: ['getCorsOrigin', 'deleteCorsOrigin'], create: ['createCorsOrigin'], update: ['updateCorsOrigin'] }),
   datasources: configEntityAdapters('datasourceId', {
     byId: ['getDatasource', 'archiveDatasource'],
@@ -1590,9 +1896,7 @@ const PARAM_ADAPTERS: Record<string, Record<string, ParamAdapter>> = {
     }),
     reorderCustomSections: sectionOrder,
   },
-  activity: { listActivity: flattenParams },
   statistics: { getPowerMatrix: renameTo(PARAMS_PARAM, CONFIG_PARAM) },
-  events: { listEvents: flattenParams, listEventsHistory: flattenParams },
   storageconfigs: configEntityAdapters('configId', {
     byId: ['getStorageConfig'],
     create: ['createStorageConfig'],
@@ -1611,17 +1915,17 @@ type CommandRunner = (client: ApiClientLike, params: Record<string, unknown>) =>
 
 const BULK_COMMANDS = ['bulkStart', 'bulkStop', 'bulkArchive', 'bulkDevelopment', 'bulkFullOn'] as const;
 // Positional arguments after `names`, per @absmartly/cli core/experiments/bulk.js.
+// Arguments the backend rejects when absent; failing here beats sending `undefined` (as in 2.0.1).
+const BULK_REQUIRED_ARGS: Partial<Record<typeof BULK_COMMANDS[number], string>> = {
+  bulkStop: 'reason',
+  bulkFullOn: 'variant',
+};
 const BULK_EXTRA_ARGS: Record<typeof BULK_COMMANDS[number], string[]> = {
   bulkStart: ['note'],
   bulkStop: ['reason', 'note'],
   bulkArchive: ['note'],
   bulkDevelopment: ['note'],
   bulkFullOn: ['variant', 'note'],
-};
-// Arguments the backend rejects when absent; failing here beats sending `undefined`.
-const BULK_REQUIRED_ARGS: Partial<Record<typeof BULK_COMMANDS[number], string>> = {
-  bulkStop: 'reason',
-  bulkFullOn: 'variant',
 };
 
 const experimentsCore = CORE_MODULES.experiments;
@@ -1637,7 +1941,8 @@ function bulkRunner(command: typeof BULK_COMMANDS[number]): CommandRunner {
     if (required !== undefined && params[required] === undefined) {
       throw new Error(`experiments.${command} requires "${required}"`);
     }
-    const ids = Array.isArray(params.ids) ? params.ids.map(toNumberIfNumeric) : [];
+    // Normalised by normalizeIdParams when given; absent ids stay an empty batch, as in 2.0.1.
+    const ids = Array.isArray(params[ID_LIST_PARAM]) ? params[ID_LIST_PARAM] as number[] : [];
     const extra = BULK_EXTRA_ARGS[command].map((name) => params[name]);
     return experimentsCore[command](client, ids, new Map(), ...extra);
   };
@@ -1665,8 +1970,11 @@ async function listAllAssetRoles(client: ApiClientLike): Promise<Array<{ id: num
 
 /** Resolves an asset role given by ID or by name. */
 async function resolveAssetRoleId(client: ApiClientLike, role: unknown): Promise<unknown> {
-  const numeric = toNumberIfNumeric(role);
-  if (typeof numeric === 'number') return numeric;
+  const id = toPositiveInteger(role);
+  if (id !== undefined) return id;
+  if (typeof role !== 'string' || role.trim() === '') {
+    throw new Error(`Asset role must be a positive integer ID or a role name: ${JSON.stringify(role)}`);
+  }
   const data = await listAllAssetRoles(client);
   const wanted = String(role).toLowerCase();
   const match = data.find((r) => r.name?.toLowerCase() === wanted);
@@ -1676,21 +1984,71 @@ async function resolveAssetRoleId(client: ApiClientLike, role: unknown): Promise
   return match.id;
 }
 
-function experimentAccessRunner(command: 'grantExperimentAccessUser' | 'grantExperimentAccessTeam'): CommandRunner {
+/**
+ * Access grant/revoke commands document `role` (an asset role ID or name);
+ * the core reads `roleId`, and the entity ID under `idParam`.
+ */
+function accessRunner(group: string, command: string, entityIdParam: string, coreIdParam: string): CommandRunner {
   return async (client, params) => {
-    const { role, ...rest } = params;
-    if (role === undefined && rest.roleId === undefined) {
-      throw new Error(`experiments.${command} requires "role" (an asset role ID or name)`);
+    const { role, [entityIdParam]: entityId, ...rest } = params;
+    if (role === undefined) {
+      // No role: the 2.0 shape. Commands that went straight to the core in
+      // 2.0 still do (with roleId as the core reads it, if given); 2.0.1's
+      // grant runners required role and still do.
+      if (ACCESS_COMMANDS_DIRECT_IN_2_0.has(`${group}.${command}`)) {
+        return CORE_MODULES[group][command](client, { ...rest, [coreIdParam]: entityId });
+      }
+      throw new Error(`${group}.${command} requires "role" (an asset role ID or name)`);
     }
-    const roleId = rest.roleId !== undefined ? toNumberIfNumeric(rest.roleId) : await resolveAssetRoleId(client, role);
-    return experimentsCore[command](client, { ...rest, roleId });
+    const roleId = await resolveAssetRoleId(client, role);
+    return CORE_MODULES[group][command](client, { ...rest, [coreIdParam]: entityId, roleId });
+  };
+}
+
+// Access commands that went straight to the core in 2.0.1 (no runner).
+const ACCESS_COMMANDS_DIRECT_IN_2_0 = new Set([
+  'experiments.revokeExperimentAccessUser', 'experiments.revokeExperimentAccessTeam',
+  'goals.grantGoalAccessUser', 'goals.revokeGoalAccessUser', 'goals.grantGoalAccessTeam', 'goals.revokeGoalAccessTeam',
+]);
+const EXPERIMENT_ACCESS_COMMANDS = ['grantExperimentAccessUser', 'revokeExperimentAccessUser', 'grantExperimentAccessTeam', 'revokeExperimentAccessTeam'];
+const GOAL_ACCESS_COMMANDS = ['grantGoalAccessUser', 'revokeGoalAccessUser', 'grantGoalAccessTeam', 'revokeGoalAccessTeam'];
+
+/**
+ * Datasource test/introspect/validate: the backend accepts `datasource_id` and
+ * reads the stored config itself, including secrets that GET would mask. The
+ * core only forwards a `config` body, so build that body from the ID.
+ */
+const VALIDATE_DATASOURCE_QUERY_COMMAND = 'validateDatasourceQuery';
+const DATASOURCE_CONFIG_COMMANDS = ['testDatasource', 'introspectDatasource', VALIDATE_DATASOURCE_QUERY_COMMAND];
+
+function datasourceRunner(command: string): CommandRunner {
+  return async (client, params) => {
+    // A given `config` is the whole request body, as in 2.0: the caller's own
+    // (unsaved) definition, sent as is.
+    if (params[CONFIG_PARAM] !== undefined) {
+      return CORE_MODULES.datasources[command](client, { config: params[CONFIG_PARAM] });
+    }
+    if (params.datasourceId === undefined) {
+      throw new Error(`datasources.${command} needs "datasourceId" or a "config" object`);
+    }
+    if (command === VALIDATE_DATASOURCE_QUERY_COMMAND && typeof params.query !== 'string') {
+      throw new Error(`datasources.${command} requires "query" with "datasourceId"`);
+    }
+    // The saved datasource by ID: the backend reads its stored config,
+    // including secrets, itself.
+    const body: Record<string, unknown> = { datasource_id: params.datasourceId };
+    if (params.query !== undefined) body.query = params.query;
+    return CORE_MODULES.datasources[command](client, { config: body });
   };
 }
 
 /** Resolves a platform config given by numeric ID or by its name (e.g. "experiment_form_team_visibility"). */
 async function resolvePlatformConfigId(client: ApiClientLike, configKey: unknown): Promise<unknown> {
-  const numeric = toNumberIfNumeric(configKey);
-  if (typeof numeric === 'number') return numeric;
+  const id = toPositiveInteger(configKey);
+  if (id !== undefined) return id;
+  if (typeof configKey !== 'string' || configKey.trim() === '') {
+    throw new Error(`Platform config must be a positive integer ID or a config name: ${JSON.stringify(configKey ?? null)}`);
+  }
   const { data } = await CORE_MODULES.platformconfig.listPlatformConfigs(client) as { data: Array<{ id: number; name?: string }> };
   const match = data.find((c) => c.name === configKey);
   if (!match) throw new Error(`Platform config "${String(configKey)}" not found`);
@@ -1707,19 +2065,17 @@ const EXPERIMENT_RUNNERS: Record<string, CommandRunner> = {
   createExperiment: (client, params) =>
     experimentsCore.createExperiment(client, isRecord(params.data) ? params.data : {}),
   // core cloneExperiment(client, payload, sourceId) expects a payload built by buildClonePayload.
+  // experimentId is already a positive integer (normalizeIdParams).
   cloneExperiment: async (client, params) => {
-    const experimentId = toNumberIfNumeric(params.experimentId);
     const { payload, warnings } = await experimentsCore.buildClonePayload(client, {
       ...params,
-      experimentId,
       defaultType: params.defaultType ?? DEFAULT_EXPERIMENT_TYPE,
     });
-    const result = await experimentsCore.cloneExperiment(client, payload, experimentId);
+    const result = await experimentsCore.cloneExperiment(client, payload, params.experimentId);
     return warnings?.length ? { ...result, warnings: [...(result.warnings ?? []), ...warnings] } : result;
   },
   ...Object.fromEntries(BULK_COMMANDS.map((c) => [c, bulkRunner(c)])),
-  grantExperimentAccessUser: experimentAccessRunner('grantExperimentAccessUser'),
-  grantExperimentAccessTeam: experimentAccessRunner('grantExperimentAccessTeam'),
+  ...Object.fromEntries(EXPERIMENT_ACCESS_COMMANDS.map((c) => [c, accessRunner('experiments', c, EXPERIMENT_ID_PARAM, EXPERIMENT_ID_PARAM)])),
   // core createAnnotation/updateAnnotation forward only `type`; the API takes the whole annotation.
   createAnnotation: async (client, params) => ({
     data: await client.createAnnotation({ ...userFields(params.data), experiment_id: params.experimentId } as any),
@@ -1738,6 +2094,22 @@ const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
       if (Object.keys(data).length === 0) throw new Error('At least one update field is required');
       await client.updateUser(params.userId as any, data as any);
       return { data: { id: params.userId } };
+    },
+  },
+  goals: Object.fromEntries(GOAL_ACCESS_COMMANDS.map((c) => [c, accessRunner('goals', c, GOAL_ID_PARAM, ID_PARAM)])),
+  datasources: Object.fromEntries(DATASOURCE_CONFIG_COMMANDS.map((c) => [c, datasourceRunner(c)])),
+  storageconfigs: {
+    // The backend merges only the stored secret key (by storage_config_id); the
+    // exporter needs type and properties in the body, so read those first.
+    testStorageConfig: async (client, params) => {
+      // A given `config` is the whole request body, as in 2.0.
+      if (params[CONFIG_PARAM] !== undefined || params.configId === undefined) {
+        return CORE_MODULES.storageconfigs.testStorageConfig(client, { config: params[CONFIG_PARAM] });
+      }
+      const { data: stored } = await CORE_MODULES.storageconfigs.getStorageConfig(client, { id: params.configId }) as { data: Record<string, unknown> };
+      return CORE_MODULES.storageconfigs.testStorageConfig(client, {
+        config: { type: stored.type, properties: stored.properties, storage_config_id: params.configId },
+      });
     },
   },
   platformconfig: {
@@ -1760,8 +2132,9 @@ const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
  */
 export const RUNNER_EXTRA_CORE_FUNCTIONS: Record<string, string[]> = {
   'experiments.cloneExperiment': ['buildClonePayload'],
-  'experiments.grantExperimentAccessUser': ['assetroles.listAssetRoles'],
-  'experiments.grantExperimentAccessTeam': ['assetroles.listAssetRoles'],
+  ...Object.fromEntries(EXPERIMENT_ACCESS_COMMANDS.map((c) => [`experiments.${c}`, ['assetroles.listAssetRoles']])),
+  ...Object.fromEntries(GOAL_ACCESS_COMMANDS.map((c) => [`goals.${c}`, ['assetroles.listAssetRoles']])),
+  'storageconfigs.testStorageConfig': ['getStorageConfig'],
   'platformconfig.getPlatformConfig': ['listPlatformConfigs'],
   'platformconfig.updatePlatformConfig': ['listPlatformConfigs'],
 };
@@ -1803,9 +2176,18 @@ export async function executeCommand(
     throw new Error(`Unknown group: "${group}". Available: ${CLI_GROUPS.join(', ')}`);
   }
 
+  // The only addition to the 2.0 dispatch: ID safety. Every ID that can reach
+  // a path is a positive integer (null or invalid is an error) and declared
+  // aliases are mapped. Required catalog params are not checked here; that is
+  // execute_command's validation (validateCommandParams), as in 2.0.
+  const idSafeParams = normalizeIdParams(entry, params, { checkRequired: false });
+  // Whatever reaches a request path, by any route (top level, inside `data`,
+  // a core-name key), is checked where the APIClient builds the path.
+  const guardedClient = withPathIdGuard(client);
+
   const runner = COMMAND_RUNNERS[group]?.[command];
   if (runner) {
-    return runner(client, params);
+    return runner(guardedClient, idSafeParams);
   }
 
   const fn = mod[command];
@@ -1813,5 +2195,5 @@ export async function executeCommand(
     throw new Error(`Function "${command}" not found in core module "${group}". Available: ${Object.keys(mod).filter(k => typeof mod[k] === 'function').join(', ')}`);
   }
 
-  return fn(client, normalizeCommandParams(group, command, params));
+  return fn(guardedClient, normalizeCommandParams(group, command, idSafeParams));
 }

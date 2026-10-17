@@ -207,6 +207,146 @@ export default async function run() {
     assert.strictEqual(seen.length, 2, 'onApprove must be called again on retry');
   });
 
+  await asyncTest('an invalid stored endpoint mapping shows the endpoint form, and a corrected one works', async () => {
+    const store = memoryStore();
+    const extra: Partial<ConsentOptions> = { requireEndpoint: true };
+    for (const endpoint of ['https://acme.absmartly.com/%2e%2e', 'ftp://acme.absmartly.com', 'https://u:p@acme.absmartly.com', 'https://acme.absmartly.com/?x=1']) {
+      const begin = await beginAuthorization({ authRequest: request(), endpoint, cookieHeader: null }, options(store, extra));
+      assert.ok(begin.type === 'respond' && begin.response.status === 200 && (begin.response.body ?? '').includes('name="absmartly_endpoint"'), `begin with ${endpoint} shows the endpoint form`);
+    }
+    const begin = await beginAuthorization({ authRequest: request(), endpoint: 'ftp://acme.absmartly.com', cookieHeader: null }, options(store, extra));
+    if (begin.type !== 'respond') throw new Error('unreachable');
+    const transactionId = (begin.response.body ?? '').match(/name="transaction_id" value="([^"]+)"/)?.[1] || '';
+    const cookie = cookiePair(begin.response.setCookies[0] || '');
+    const fixed = await submitConsent({ form: { action: 'set_endpoint', transactionId, endpoint: 'acme.absmartly.com' }, cookieHeader: cookie }, options(store, extra));
+    assert.ok(fixed.type === 'respond' && fixed.response.status === 200 && (fixed.response.body ?? '').includes('acme.absmartly.com'), 'the corrected endpoint reaches the consent page');
+    const approved = await submitConsent({ form: { action: 'approve', transactionId }, cookieHeader: cookie }, options(store, extra));
+    assert.ok(approved.type === 'approved' && approved.endpoint === 'https://acme.absmartly.com', 'and approval carries the canonical endpoint');
+  });
+
+  await asyncTest('an invalid endpoint typed into the form is rejected with 400 "Invalid ABsmartly endpoint"', async () => {
+    const store = memoryStore();
+    const extra: Partial<ConsentOptions> = { requireEndpoint: true };
+    const { transactionId, cookie } = await start(store, extra);
+    const set = await submitConsent({ form: { action: 'set_endpoint', transactionId, endpoint: 'https://acme.absmartly.com/%2e%2e' }, cookieHeader: cookie }, options(store, extra));
+    assert.ok(set.type === 'respond' && set.response.status === 400, 'set_endpoint rejects an invalid endpoint with 400');
+    const body = set.type === 'respond' ? set.response.body ?? '' : '';
+    assert.ok(body.includes('name="absmartly_endpoint"') && body.includes('Invalid ABsmartly endpoint') && body.includes('role="alert"'), 'and re-renders the endpoint form with the error');
+    assert.ok(body.includes(`value="${transactionId}"`), 'keeping the same transaction');
+    const empty = await submitConsent({ form: { action: 'set_endpoint', transactionId, endpoint: '  ' }, cookieHeader: cookie }, options(store, extra));
+    assert.ok(empty.type === 'respond' && empty.response.status === 400 && empty.response.body === 'ABsmartly endpoint is required', 'an empty endpoint is still "required"');
+  });
+
+  await asyncTest('a valid endpoint entering consent is stored in canonical form', async () => {
+    const store = memoryStore();
+    const extra: Partial<ConsentOptions> = { requireEndpoint: true };
+    const { transactionId, cookie } = await start(store, extra);
+    await submitConsent({ form: { action: 'set_endpoint', transactionId, endpoint: ' acme.absmartly.com/v1/ ' }, cookieHeader: cookie }, options(store, extra));
+    const stored = JSON.parse(store.data.get(`oauth:consent:${transactionId}`) ?? [...store.data.values()].find((v) => v.includes('absmartlyEndpoint')) ?? '{}');
+    assert.strictEqual(stored.absmartlyEndpoint, 'https://acme.absmartly.com');
+  });
+
+  await asyncTest('a pre-validation transaction with a bad endpoint is rejected before onApprove persists it', async () => {
+    const store = memoryStore();
+    const persisted: unknown[] = [];
+    const extra: Partial<ConsentOptions> = { requireEndpoint: true, onApprove: async (_r, endpoint) => { persisted.push(endpoint); } };
+    const { transactionId, cookie } = await start(store, extra);
+    const key = [...store.data.keys()].find((k) => k.includes(transactionId))!;
+    const tx = JSON.parse(store.data.get(key)!);
+    tx.absmartlyEndpoint = 'https://acme.absmartly.com/%2e%2e/admin';
+    store.data.set(key, JSON.stringify(tx));
+    const outcome = await submitConsent({ form: { action: 'approve', transactionId }, cookieHeader: cookie }, options(store, extra));
+    assert.ok(outcome.type === 'respond' && outcome.response.status === 400 && outcome.response.body === 'Invalid ABsmartly endpoint', 'rejected with 400');
+    assert.deepStrictEqual(persisted, [], 'onApprove never ran');
+  });
+
+  await asyncTest('approvals stored before canonicalisation (with /v1 or an upper-case host) still match', async () => {
+    const store = memoryStore();
+    const extra: Partial<ConsentOptions> = { requireEndpoint: true, rememberApprovals: true };
+    const first = await beginAuthorization({ authRequest: request(), endpoint: 'https://acme.absmartly.com', cookieHeader: null }, options(store, extra));
+    if (first.type !== 'respond') throw new Error('unreachable');
+    const transactionId = (first.response.body ?? '').match(/name="transaction_id" value="([^"]+)"/)?.[1] || '';
+    const cookie = cookiePair(first.response.setCookies[0] || '');
+    const approved = await submitConsent({ form: { action: 'approve', transactionId }, cookieHeader: cookie }, options(store, extra));
+    if (approved.type !== 'approved') throw new Error('expected approval');
+    const approvalsCookie = cookiePair(approved.setCookies.find((c) => c.includes('approv')) ?? '');
+    // Rewrite the stored approval into the pre-2.1 shape.
+    const approvalsKey = [...store.data.keys()].find((k) => k.startsWith('oauth:approvals:'))!;
+    store.data.set(approvalsKey, JSON.stringify([JSON.stringify([CIMD_CLIENT, 'https://ACME.absmartly.com/v1/'])]));
+    const again = await beginAuthorization({ authRequest: request(), endpoint: 'https://acme.absmartly.com/v1', cookieHeader: approvalsCookie }, options(store, extra));
+    assert.strictEqual(again.type, 'approved', 'the legacy-shaped approval still skips consent');
+  });
+
+  await asyncTest('an invalid explicit endpoint falls back to the valid stored mapping, with a visible notice', async () => {
+    const store = memoryStore();
+    const extra: Partial<ConsentOptions> = { requireEndpoint: true };
+    const begin = await beginAuthorization(
+      { authRequest: request(), endpoint: 'https://acme.absmartly.com/%2e%2e', fallbackEndpoint: 'https://stored.absmartly.com/v1', cookieHeader: null },
+      options(store, extra),
+    );
+    if (begin.type !== 'respond') throw new Error('unreachable');
+    const body = begin.response.body ?? '';
+    assert.ok(body.includes('stored.absmartly.com') && !body.includes('name="absmartly_endpoint"'), 'consent is shown for the stored endpoint');
+    assert.ok(body.includes('role="status"') && body.includes('was not a valid ABsmartly URL') && body.includes('https://stored.absmartly.com is used instead'), 'with a notice that the supplied one was ignored');
+    assert.ok(!body.includes('%2e%2e'), 'without echoing the rejected value');
+    const plain = await beginAuthorization({ authRequest: request(), endpoint: null, fallbackEndpoint: 'https://stored.absmartly.com', cookieHeader: null }, options(store, extra));
+    assert.ok(plain.type === 'respond' && !(plain.response.body ?? '').includes('role="status"'), 'no notice when no endpoint was supplied');
+  });
+
+  await asyncTest('a fallback endpoint is never auto-approved silently, even with a remembered approval', async () => {
+    const store = memoryStore();
+    const extra: Partial<ConsentOptions> = { requireEndpoint: true, rememberApprovals: true };
+    const first = await beginAuthorization({ authRequest: request(), endpoint: 'https://stored.absmartly.com', cookieHeader: null }, options(store, extra));
+    if (first.type !== 'respond') throw new Error('unreachable');
+    const transactionId = (first.response.body ?? '').match(/name="transaction_id" value="([^"]+)"/)?.[1] || '';
+    const approved = await submitConsent({ form: { action: 'approve', transactionId }, cookieHeader: cookiePair(first.response.setCookies[0] || '') }, options(store, extra));
+    if (approved.type !== 'approved') throw new Error('expected approval');
+    const approvalsCookie = cookiePair(approved.setCookies.find((c) => c.includes('approv')) ?? '');
+    const remembered = await beginAuthorization({ authRequest: request(), endpoint: 'https://stored.absmartly.com', cookieHeader: approvalsCookie }, options(store, extra));
+    assert.strictEqual(remembered.type, 'approved', 'a valid explicit endpoint still uses the remembered approval');
+    const fallback = await beginAuthorization(
+      { authRequest: request(), endpoint: 'ftp://bad', fallbackEndpoint: 'https://stored.absmartly.com', cookieHeader: approvalsCookie },
+      options(store, extra),
+    );
+    assert.ok(fallback.type === 'respond' && (fallback.response.body ?? '').includes('role="status"'), 'the fallback shows the consent page with the notice');
+  });
+
+  await asyncTest('an invalid explicit endpoint with no fallback shows the endpoint form with an error', async () => {
+    const store = memoryStore();
+    const begin = await beginAuthorization({ authRequest: request(), endpoint: 'ftp://bad.example', cookieHeader: null }, options(store, { requireEndpoint: true }));
+    if (begin.type !== 'respond') throw new Error('unreachable');
+    const body = begin.response.body ?? '';
+    assert.ok(body.includes('name="absmartly_endpoint"') && body.includes('role="alert"') && body.includes('was not a valid ABsmartly URL'), 'form with the rejection');
+    assert.ok(!body.includes('bad.example'), 'without echoing the rejected value');
+    const none = await beginAuthorization({ authRequest: request(), endpoint: null, cookieHeader: null }, options(store, { requireEndpoint: true }));
+    assert.ok(none.type === 'respond' && !(none.response.body ?? '').includes('role="alert"'), 'no error when nothing was supplied');
+  });
+
+  await asyncTest('a refused endpoint shows a notice even when no endpoint is required (backend mode)', async () => {
+    const store = memoryStore();
+    const begin = await beginAuthorization({ authRequest: request(), endpoint: 'ftp://bad.example', cookieHeader: null }, options(store));
+    if (begin.type !== 'respond') throw new Error('unreachable');
+    const body = begin.response.body ?? '';
+    assert.ok(body.includes('role="status"') && body.includes('was not a valid ABsmartly URL') && !body.includes('bad.example'), 'notice, no echo');
+  });
+
+  await asyncTest('a rejected request endpoint substituted by a valid lower-priority one keeps the notice and is not auto-approved', async () => {
+    const store = memoryStore();
+    const extra: Partial<ConsentOptions> = { requireEndpoint: true, rememberApprovals: true };
+    const first = await beginAuthorization({ authRequest: request(), endpoint: 'https://other.absmartly.com', cookieHeader: null }, options(store, extra));
+    if (first.type !== 'respond') throw new Error('unreachable');
+    const transactionId = (first.response.body ?? '').match(/name="transaction_id" value="([^"]+)"/)?.[1] || '';
+    const approved = await submitConsent({ form: { action: 'approve', transactionId }, cookieHeader: cookiePair(first.response.setCookies[0] || '') }, options(store, extra));
+    if (approved.type !== 'approved') throw new Error('expected approval');
+    const approvalsCookie = cookiePair(approved.setCookies.find((c) => c.includes('approv')) ?? '');
+    // What the worker passes when the resource endpoint is invalid but a header endpoint is valid.
+    const substituted = await beginAuthorization(
+      { authRequest: request(), endpoint: 'bad host', fallbackEndpoint: 'https://other.absmartly.com', cookieHeader: approvalsCookie },
+      options(store, extra),
+    );
+    assert.ok(substituted.type === 'respond' && (substituted.response.body ?? '').includes('role="status"'), 'notice shown, no auto-approve');
+  });
+
   return {
     success: failed === 0,
     message: `${passed} passed, ${failed} failed`,

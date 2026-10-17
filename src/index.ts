@@ -6,7 +6,7 @@ import { z } from "zod";
 import { ABsmartlyResources } from "./resources.js";
 import { ABsmartlyOAuthHandler } from "./absmartly-oauth-handler.js";
 import { SCOPE_MCP_ACCESS, SUPPORTED_SCOPES, validateClientRegistration } from "./oauth/index.js";
-import { checkBackendSessionOnRefresh, normalizeResourceParameter, protectedResourceMetadataUrl, rejectUntrustedCimdClient } from "./oauth-worker-guards.js";
+import { checkBackendSessionOnRefresh, normalizeResourceParameter, protectedResourceMetadataUrl, rejectUntrustedCimdClient, withValidStoredEndpoint } from "./oauth-worker-guards.js";
 import { Env } from "./types.js";
 import { debug } from "./config.js";
 import { MCP_VERSION } from "./version.js";
@@ -28,7 +28,6 @@ import {
     OAUTH_STATE_TTL_SECONDS,
     SSE_PATH,
     MCP_PATH,
-    normalizeBaseUrl,
     extractEndpointFromPath,
     handleOAuthDiscovery,
     API_KEY_SESSION_KV_PREFIX,
@@ -36,8 +35,21 @@ import {
     safeKvPut,
     safeKvGet,
 } from "./shared.js";
+import {
+    HTTP_STATUS_BAD_REQUEST,
+    HTTP_STATUS_SERVICE_UNAVAILABLE,
+    HTTP_STATUS_UNAUTHORIZED,
+    firstValidEndpoint,
+    MESSAGE_INVALID_ENDPOINT,
+    tryParseAbsmartlyEndpoint,
+} from "./oauth/index.js";
 
 const ENTITY_LIST_PAGE_SIZE = 100;
+const VERIFY_ERROR_SERVER = 'server_error';
+const VERIFY_ERROR_NETWORK = 'network_error';
+const VERIFY_ERROR_UNAUTHORIZED = 'unauthorized';
+const MESSAGE_SERVICE_UNAVAILABLE = 'ABsmartly service temporarily unavailable';
+const MESSAGE_UNAUTHORIZED = 'Unauthorized';
 const ENTITY_LIST_FIRST_PAGE = 1;
 const ACCESS_TOKEN_TTL_SECONDS = 3600;
 // workers-oauth-provider 0.10.x defaults both of these; pin them explicitly (at the
@@ -147,6 +159,9 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             throw new Error("No valid authentication token available");
         }
 
+        // OAuth grants with an endpoint that no longer parses are turned away
+        // before reaching here (withValidStoredEndpoint), so the client
+        // re-authorizes; anything else still fails with InvalidEndpointError.
         const fetchHttpClient = new FetchHttpClient(
             this.props.absmartly_endpoint,
             { authToken, authType }
@@ -543,16 +558,16 @@ Steps:
 
 async function verifyApiKey(apiKey: string, endpoint: string): Promise<{ ok: boolean; user?: any; error?: string }> {
     try {
-        const httpClient = new FetchHttpClient(normalizeBaseUrl(endpoint), { authToken: apiKey, authType: 'api-key' });
+        const httpClient = new FetchHttpClient(endpoint, { authToken: apiKey, authType: 'api-key' });
         const client = new APIClient(httpClient);
         const user = await client.getCurrentUser();
         return { ok: true, user };
     } catch (error: any) {
         const msg = error.message || String(error);
         console.error('API key verification error:', msg);
-        if (msg.includes('HTTP 5')) return { ok: false, error: 'server_error' };
-        if (msg.includes('Network error') || msg.includes('timed out')) return { ok: false, error: 'network_error' };
-        return { ok: false, error: 'unauthorized' };
+        if (msg.includes('HTTP 5')) return { ok: false, error: VERIFY_ERROR_SERVER };
+        if (msg.includes('Network error') || msg.includes('timed out')) return { ok: false, error: VERIFY_ERROR_NETWORK };
+        return { ok: false, error: VERIFY_ERROR_UNAUTHORIZED };
     }
 }
 
@@ -568,8 +583,8 @@ const oauthHandler = new ABsmartlyOAuthHandler();
 
 const oauthProvider = new OAuthProvider({
     apiHandlers: {
-        [SSE_PATH]: sseMcpHandler,
-        [MCP_PATH]: streamableMcpHandler
+        [SSE_PATH]: withValidStoredEndpoint(sseMcpHandler as any, SSE_PATH),
+        [MCP_PATH]: withValidStoredEndpoint(streamableMcpHandler as any, MCP_PATH),
     },
     authorizeEndpoint: "/authorize",
     tokenEndpoint: "/token",
@@ -630,13 +645,21 @@ async function handleMcpTransportRequest(
         debug(`API key detected on ${route.pathPrefix}, bypassing OAuth flow`);
 
         try {
-            const verifyResult = await verifyApiKey(apiKey, endpoint || DEFAULT_ABSMARTLY_ENDPOINT);
+            // Parse the endpoint where it enters, and store the canonical form.
+            const parsed = tryParseAbsmartlyEndpoint(endpoint || DEFAULT_ABSMARTLY_ENDPOINT);
+            if (!parsed) {
+                console.error(`Rejected API key request: ${MESSAGE_INVALID_ENDPOINT}: ${endpoint}`);
+                return new Response(MESSAGE_INVALID_ENDPOINT, { status: HTTP_STATUS_BAD_REQUEST, headers: CORS_HEADERS });
+            }
+            const apiUrl = parsed.apiUrl;
+
+            const verifyResult = await verifyApiKey(apiKey, apiUrl);
 
             if (!verifyResult.ok) {
-                const isTransient = verifyResult.error === 'server_error' || verifyResult.error === 'network_error';
+                const isTransient = verifyResult.error === VERIFY_ERROR_SERVER || verifyResult.error === VERIFY_ERROR_NETWORK;
                 console.error(`Failed to verify API key: ${verifyResult.error}`);
-                return new Response(isTransient ? "ABsmartly service temporarily unavailable" : "Unauthorized", {
-                    status: isTransient ? 503 : 401,
+                return new Response(isTransient ? MESSAGE_SERVICE_UNAVAILABLE : MESSAGE_UNAUTHORIZED, {
+                    status: isTransient ? HTTP_STATUS_SERVICE_UNAVAILABLE : HTTP_STATUS_UNAUTHORIZED,
                     headers: CORS_HEADERS,
                 });
             }
@@ -651,7 +674,7 @@ async function handleMcpTransportRequest(
             const props: ABsmartlyProps = {
                 email: userData.email || DEFAULT_API_KEY_USER_EMAIL,
                 name: `${userData.first_name || ''} ${userData.last_name || ''}`.trim() || userData.email || DEFAULT_API_KEY_USER_NAME,
-                absmartly_endpoint: endpoint || DEFAULT_ABSMARTLY_ENDPOINT,
+                absmartly_endpoint: apiUrl,
                 absmartly_api_key: apiKey,
                 user_id: userId
             };
@@ -688,13 +711,18 @@ async function handleMcpTransportRequest(
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
         debug(`No valid Authorization header on ${route.pathPrefix}, returning 401 to trigger OAuth flow`);
 
-        const requestedEndpoint = url.searchParams.get('absmartly-endpoint') ||
-            extractEndpointFromResourceParam(url.searchParams.get('resource')) ||
-            request.headers.get('x-absmartly-endpoint') ||
-            extractEndpointFromPath(url.pathname, route.pathPrefix) ||
-            endpoint;
-        if (requestedEndpoint) {
-            await safeKvPut(env.OAUTH_KV, `oauth_endpoint_pending:${clientFingerprint}`, requestedEndpoint, {
+        // Only a valid endpoint is remembered for the coming /register: the
+        // first source that parses, so an invalid one never hides a valid one.
+        const requested = firstValidEndpoint([
+            url.searchParams.get('absmartly-endpoint'),
+            extractEndpointFromResourceParam(url.searchParams.get('resource')),
+            request.headers.get('x-absmartly-endpoint'),
+            extractEndpointFromPath(url.pathname, route.pathPrefix),
+            endpoint,
+        ]);
+        const pendingEndpoint = requested.endpoint?.baseUrl;
+        if (pendingEndpoint) {
+            await safeKvPut(env.OAUTH_KV, `oauth_endpoint_pending:${clientFingerprint}`, pendingEndpoint, {
                 expirationTtl: OAUTH_STATE_TTL_SECONDS,
             });
         }
@@ -793,7 +821,9 @@ export default {
         }
 
         if (url.pathname === '/register' && request.method === 'POST') {
-            const pendingEndpoint = await safeKvGet(env.OAUTH_KV, `oauth_endpoint_pending:${clientFingerprint}`);
+            const pendingEndpoint = tryParseAbsmartlyEndpoint(
+                await safeKvGet(env.OAUTH_KV, `oauth_endpoint_pending:${clientFingerprint}`),
+            )?.baseUrl;
             const response = await oauthProvider.fetch(request, env, ctx);
 
             if (response.ok && pendingEndpoint) {

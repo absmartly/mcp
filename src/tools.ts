@@ -12,7 +12,10 @@ import {
   getGroupCommands,
   getCommandEntry,
   searchCommands,
+  documentedParams,
   executeCommand,
+  TOOL_INJECTED_PARAMS,
+  isListCommand,
   getTotalCommandCount,
   validateCommandParams,
 } from "./cli-catalog.js";
@@ -49,8 +52,9 @@ export interface ToolContext {
 
 function formatCommandList(entries: CommandEntry[]): string {
   return entries.map(m => {
-    const paramList = m.params.length > 0
-      ? m.params.map(p => `  - \`${p.name}\` (${p.type}${p.required ? ', required' : ''}): ${p.description}`).join('\n')
+    const params = documentedParams(m);
+    const paramList = params.length > 0
+      ? params.map(p => `  - \`${p.name}\` (${p.type}${p.required ? ', required' : ''}): ${p.description}`).join('\n')
       : '  (no parameters)';
     return `### ${m.group}.${m.command}\n${m.description}\n${m.dangerous ? '**WARNING: Destructive operation**\n' : ''}**Params:**\n${paramList}\n**Returns:** ${m.returns}`;
   }).join('\n\n---\n\n');
@@ -104,10 +108,11 @@ function buildCommandDoc(entry: CommandEntry, customFields: readonly any[]): str
   }
   doc += `**Returns:** ${entry.returns}\n\n`;
 
-  if (entry.params.length > 0) {
+  const params = documentedParams(entry);
+  if (params.length > 0) {
     doc += '## Parameters\n\n';
     doc += '| Name | Type | Required | Description |\n|------|------|----------|-------------|\n';
-    for (const p of entry.params) {
+    for (const p of params) {
       doc += `| ${p.name} | ${p.type} | ${p.required ? 'Yes' : 'No'} | ${p.description} |\n`;
     }
   } else {
@@ -119,7 +124,7 @@ function buildCommandDoc(entry: CommandEntry, customFields: readonly any[]): str
   }
 
   doc += `\n## Usage with execute_command\n\n\`\`\`json\n{\n  "group": "${entry.group}",\n  "command": "${entry.command}",\n  "params": ${JSON.stringify(
-    Object.fromEntries(entry.params.filter(p => p.required).map(p => [p.name, p.type === 'number' ? 1 : p.type === 'boolean' ? true : p.type === 'object' ? {} : p.type === 'array' ? [] : 'value'])),
+    Object.fromEntries(params.filter(p => p.required).map(p => [p.name, p.type === 'number' ? 1 : p.type === 'boolean' ? true : p.type === 'object' ? {} : p.type === 'array' ? [] : 'value'])),
     null, 2
   )}\n}\n\`\`\``;
 
@@ -400,20 +405,21 @@ To create experiments, use group "experiments", command "createExperimentFromTem
           );
         }
 
-        // Apply default items limit for list operations
-        const itemsLimit = params.limit ?? DEFAULT_LIST_ITEMS;
-        if (params.command.startsWith('list') || params.command.startsWith('search')) {
-          if (commandParams.items === undefined) {
-            commandParams.items = itemsLimit;
+        // Defaults the tool layer injects; executeCommand lets exactly these
+        // through (TOOL_INJECTED_PARAMS), and the audit ignores them.
+        const injectedDefaults: Record<string, unknown> = {
+          items: params.limit ?? DEFAULT_LIST_ITEMS,
+          page: 1,
+          apiEndpoint: ctx.endpoint || undefined,
+        };
+        const injectedNames: readonly string[] = [
+          ...TOOL_INJECTED_PARAMS.always,
+          ...(isListCommand(params.command) ? TOOL_INJECTED_PARAMS.listCommands : []),
+        ];
+        for (const name of injectedNames) {
+          if (commandParams[name] === undefined && injectedDefaults[name] !== undefined) {
+            commandParams[name] = injectedDefaults[name];
           }
-          if (commandParams.page === undefined) {
-            commandParams.page = 1;
-          }
-        }
-
-        // Fill in apiEndpoint for commands that need it (clone, generateTemplate, etc.)
-        if (commandParams.apiEndpoint === undefined && ctx.endpoint) {
-          commandParams.apiEndpoint = ctx.endpoint;
         }
 
         const result = await executeCommand(ctx.apiClient, params.group, params.command, commandParams);

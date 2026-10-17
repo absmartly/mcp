@@ -17,6 +17,11 @@ import {
   type ConsentOptions,
   type ConsentOutcome,
   type OAuthStateStore,
+  HTTP_STATUS_BAD_REQUEST,
+  firstValidEndpoint,
+  MESSAGE_INVALID_ENDPOINT,
+  parseAbsmartlyEndpoint,
+  tryParseAbsmartlyEndpoint,
 } from './oauth/index.js';
 
 type OAuthBindings = Env & { OAUTH_PROVIDER: OAuthHelpers };
@@ -28,7 +33,6 @@ const HOST_COOKIE_PREFIX = 'host';
 // One cookie per upstream login, named after its state token, so parallel logins in the
 // same browser don't overwrite each other's binding.
 const CALLBACK_COOKIE_NAME_PREFIX = 'absmartly-oauth-cb-';
-const HTTP_STATUS_BAD_REQUEST = 400;
 const ENDPOINT_QUERY_PARAM = 'absmartly-endpoint';
 const ENDPOINT_HEADER = 'x-absmartly-endpoint';
 // 0.10.x defaults completeAuthorization to revoking every other grant for the same
@@ -105,15 +109,27 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
         return c.text('Invalid authorization request', HTTP_STATUS_BAD_REQUEST);
       }
 
-      let absmartlyEndpoint = this.extractEndpointFromResource(authRequest.resource) ||
-                              url.searchParams.get(ENDPOINT_QUERY_PARAM) ||
-                              c.req.header(ENDPOINT_HEADER) || null;
-      if (!absmartlyEndpoint) {
-        absmartlyEndpoint = await safeKvGet(c.env.OAUTH_KV, `oauth_endpoint:client:${authRequest.clientId}`);
-      }
+      // The first request source that parses wins; an invalid one is reported
+      // (as rejected) without hiding a valid lower-priority source.
+      const requested = firstValidEndpoint([
+        this.extractEndpointFromResource(authRequest.resource),
+        url.searchParams.get(ENDPOINT_QUERY_PARAM),
+        c.req.header(ENDPOINT_HEADER),
+      ]);
+      // Whenever a higher-priority request source was rejected, it is passed
+      // as the explicit endpoint, with the substitute (a valid lower-priority
+      // source, or else the stored mapping) as the fallback: consent then
+      // shows the "was ignored" notice and does not auto-approve.
+      const valid = requested.endpoint?.baseUrl ?? null;
+      const substitute = valid ?? await safeKvGet(c.env.OAUTH_KV, `oauth_endpoint:client:${authRequest.clientId}`);
 
       const outcome = await beginAuthorization(
-        { authRequest, endpoint: absmartlyEndpoint, cookieHeader: c.req.header('Cookie') },
+        {
+          authRequest,
+          endpoint: requested.rejected ?? valid,
+          fallbackEndpoint: requested.rejected || !valid ? substitute : null,
+          cookieHeader: c.req.header('Cookie'),
+        },
         this.consentOptions(c),
       );
       return this.finishConsent(c, outcome);
@@ -197,7 +213,9 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
         debug('No absmartlyEndpoint in stored state');
         return c.text('Missing ABsmartly endpoint in OAuth state', 400);
       }
-      const cleanEndpoint = absmartlyEndpoint.replace(/\/+$/, '');
+      const parsedEndpoint = tryParseAbsmartlyEndpoint(absmartlyEndpoint);
+      if (!parsedEndpoint) return c.text(MESSAGE_INVALID_ENDPOINT, HTTP_STATUS_BAD_REQUEST);
+      const cleanEndpoint = parsedEndpoint.baseUrl;
       const tokenUrl = `${cleanEndpoint}/auth/oauth/token`;
       const tokenBody = new URLSearchParams({
         grant_type: 'authorization_code',
@@ -271,7 +289,7 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
 
       debug('Extracted user details:', { email: finalEmail, name: finalName, userId: finalUserId });
 
-      const apiEndpoint = cleanEndpoint.endsWith('/v1') ? cleanEndpoint : `${cleanEndpoint}/v1`;
+      const apiEndpoint = parsedEndpoint.apiUrl;
 
       let result;
       try {
@@ -305,7 +323,7 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
 
     debug(`ABsmartly endpoint for OAuth redirect: ${absmartlyEndpoint}`);
 
-    const cleanEndpoint = absmartlyEndpoint.replace(/\/+$/, '');
+    const cleanEndpoint = parseAbsmartlyEndpoint(absmartlyEndpoint).baseUrl;
     const { codeVerifier, codeChallenge } = await generatePkcePair();
     const stateToken = crypto.randomUUID();
     const browserBinding = crypto.randomUUID();

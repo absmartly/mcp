@@ -71,3 +71,4 @@ docs/superpowers/
 
 # CommonJS build produced by tests/unit/package-entries.test.ts
 .test-dist/
+.parity-*/

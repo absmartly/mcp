@@ -25,16 +25,13 @@ import ts from "typescript";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CLI_GROUPS, getGroupCommands, normalizeCommandParams, hasCommandRunner } from "../src/cli-catalog.js";
+import { CLI_GROUPS, getGroupCommands, normalizeCommandParams, normalizeIdParams, hasCommandRunner, isListCommand, TOOL_INJECTED_PARAMS } from "../src/cli-catalog.js";
 
 const require = createRequire(import.meta.url);
 
 const DATA_PARAM = "data";
 const FILTER_BAG_PARAM = "params";
 const SAMPLE_BASE = 9000;
-// Injected by the execute_command handler (src/tools.ts), not by the caller.
-const LIST_INJECTED_PARAMS = ["items", "page"];
-const ALWAYS_INJECTED_PARAMS = ["apiEndpoint"];
 
 export interface CatalogParamFinding {
   command: string;
@@ -117,19 +114,24 @@ export function auditCatalogParams(): CatalogParamFinding[] {
         continue;
       }
 
-      const injected = new Set(ALWAYS_INJECTED_PARAMS);
-      if (/^(list|search)/.test(entry.command)) LIST_INJECTED_PARAMS.forEach((p) => injected.add(p));
+      const injected = new Set<string>(TOOL_INJECTED_PARAMS.always);
+      if (isListCommand(entry.command)) TOOL_INJECTED_PARAMS.listCommands.forEach((p) => injected.add(p));
+      // The same pipeline executeCommand runs: IDs first, then the adapter.
+      // Deprecated params are left out of the sample: they are aliases or
+      // ignored, and an alias would otherwise compete with its canonical param.
       const translate = (params: Record<string, unknown>) =>
-        normalizeCommandParams(group, entry.command, structuredClone(params));
+        normalizeCommandParams(group, entry.command, normalizeIdParams(entry, structuredClone(params), { checkRequired: false }));
 
       const sample: Record<string, unknown> = {};
-      entry.params.forEach((p, i) => { sample[p.name] = sampleValue(p.type, SAMPLE_BASE + 2 * i); });
+      entry.params.forEach((p, i) => { if (!p.deprecated) sample[p.name] = sampleValue(p.type, SAMPLE_BASE + 2 * i); });
       const baseline = readView(translate(sample), core);
 
       const dropped: string[] = [];
       const dataParam = entry.params.find((p) => p.name === DATA_PARAM);
       entry.params.forEach((p, i) => {
-        if (injected.has(p.name) || p === dataParam) return;
+        // Deprecated params are accepted for backward compatibility and are not
+        // documented, so they may be ignored or superseded by documented ones.
+        if (injected.has(p.name) || p === dataParam || p.deprecated) return;
         const changed = { ...sample, [p.name]: sampleValue(p.type, SAMPLE_BASE + 2 * i + 1) };
         if (readView(translate(changed), core) !== baseline) return;
         dropped.push(p.name === FILTER_BAG_PARAM

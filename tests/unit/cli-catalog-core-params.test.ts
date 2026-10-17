@@ -2,8 +2,9 @@
 // HttpClient, and guards the whole catalog with scripts/audit-catalog-params.ts.
 import { APIClient } from '@absmartly/cli/api-client';
 import type { HttpClient, HttpRequestConfig, HttpResponse } from '@absmartly/cli/api-client';
-import { executeCommand, getCommandEntry, validateCommandParams } from '../../src/cli-catalog';
+import { CLI_GROUPS, documentedParams, executeCommand, getCommandEntry, getGroupCommands, validateCommandParams } from '../../src/cli-catalog';
 import { auditCatalogParams } from '../../scripts/audit-catalog-params';
+import { compareWithRef, RefUnavailableError } from '../../scripts/parity-main';
 
 const BASE_URL = 'https://api.test/v1';
 const ROOT_URL = 'https://api.test';
@@ -144,9 +145,6 @@ const CASES: Case[] = [
       { method: 'GET', url: '/asset_roles', params: { items: '100', page: '2' } },
       { method: 'POST', url: '/experiments/3/asset_role_users', data: { user_id: 2, asset_role_id: 777 } },
     ] },
-  { name: 'grantExperimentAccessTeam normalises a direct numeric-string roleId', group: 'experiments', command: 'grantExperimentAccessTeam',
-    params: { experimentId: 3, teamId: 2, roleId: '6' },
-    expected: [{ method: 'POST', url: '/experiments/3/asset_role_teams', data: { team_id: 2, asset_role_id: 6 } }] },
   // Pre-1.16 cores drop { items, page } and return every role on each call
   // (simulated by a server that ignores the paging params).
   { name: 'role lookup makes one request when paging is ignored and the list exceeds a page', group: 'experiments', command: 'grantExperimentAccessUser',
@@ -163,6 +161,201 @@ const CASES: Case[] = [
     select: (requests) => requests.map(({ method, url }) => ({ method, url })),
     expectedErrorPrefix: 'Asset role "Missing" not found',
     expected: [{ method: 'GET', url: '/asset_roles' }, { method: 'GET', url: '/asset_roles' }] },
+  { name: 'listUserApiKeys resolves an email userId', group: 'users', command: 'listUserApiKeys', params: { userId: 'jane@example.com' },
+    respond: (config) => (config.url === '/users' ? { users: [{ id: 42, email: 'jane@example.com' }] } : { user_api_keys: [] }),
+    select: (requests) => requests.filter((r) => r.url.includes('/api_keys')).map(({ method, url }) => ({ method, url })),
+    expected: [{ method: 'GET', url: '/users/42/api_keys' }] },
+  { name: 'listEvents treats params: null as no filters', group: 'events', command: 'listEvents', params: { params: null },
+    // take: 100 is the core's default page size (@absmartly/cli >= 1.16).
+    expected: [{ method: 'POST', url: '/events', data: { take: 100 } }] },
+  { name: 'grantExperimentAccessUser does not put role 1.5 into a path', group: 'experiments', command: 'grantExperimentAccessUser',
+    params: { experimentId: 3, userId: 2, role: '1.5' },
+    respond: (config) => (config.url === '/asset_roles' ? { asset_roles: [{ id: 5, name: 'Editor' }] } : {}),
+    select: (requests) => requests.filter((r) => r.method !== 'GET'),
+    expectedErrorPrefix: 'Asset role "1.5" not found', expected: [] },
+  { name: 'grantExperimentAccessUser does not put role -3 into a path', group: 'experiments', command: 'grantExperimentAccessUser',
+    params: { experimentId: 3, userId: 2, role: '-3' },
+    respond: (config) => (config.url === '/asset_roles' ? { asset_roles: [{ id: 5, name: 'Editor' }] } : {}),
+    select: (requests) => requests.filter((r) => r.method !== 'GET'),
+    expectedErrorPrefix: 'Asset role "-3" not found', expected: [] },
+  { name: 'grantExperimentAccessUser does not put role Infinity into a path', group: 'experiments', command: 'grantExperimentAccessUser',
+    params: { experimentId: 3, userId: 2, role: 'Infinity' },
+    respond: (config) => (config.url === '/asset_roles' ? { asset_roles: [{ id: 5, name: 'Editor' }] } : {}),
+    select: (requests) => requests.filter((r) => r.method !== 'GET'),
+    expectedErrorPrefix: 'Asset role "Infinity" not found', expected: [] },
+  { name: 'grantExperimentAccessUser does not put role 1e3 into a path', group: 'experiments', command: 'grantExperimentAccessUser',
+    params: { experimentId: 3, userId: 2, role: '1e3' },
+    respond: (config) => (config.url === '/asset_roles' ? { asset_roles: [{ id: 5, name: 'Editor' }] } : {}),
+    select: (requests) => requests.filter((r) => r.method !== 'GET'),
+    expectedErrorPrefix: 'Asset role "1e3" not found', expected: [] },
+  { name: 'grantExperimentAccessUser does not put role 0x10 into a path', group: 'experiments', command: 'grantExperimentAccessUser',
+    params: { experimentId: 3, userId: 2, role: '0x10' },
+    respond: (config) => (config.url === '/asset_roles' ? { asset_roles: [{ id: 5, name: 'Editor' }] } : {}),
+    select: (requests) => requests.filter((r) => r.method !== 'GET'),
+    expectedErrorPrefix: 'Asset role "0x10" not found', expected: [] },
+  { name: 'grantExperimentAccessUser does not put role 0 into a path', group: 'experiments', command: 'grantExperimentAccessUser',
+    params: { experimentId: 3, userId: 2, role: '0' },
+    respond: (config) => (config.url === '/asset_roles' ? { asset_roles: [{ id: 5, name: 'Editor' }] } : {}),
+    select: (requests) => requests.filter((r) => r.method !== 'GET'),
+    expectedErrorPrefix: 'Asset role "0" not found', expected: [] },
+  { name: 'getPlatformConfig resolves a non-integer configKey by name, never as an ID', group: 'platformconfig', command: 'getPlatformConfig',
+    params: { configKey: '1e3' },
+    respond: (config) => (config.url === '/configs' ? { configs: [{ id: 1000, name: 'other' }] } : { config: {} }),
+    expectedError: 'Platform config "1e3" not found', expected: [{ method: 'GET', url: '/configs' }] },
+  { name: 'bulkStart rejects non-integer ids before any request', group: 'experiments', command: 'bulkStart', params: { ids: [1, '2.5'] },
+    expectedError: 'Param "ids" for experiments.bulkStart must be an array of positive integer IDs.', expected: [] },
+  { name: 'bulkArchive rejects a non-array ids before any request', group: 'experiments', command: 'bulkArchive', params: { ids: '5' },
+    expectedError: 'Param "ids" for experiments.bulkArchive must be an array of positive integer IDs.', expected: [] },
+  // The ID rule runs in executeCommand, so direct Node callers are covered too.
+  // normalizeIdParams owns ID params: undocumented core-name aliases never reach the core.
+  { name: 'executeCommand rejects an invalid id alias instead of letting it reach the path', group: 'goals', command: 'followGoal', params: { goalId: 1, id: '6/follow' },
+    expectedError: 'Param "id" for goals.followGoal must be a positive integer ID.', expected: [] },
+  { name: 'executeCommand rejects an id alias that disagrees with keyId', group: 'apikeys', command: 'deleteApiKey', params: { keyId: 9, id: 10 },
+    expectedError: 'Params "id" and "keyId" for apikeys.deleteApiKey disagree; pass only "keyId".', expected: [] },
+  { name: 'executeCommand accepts the 2.0 core-name id alias (deprecated)', group: 'apikeys', command: 'deleteApiKey', params: { id: ' 9' },
+    expected: [{ method: 'DELETE', url: '/api_keys/9' }] },
+  { name: 'executeCommand accepts the 2.0 metrics id alias (deprecated)', group: 'metrics', command: 'getMetric', params: { id: 12 },
+    expected: [{ method: 'GET', url: '/metrics/12' }] },
+  { name: 'executeCommand passes an unrelated undocumented key through (as in 2.0)', group: 'goals', command: 'getGoal', params: { goalId: 3, url: '/admin' },
+    expected: [{ method: 'GET', url: '/goals/3' }] },
+  { name: 'executeCommand passes a core-only option through to the core (includeArchived)', group: 'users', command: 'listUsers',
+    params: { items: 10, page: 1, includeArchived: true },
+    expected: [{ method: 'GET', url: '/users', params: { items: '10', page: '1', include_archived: '1' } }] },
+  { name: 'an undocumented ID-named key must still be a positive integer', group: 'experiments', command: 'getMetricResults',
+    params: { experimentId: 3, metricId: '1/../x' },
+    // Checked where the APIClient builds the path (withPathIdGuard).
+    select: (requests) => requests.filter((r) => r.url.includes('metric')),
+    expectedError: 'Invalid ID "1/../x" for getMetric: a path ID must be a positive integer.', expected: [] },
+  { name: 'executeCommand rejects a deprecated metrics roleId that is not an integer', group: 'metrics', command: 'revokeMetricAccessUser',
+    params: { metricId: 8, userId: 4, roleId: '4/x' },
+    expectedError: 'Param "roleId" for metrics.revokeMetricAccessUser must be a positive integer ID.', expected: [] },
+  { name: 'executeCommand maps a deprecated metrics roleId to assetRoleId', group: 'metrics', command: 'revokeMetricAccessUser',
+    params: { metricId: 8, userId: 4, roleId: ' 05 ' },
+    expected: [{ method: 'DELETE', url: '/metrics/8/asset_role_users/4/5' }] },
+  { name: 'executeCommand rejects disagreeing roleId and assetRoleId', group: 'metrics', command: 'grantMetricAccessUser',
+    params: { metricId: 8, userId: 4, assetRoleId: 3, roleId: 5 },
+    expectedError: 'Params "roleId" and "assetRoleId" for metrics.grantMetricAccessUser disagree; pass only "assetRoleId".', expected: [] },
+  { name: 'a padded ID reaches the path as an integer', group: 'goals', command: 'getGoal', params: { goalId: ' 05 ' },
+    expected: [{ method: 'GET', url: '/goals/5' }] },
+  { name: 'grantExperimentAccessUser still accepts the 2.0 roleId', group: 'experiments', command: 'grantExperimentAccessUser',
+    params: { experimentId: 3, userId: 2, roleId: 4 },
+    expected: [{ method: 'POST', url: '/experiments/3/asset_role_users', data: { user_id: 2, asset_role_id: 4 } }] },
+  { name: 'teams userIds are normalised as IDs', group: 'teams', command: 'addTeamMembers', params: { teamId: 5, userIds: [' 2', 3] },
+    expected: [{ method: 'PUT', url: '/teams/5/members/add', data: { user_ids: [2, 3] } }] },
+  { name: 'teams userIds reject a non-integer', group: 'teams', command: 'removeTeamMembers', params: { teamId: 5, userIds: ['2/x'] },
+    expectedError: 'Param "userIds" for teams.removeTeamMembers must be an array of positive integer IDs.', expected: [] },
+  { name: 'reorderCustomSections ids are normalised as IDs', group: 'customsections', command: 'reorderCustomSections', params: { ids: ['09', 7] },
+    expected: [{ method: 'PUT', url: '/experiment_custom_sections/order', data: { experiment_custom_sections: [{ id: 9, order_index: 0 }, { id: 7, order_index: 1 }] } }] },
+  { name: 'the deprecated params bag is flattened, then passed through like top-level params', group: 'events', command: 'listEvents',
+    params: { params: { take: 5, eventTypes: ['goal'] } },
+    expected: [{ method: 'POST', url: '/events', data: { filters: { event_types: ['goal'] }, take: 5 } }] },
+  { name: 'a deprecated ignored ID never reaches the core, even if malformed', group: 'experiments', command: 'dismissAlert',
+    params: { alertId: 4, experimentId: '../x' },
+    expected: [{ method: 'PUT', url: '/experiment_alerts/4/dismiss' }] },
+  { name: 'a non-object params bag is rejected before any request', group: 'events', command: 'listEvents', params: { params: 'take=5' },
+    expectedError: 'Param "params" for events.listEvents must be an object.', expected: [] },
+  { name: 'a nested params bag is rejected before any request', group: 'events', command: 'listEvents', params: { params: { params: { take: 5 } } },
+    expectedError: 'Param "params" for events.listEvents must not contain a nested "params".', expected: [] },
+  { name: 'an optional ID given as null is treated as absent', group: 'experiments', command: 'diffExperimentsCore',
+    params: { experimentId1: 3, experimentId2: null },
+    // Absent, so the core asks for it (not a "/experiments/null" request).
+    select: (requests) => requests.slice(0, 1),
+    expectedError: 'Provide a second experiment ID or use --iteration <n>',
+    expected: [{ method: 'GET', url: '/experiments/3' }] },
+  { name: 'editTeamMemberRoles accepts an empty roles list (clears roles)', group: 'teams', command: 'editTeamMemberRoles',
+    params: { teamId: 5, userId: 2, roles: [] },
+    expected: [{ method: 'PUT', url: '/teams/5/members/edit_roles', data: { user_ids: [2], role_ids: [] } }] },
+  { name: 'editTeamMemberRoles still rejects a non-integer role', group: 'teams', command: 'editTeamMemberRoles',
+    params: { teamId: 5, userId: 2, roles: ['x'] },
+    expectedError: 'Param "roles" for teams.editTeamMemberRoles must be an array of positive integer IDs.', expected: [] },
+  // Option A: 2.0 direct callers using the core's own param names still work.
+  { name: '2.0 core shape: searchExperiments {query}', group: 'experiments', command: 'searchExperiments', params: { query: 'checkout' },
+    expected: [{ method: 'GET', url: '/experiments', params: { items: '50', search: 'checkout' } }] },
+  { name: '2.0 core shape: createExperimentNote {experimentId, note}', group: 'experiments', command: 'createExperimentNote', params: { experimentId: 1, note: 'hi' },
+    expected: [{ method: 'POST', url: '/experiments/1/activity', data: { note: 'hi' } }] },
+  { name: '2.0 core shape: addFavorite {type, id}', group: 'favorites', command: 'addFavorite', params: { type: 'experiment', id: 5 },
+    expected: [{ method: 'PUT', url: '/favorites/experiment', params: { id: '5', favorite: 'true' } }] },
+  { name: '2.0 core shape: updateGoal {id, description}', group: 'goals', command: 'updateGoal', params: { id: 5, description: 'n' },
+    expected: [{ method: 'PUT', url: '/goals/5', data: { data: { description: 'n' } } }] },
+  { name: '2.0 core shape: editTeamMemberRoles {id, userIds, roleIds}', group: 'teams', command: 'editTeamMemberRoles', params: { id: 1, userIds: [2], roleIds: [3] },
+    expected: [{ method: 'PUT', url: '/teams/1/members/edit_roles', data: { user_ids: [2], role_ids: [3] } }] },
+  { name: '2.0 core shape: deleteUserApiKey {userRef, keyId}', group: 'users', command: 'deleteUserApiKey', params: { userRef: '5', keyId: 2 },
+    expected: [{ method: 'DELETE', url: '/users/5/api_keys/2' }] },
+  { name: '2.0 core shape: grantGoalAccessUser {id, userId, roleId} (runner command)', group: 'goals', command: 'grantGoalAccessUser', params: { id: 5, userId: 3, roleId: 7 },
+    expected: [{ method: 'POST', url: '/goals/5/asset_role_users', data: { user_id: 3, asset_role_id: 7 } }] },
+  { name: '2.0 core shape still rejects an unsafe core-name ID', group: 'goals', command: 'updateGoal', params: { id: '5/../users/1', description: 'n' },
+    expectedError: 'Param "id" for goals.updateGoal must be a positive integer ID.', expected: [] },
+  // Round 10: the general rule replaces per-command fallbacks.
+  { name: '2.0 core shape: testDatasource {config}', group: 'datasources', command: 'testDatasource', params: { config: { type: 'clickhouse', properties: { host: 'h' } } },
+    expected: [{ method: 'POST', url: '/datasources/test', data: { type: 'clickhouse', properties: { host: 'h' } } }] },
+  { name: '2.0 core shape: introspectDatasource {config}', group: 'datasources', command: 'introspectDatasource', params: { config: { datasource_id: 2 } },
+    expected: [{ method: 'POST', url: '/datasources/introspect', data: { datasource_id: 2 } }] },
+  { name: '2.0 core shape: validateDatasourceQuery {config}', group: 'datasources', command: 'validateDatasourceQuery', params: { config: { type: 'clickhouse', properties: {}, query: 'select 1' } },
+    expected: [{ method: 'POST', url: '/datasources/validate_query', data: { type: 'clickhouse', properties: {}, query: 'select 1' } }] },
+  { name: 'validateDatasourceQuery with datasourceId still needs query', group: 'datasources', command: 'validateDatasourceQuery', params: { datasourceId: 2 },
+    expectedError: 'datasources.validateDatasourceQuery requires "query" with "datasourceId"', expected: [] },
+  { name: 'a null core-name ID is an error, never a /configs/null path', group: 'platformconfig', command: 'getPlatformConfig', params: { id: null },
+    expectedError: 'Platform config must be a positive integer ID or a config name: null', expected: [] },
+  { name: 'a null core-name ID on update is an error too', group: 'platformconfig', command: 'updatePlatformConfig', params: { id: null, value: 2 },
+    expectedError: 'Platform config must be a positive integer ID or a config name: null', expected: [] },
+  { name: 'a null documented ID alias is an error', group: 'goals', command: 'followGoal', params: { id: null },
+    expectedError: 'Param "id" for goals.followGoal must be a positive integer ID.', expected: [] },
+  { name: 'bag conflicts compare normalised IDs', group: 'events', command: 'listEvents', params: { params: { take: 5, experimentId: 5 }, experimentId: ' 5' },
+    expected: [{ method: 'POST', url: '/events', data: { take: 5 } }] },
+  { name: 'tool-injected paging loses to the bag without a conflict', group: 'events', command: 'listEventsHistory', params: { params: { period: 'day' }, items: 20, page: 1 },
+    expected: [{ method: 'POST', url: '/events/history', data: { period: 'day' } }] },
+  { name: 'a negative numeric userId on user API keys is refused', group: 'users', command: 'listUserApiKeys', params: { userId: '-5' },
+    expectedError: 'Param "userId" for users.listUserApiKeys must be a positive integer user ID or an email.', expected: [] },
+  { name: 'a zero userRef (2.0 core shape) is refused', group: 'users', command: 'deleteUserApiKey', params: { userRef: '0', keyId: 2 },
+    expectedError: 'Param "userRef" for users.deleteUserApiKey must be a positive integer user ID or an email.', expected: [] },
+  // Round 12: IDs nested in data reach the path through flattenData; the
+  // APIClient-boundary guard refuses them.
+  { name: 'an ID nested in data is refused at the path (abc)', group: 'goals', command: 'updateGoal', params: { data: { id: 'abc', description: 'x' } },
+    expectedError: 'Invalid ID "abc" for updateGoal: a path ID must be a positive integer.', expected: [] },
+  { name: 'an ID nested in data is refused at the path (x/y)', group: 'experiments', command: 'updateCustomField', params: { data: { id: 'x/y', name: 'n' } },
+    expectedError: 'Invalid ID "x/y" for updateCustomSectionField: a path ID must be a positive integer.', expected: [] },
+  { name: 'an ID nested in data is refused at the path (-3)', group: 'goals', command: 'updateGoal', params: { data: { id: -3, description: 'x' } },
+    expectedError: 'Invalid ID -3 for updateGoal: a path ID must be a positive integer.', expected: [] },
+  { name: 'an ID nested in data is refused at the path (0)', group: 'goals', command: 'updateGoal', params: { data: { id: 0, description: 'x' } },
+    expectedError: 'Invalid ID 0 for updateGoal: a path ID must be a positive integer.', expected: [] },
+  { name: 'a missing ID never reaches a path, whatever the HttpClient', group: 'experiments', command: 'startExperiment', params: {},
+    expectedError: 'Invalid ID undefined for getExperiment: a path ID must be a positive integer.', expected: [] },
+  { name: 'an undocumented ID-named body key is not path-checked (createExperimentNote userId)', group: 'experiments', command: 'createExperimentNote',
+    params: { experimentId: 5, note: 'x', userId: 'ada@x.com' },
+    expected: [{ method: 'POST', url: '/experiments/5/activity', data: { note: 'x' } }] },
+  { name: 'a non-ID null passes through unchanged', group: 'events', command: 'listEvents', params: { validExposures: null, from: 1 },
+    expected: [{ method: 'POST', url: '/events', data: { filters: { from: 1, effective_exposures: null }, take: 100 } }] },
+  { name: 'a non-ID params-bag key loses quietly to the top level, as in 2.0', group: 'events', command: 'listEvents', params: { params: { from: 1 }, from: 2 },
+    expected: [{ method: 'POST', url: '/events', data: { filters: { from: 2 }, take: 100 } }] },
+  { name: 'an ID params-bag key that disagrees is an error', group: 'events', command: 'listEvents', params: { params: { experimentId: 1 }, experimentId: 2 },
+    expectedError: 'Param "experimentId" for events.listEvents is given both at the top level and in "params" with different values; pass it once.', expected: [] },
+  { name: 'empty ID lists are allowed (reorderCustomSections ids: [])', group: 'customsections', command: 'reorderCustomSections', params: { ids: [] },
+    expected: [{ method: 'PUT', url: '/experiment_custom_sections/order', data: { experiment_custom_sections: [] } }] },
+  { name: '2.0 shape: grantGoalAccessUser {goalId, userId} without role goes to the core', group: 'goals', command: 'grantGoalAccessUser', params: { goalId: 5, userId: 3 },
+    expected: [{ method: 'POST', url: '/goals/5/asset_role_users', data: { user_id: 3 } }] },
+  { name: '2.0 shape: testStorageConfig {configId, config} sends the config as is', group: 'storageconfigs', command: 'testStorageConfig',
+    params: { configId: 3, config: { type: 'S3', properties: { bucket: 'b' } } },
+    expected: [{ method: 'POST', url: '/storage_configs/test', data: { type: 'S3', properties: { bucket: 'b' } } }] },
+  { name: 'screenshotId is not a path ID and passes through unchanged', group: 'experiments', command: 'updateExperiment',
+    params: { experimentId: 5, changes: { name: 'n' }, screenshotId: ['0:12'] },
+    select: (requests) => requests.slice(0, 1),
+    expected: [{ method: 'GET', url: '/experiments/5' }] },
+  { name: 'a documented required ID given as null is an error', group: 'experiments', command: 'startExperiment', params: { experimentId: null },
+    expectedError: 'Param "experimentId" for experiments.startExperiment must be a positive integer ID.', expected: [] },
+  { name: 'executeCommand rejects a multi-segment experimentId (6/full_on)', group: 'experiments', command: 'startExperiment', params: { experimentId: '6/full_on' },
+    expectedError: 'Param "experimentId" for experiments.startExperiment must be a positive integer ID.', expected: [] },
+  { name: 'executeCommand rejects a traversal segmentId', group: 'segments', command: 'deleteSegment', params: { segmentId: '../users/5' },
+    expectedError: 'Param "segmentId" for segments.deleteSegment must be a positive integer ID.', expected: [] },
+  { name: 'executeCommand rejects a traversal goalId on a runner command', group: 'goals', command: 'grantGoalAccessUser', params: { goalId: '1/../2', userId: 2, role: 5 },
+    expectedError: 'Param "goalId" for goals.grantGoalAccessUser must be a positive integer ID.', expected: [] },
+  { name: 'executeCommand accepts a padded numeric-string ID', group: 'segments', command: 'deleteSegment', params: { segmentId: ' 07 ' },
+    select: (requests) => requests.map(({ method }) => ({ method, url: 'DELETE /segments/<id>' })),
+    expected: [{ method: 'DELETE', url: 'DELETE /segments/<id>' }] },
+  { name: 'role accepts " 05 " as asset role 5', group: 'experiments', command: 'grantExperimentAccessUser',
+    params: { experimentId: 3, userId: 2, role: ' 05 ' },
+    expected: [{ method: 'POST', url: '/experiments/3/asset_role_users', data: { user_id: 2, asset_role_id: 5 } }] },
+  { name: 'configKey accepts "012" as config 12', group: 'platformconfig', command: 'getPlatformConfig', params: { configKey: '012' },
+    expected: [{ method: 'GET', url: '/configs/12' }] },
   { name: 'grantExperimentAccessUser without role fails before any request', group: 'experiments', command: 'grantExperimentAccessUser',
     params: { experimentId: 3, userId: 2 },
     expectedError: 'experiments.grantExperimentAccessUser requires "role" (an asset role ID or name)', expected: [] },
@@ -336,42 +529,89 @@ const CASES: Case[] = [
       { method: 'GET', url: '/configs/12' },
       { method: 'PUT', url: '/configs/12', data: { data: { name: 'flag', value: 'true' } } },
     ] },
+
+  // ── 2.1.0 contract additions ──────────────────────────────────────────────
+  { name: 'revokeExperimentAccessUser resolves role into the URL', group: 'experiments', command: 'revokeExperimentAccessUser',
+    params: { experimentId: 3, userId: 2, role: 'Editor' }, respond: (config) => (config.url === '/asset_roles' ? { asset_roles: [{ id: 1, name: 'Viewer' }, { id: 5, name: 'Editor' }] } : {}),
+    expected: [{ method: 'GET', url: '/asset_roles', params: { items: '100', page: '1' } }, { method: 'DELETE', url: '/experiments/3/asset_role_users/2/5' }] },
+  { name: 'revokeExperimentAccessTeam takes a numeric role', group: 'experiments', command: 'revokeExperimentAccessTeam',
+    params: { experimentId: 3, teamId: 4, role: 5 },
+    expected: [{ method: 'DELETE', url: '/experiments/3/asset_role_teams/4/5' }] },
+  { name: 'grantGoalAccessUser maps goalId and role', group: 'goals', command: 'grantGoalAccessUser',
+    params: { goalId: 12, userId: 2, role: 5 },
+    expected: [{ method: 'POST', url: '/goals/12/asset_role_users', data: { user_id: 2, asset_role_id: 5 } }] },
+  { name: 'revokeGoalAccessTeam maps goalId and resolves a role name', group: 'goals', command: 'revokeGoalAccessTeam',
+    params: { goalId: 12, teamId: 4, role: 'viewer' }, respond: (config) => (config.url === '/asset_roles' ? { asset_roles: [{ id: 1, name: 'Viewer' }, { id: 5, name: 'Editor' }] } : {}),
+    expected: [{ method: 'GET', url: '/asset_roles', params: { items: '100', page: '1' } }, { method: 'DELETE', url: '/goals/12/asset_role_teams/4/1' }] },
+  { name: 'revokeGoalAccessUser without role fails before any request', group: 'goals', command: 'revokeGoalAccessUser',
+    params: { goalId: 12, userId: 2 },
+    // No role: the 2.0 shape goes to the core, which would build ".../undefined";
+    // the path guard refuses it before any request.
+    expectedError: 'Invalid ID undefined for revokeGoalAccessUser: a path ID must be a positive integer.', expected: [] },
+  { name: 'restartExperiment passes state and reshuffle', group: 'experiments', command: 'restartExperiment',
+    params: { experimentId: 3, reason: 'testing', state: 'development', reshuffle: true },
+    select: (requests) => requests.map(({ method, url, data }) => {
+      const { reason, state, reshuffle } = (data ?? {}) as Record<string, unknown>;
+      return data === undefined ? { method, url } : { method, url, data: { reason, state, reshuffle } };
+    }),
+    expected: [
+      { method: 'GET', url: '/experiments/3' },
+      { method: 'PUT', url: '/experiments/3/restart', data: { reason: 'testing', state: 'development', reshuffle: true } },
+    ] },
+  { name: 'estimateParticipants resolves unitType and applications', group: 'experiments', command: 'estimateParticipants',
+    params: { unitType: 'user_id', application: ['www'], from: '1700000000000' },
+    respond: (config) => {
+      if (config.url === '/unit_types') return { unit_types: [{ id: 7, name: 'user_id' }] };
+      if (config.url === '/applications') return { applications: [{ id: 2, name: 'www' }] };
+      return { columnNames: ['unit_count'], rows: [[42]] };
+    },
+    select: (requests) => requests.filter((r) => r.method === 'POST'),
+    expected: [{ method: 'POST', url: '/experiments/estimate/max_participants', data: { from: 1700000000000, unit_type_id: 7, applications: [2] } }] },
+  { name: 'generateTemplate makes no API request', group: 'experiments', command: 'generateTemplate',
+    params: { name: 'Checkout', type: 'feature' }, select: (requests) => requests.filter((r) => r.method !== 'GET'), expected: [] },
+  { name: 'listCustomFields defaults type to test', group: 'experiments', command: 'listCustomFields', params: {},
+    expected: [{ method: 'GET', url: '/experiment_custom_section_fields', params: { items: '100', page: '1' } }] },
+  { name: 'resetMyPassword sends old and new password', group: 'auth', command: 'resetMyPassword',
+    params: { oldPassword: 'old-pw', newPassword: 'new-pw' },
+    expected: [{ method: 'PUT', url: `${ROOT_URL}/auth/current-user`, data: { data: { old_password: 'old-pw', new_password: 'new-pw' } } }] },
+  { name: 'getVelocityInsights takes documented top-level filters', group: 'insights', command: 'getVelocityInsights',
+    params: { from: '2026-01-01T00:00:00Z', to: '2026-02-01T00:00:00Z', aggregation: 'week' },
+    select: (requests) => requests.filter((r) => r.url.startsWith('/insights')),
+    expected: [{ method: 'GET', url: '/insights/summary', params: { from: '1767225600', to: '1769904000', aggregation: 'week' } }] },
+  { name: 'getVelocityInsights still accepts the deprecated params bag', group: 'insights', command: 'getVelocityInsights',
+    params: { params: { from: '2026-01-01T00:00:00Z', to: '2026-02-01T00:00:00Z', aggregation: 'week' } },
+    select: (requests) => requests.filter((r) => r.url.startsWith('/insights')),
+    expected: [{ method: 'GET', url: '/insights/summary', params: { from: '1767225600', to: '1769904000', aggregation: 'week' } }] },
+  { name: 'listEvents takes documented top-level filters', group: 'events', command: 'listEvents', params: { eventTypes: ['goal'], take: 10 },
+    expected: [{ method: 'POST', url: '/events', data: { filters: { event_types: ['goal'] }, take: 10 } }] },
+  { name: 'testDatasource tests the stored datasource by id', group: 'datasources', command: 'testDatasource', params: { datasourceId: 2 },
+    expected: [{ method: 'POST', url: '/datasources/test', data: { datasource_id: 2 } }] },
+  { name: 'testDatasource merges unsaved edits but keeps the id', group: 'datasources', command: 'testDatasource',
+    // As in 2.0, a given config is the whole body.
+    params: { datasourceId: 2, config: { type: 'clickhouse', properties: { host: 'ch.test' }, datasource_id: 99 } },
+    expected: [{ method: 'POST', url: '/datasources/test', data: { type: 'clickhouse', properties: { host: 'ch.test' }, datasource_id: 99 } }] },
+  { name: 'introspectDatasource introspects the stored datasource by id', group: 'datasources', command: 'introspectDatasource', params: { datasourceId: 2 },
+    expected: [{ method: 'POST', url: '/datasources/introspect', data: { datasource_id: 2 } }] },
+  { name: 'validateDatasourceQuery sends the id and query', group: 'datasources', command: 'validateDatasourceQuery',
+    params: { datasourceId: 2, query: 'select 1' },
+    expected: [{ method: 'POST', url: '/datasources/validate_query', data: { datasource_id: 2, query: 'select 1' } }] },
+  { name: 'testStorageConfig tests the stored config by id', group: 'storageconfigs', command: 'testStorageConfig', params: { configId: 5 },
+    respond: (config) => (config.method === 'GET'
+      ? { storage_config: { id: 5, name: 's3', type: 'S3', properties: { bucket: 'b', accessKey: 'AK' } } }
+      : { ok: true, test: {} }),
+    expected: [
+      { method: 'GET', url: '/storage_configs/5' },
+      { method: 'POST', url: '/storage_configs/test', data: { type: 'S3', properties: { bucket: 'b', accessKey: 'AK' }, storage_config_id: 5 } },
+    ] },
 ];
 
 // Catalog/core mismatches the translation layer cannot fix without changing
 // the documented catalog contract. Each is reported in the PR for a follow-up;
 // keep this list exact so a new mismatch, or a fixed one, fails the test.
-export const KNOWN_CATALOG_GAPS: Record<string, { dropped: string[]; missingRequired: string[] }> = {
-  'experiments.searchExperiments': { dropped: ['show', 'exclude'], missingRequired: [] },
-  'experiments.restartExperiment': { dropped: [], missingRequired: ['defaultType'] },
-  'experiments.exportExperiment': { dropped: ['format'], missingRequired: [] },
-  'experiments.generateTemplate': { dropped: ['experimentId'], missingRequired: ['name', 'type'] },
-  'experiments.estimateParticipants': { dropped: ['experimentId'], missingRequired: ['unitType'] },
-  'experiments.confirmMetricImpact': { dropped: ['impact'], missingRequired: [] },
-  'experiments.dismissAlert': { dropped: ['experimentId'], missingRequired: [] },
-  'experiments.dismissRecommendedAction': { dropped: ['experimentId'], missingRequired: [] },
-  'experiments.revokeExperimentAccessUser': { dropped: [], missingRequired: ['roleId'] },
-  'experiments.revokeExperimentAccessTeam': { dropped: [], missingRequired: ['roleId'] },
-  'experiments.archiveAnnotation': { dropped: ['experimentId'], missingRequired: [] },
-  'experiments.listCustomFields': { dropped: [], missingRequired: ['type'] },
-  'experiments.refreshFields': { dropped: [], missingRequired: ['profile'] },
-  'goals.grantGoalAccessUser': { dropped: [], missingRequired: ['roleId'] },
-  'goals.revokeGoalAccessUser': { dropped: [], missingRequired: ['roleId'] },
-  'goals.grantGoalAccessTeam': { dropped: [], missingRequired: ['roleId'] },
-  'goals.revokeGoalAccessTeam': { dropped: [], missingRequired: ['roleId'] },
-  'auth.resetMyPassword': { dropped: [], missingRequired: ['oldPassword', 'newPassword'] },
-  'insights.getVelocityInsights': { dropped: ['params (core reads undocumented fields: from, to, aggregation, unitTypes, teams, owners)'], missingRequired: ['from', 'to', 'aggregation'] },
-  'insights.getVelocityInsightsDetail': { dropped: ['params (core reads undocumented fields: from, to, aggregation, teams, applications)'], missingRequired: ['from', 'to', 'aggregation'] },
-  'insights.getDecisionInsights': { dropped: ['params (core reads undocumented fields: from, to, aggregation, unitTypes, teams, owners)'], missingRequired: ['from', 'to', 'aggregation'] },
-  'insights.getDecisionInsightsHistory': { dropped: ['params (core reads undocumented fields: from, to, aggregation, teams, applications)'], missingRequired: ['from', 'to', 'aggregation'] },
-  'datasources.testDatasource': { dropped: ['datasourceId'], missingRequired: ['config'] },
-  'datasources.introspectDatasource': { dropped: ['datasourceId'], missingRequired: ['config'] },
-  'datasources.validateDatasourceQuery': { dropped: ['datasourceId', 'query'], missingRequired: ['config'] },
-  'activity.listActivity': { dropped: ['params (core reads undocumented fields: experiments, limit, since, state, search, sort, includeNotes)'], missingRequired: [] },
-  'events.listEvents': { dropped: ['params (core reads undocumented fields: from, to, applications, unitTypes, eventTypes, eventNames, unitUids, environmentTypes, validExposures, take, skip)'], missingRequired: [] },
-  'events.listEventsHistory': { dropped: ['params (core reads undocumented fields: from, to, applications, unitTypes, eventTypes, eventNames, unitUids, environmentTypes, period, tzOffset)'], missingRequired: [] },
-  'storageconfigs.testStorageConfig': { dropped: ['configId'], missingRequired: ['config'] },
-};
+// Catalog/core mismatches the translation layer does not fix. Keep it empty:
+// the guard below fails on any new mismatch, so a catalog change must ship
+// with its translation (or a documented reason to list it here).
+export const KNOWN_CATALOG_GAPS: Record<string, { dropped: string[]; missingRequired: string[] }> = {};
 
 export default async function runTests() {
   let passed = 0;
@@ -453,6 +693,161 @@ export default async function runTests() {
     ['grantExperimentAccessUser', { experimentId: 3, userId: 2, role: 'Editor' }],
   ] as const) {
     assertEquals(validateCommandParams(getCommandEntry('experiments', command)!, params), [], `experiments.${command}: runner params pass catalog validation`);
+  }
+
+  // The deprecated `params` bag still satisfies the required filters it replaced.
+  {
+    const insights = getCommandEntry('insights', 'getVelocityInsights')!;
+    assertEquals(
+      validateCommandParams(insights, { params: { from: '2026-01-01', to: '2026-02-01', aggregation: 'week' } }),
+      [],
+      'insights: the legacy params bag passes validation',
+    );
+    assertEquals(
+      validateCommandParams(insights, { params: { from: '2026-01-01' } }).length,
+      2,
+      'insights: a legacy params bag missing filters still fails validation',
+    );
+    assertEquals(
+      validateCommandParams(insights, { params: { from: '2026-01-01', to: '2026-02-01', aggregation: 'week', tems: 'Growth' } })
+        .some((e) => e.startsWith('Unknown param "tems"') && e.includes('Did you mean "teams"?')),
+      true,
+      'insights: a typo inside the legacy params bag is reported as unknown',
+    );
+    assertEquals(
+      validateCommandParams(getCommandEntry('events', 'listEvents')!, { params: { take: 10 }, skip: 5 }),
+      [],
+      'events: legacy bag and top-level filters can be mixed',
+    );
+    assertEquals(
+      validateCommandParams(insights, { params: 'from=2026-01-01' }),
+      ['Param "params" for insights.getVelocityInsights must be an object.'],
+      'insights: a non-object params bag is rejected',
+    );
+    assertEquals(
+      validateCommandParams(insights, { params: { params: { from: 'x' } } }),
+      ['Param "params" for insights.getVelocityInsights must not contain a nested "params".'],
+      'insights: a nested params key inside the bag is rejected',
+    );
+    assertEquals(
+      getCommandEntry('experiments', 'restartExperiment')!.params.some((p) => p.name === 'defaultType'),
+      false,
+      'restartExperiment does not document defaultType, which the core never reads',
+    );
+  }
+
+  // IDs are interpolated into request paths, so a "../users/5" ID must never
+  // pass validation (it would DELETE /v1/users/5 from deleteSegment).
+  {
+    const del = getCommandEntry('segments', 'deleteSegment')!;
+    const bad = 'Param "segmentId" for segments.deleteSegment must be a positive integer ID.';
+    assertEquals(validateCommandParams(del, { segmentId: '../users/5' }), [bad], 'segments.deleteSegment: a path in segmentId is rejected');
+    assertEquals(validateCommandParams(del, { segmentId: '5/../../users/5' }), [bad], 'segments.deleteSegment: a trailing path in segmentId is rejected');
+    assertEquals(validateCommandParams(del, { segmentId: 0 }), [bad], 'segments.deleteSegment: a zero ID is rejected');
+    assertEquals(validateCommandParams(del, { segmentId: 1.5 }), [bad], 'segments.deleteSegment: a fractional ID is rejected');
+    assertEquals(validateCommandParams(del, { segmentId: '7' }), [], 'segments.deleteSegment: a numeric-string ID is accepted');
+    assertEquals(validateCommandParams(del, { segmentId: 7 }), [], 'segments.deleteSegment: a number ID is accepted');
+    assertEquals(
+      validateCommandParams(getCommandEntry('goals', 'getGoal')!, { goalId: '..%2Fusers' }),
+      ['Param "goalId" for goals.getGoal must be a positive integer ID.'],
+      'goals.getGoal: an encoded traversal in goalId is rejected',
+    );
+    assertEquals(
+      validateCommandParams(getCommandEntry('experiments', 'diffExperimentsCore')!, { experimentId1: 1, experimentId2: '../2' }),
+      ['Param "experimentId2" for experiments.diffExperimentsCore must be a positive integer ID.'],
+      'numbered ID params are checked too',
+    );
+  }
+
+  // Validation gives the same ID and ids errors as dispatch, as friendly messages.
+  {
+    assertEquals(
+      validateCommandParams(getCommandEntry('experiments', 'bulkStart')!, { ids: [] }),
+      [],
+      'bulkStart: empty ids are allowed, as in 2.0',
+    );
+    assertEquals(
+      validateCommandParams(getCommandEntry('experiments', 'startExperiment')!, { experimentId: '6/full_on' }),
+      ['Param "experimentId" for experiments.startExperiment must be a positive integer ID.'],
+      'startExperiment: a multi-segment ID fails validation',
+    );
+  }
+
+  // validateCommandParams reports the same ID problems as normalizeIdParams.
+  {
+    const metric = getCommandEntry('metrics', 'grantMetricAccessUser')!;
+    assertEquals(validateCommandParams(metric, { metricId: 1, userId: 2, roleId: 3 }), [], 'metrics: the deprecated roleId alias satisfies assetRoleId');
+    assertEquals(
+      validateCommandParams(getCommandEntry('experiments', 'grantExperimentAccessUser')!, { experimentId: 3, userId: 2, roleId: 4 }),
+      [],
+      'experiments: the 2.0 roleId alias satisfies role',
+    );
+    assertEquals(
+      validateCommandParams(getCommandEntry('teams', 'addTeamMembers')!, { teamId: 1, userIds: [] }),
+      [],
+      'teams: an empty userIds is allowed, as in 2.0',
+    );
+  }
+
+  // userId on the user API-key commands is a ref (ID or email); deprecated
+  // "Ignored" params are not checked as IDs either.
+  {
+    for (const command of ['listUserApiKeys', 'createUserApiKey', 'deleteUserApiKey']) {
+      const params: Record<string, unknown> = { userId: 'jane@example.com' };
+      if (command === 'deleteUserApiKey') params.keyId = 3;
+      assertEquals(validateCommandParams(getCommandEntry('users', command)!, params), [], `users.${command}: userId accepts an email`);
+    }
+    assertEquals(
+      validateCommandParams(getCommandEntry('experiments', 'dismissAlert')!, { alertId: 4, experimentId: 'legacy' }),
+      [],
+      'a deprecated experimentId is not checked as an ID',
+    );
+    assertEquals(
+      validateCommandParams(getCommandEntry('events', 'listEvents')!, { params: null }),
+      [],
+      'params: null is accepted for legacy-bag commands',
+    );
+  }
+
+  // Deprecated params stay accepted (old callers keep working) but are not documented.
+  {
+    const search = getCommandEntry('experiments', 'searchExperiments')!;
+    assertEquals(validateCommandParams(search, { search: 'x', show: ['audience'] }), [], 'deprecated params are still accepted');
+    assertEquals(documentedParams(search).map((p) => p.name), ['search', 'items'], 'deprecated params are hidden from docs');
+    assertEquals(
+      validateCommandParams(search, { serch: 'x' }).some((e) => e.includes('Valid params: search, items.')),
+      true,
+      'unknown-param errors list only documented params',
+    );
+    assertEquals(getCommandEntry('experiments', 'refreshFields'), undefined, 'refreshFields is not in the MCP catalog');
+  }
+
+  // A param documented twice would render twice in docs and validation errors.
+  const duplicated = CLI_GROUPS.flatMap((g) => getGroupCommands(g))
+    .filter((e) => new Set(e.params.map((p) => p.name)).size !== e.params.length)
+    .map((e) => `${e.group}.${e.command}`);
+  assertEquals(duplicated, [], 'no command documents a param twice');
+
+  // executeCommand dispatch is identical to origin/main (2.0.1) apart from ID
+  // safety: run every 2.0 call shape from review through both and compare.
+  {
+    let results: Awaited<ReturnType<typeof compareWithRef>> | undefined;
+    try {
+      results = await compareWithRef();
+    } catch (e) {
+      // Only a missing ref is a skip; any other failure fails the suite.
+      if (!(e instanceof RefUnavailableError)) throw e;
+      results = undefined;
+    }
+    if (results) {
+      for (const r of results) {
+        assertEquals(r.ok, true, `parity with origin/main: ${r.call.group}.${r.call.command} ${JSON.stringify(r.call.params)}${r.expected ? ` (expected difference: ${r.expected})` : ''}`);
+      }
+    } else {
+      // origin/main is not available (e.g. a shallow checkout); the parity
+      // script is still run in CI (npm run parity:main).
+      assertEquals(true, true, 'parity with origin/main: skipped, ref unavailable');
+    }
   }
 
   // Broad guard: every catalog command, after translation, supplies the
