@@ -1204,8 +1204,21 @@ export function documentedParams(entry: CommandEntry): CommandParam[] {
 // positive integers (a numeric string is accepted): "../users/5" must never
 // reach a path template.
 const ID_PARAM_NAME = /Id\d*$/;
-// Keys the cores interpolate into paths: "id" or any "...Id".
-const UNDOCUMENTED_ID_KEY = /^id$|Id\d*$/;
+// Undocumented keys the cores interpolate into a request path: "id" and the
+// path-ID names their params use. Not every core "...Id" is a path value
+// (updateExperiment's screenshotId is a list of "variant:uploadId" strings,
+// events' goalId and createExperiment's applicationId are body fields), so
+// only these are owned.
+const PATH_ID_KEYS = new Set([
+  'id', 'experimentId', 'experimentId1', 'experimentId2', 'metricId', 'goalId', 'segmentId', 'teamId', 'userId',
+  'noteId', 'alertId', 'actionId', 'annotationId', 'commentId', 'keyId', 'roleId', 'exportConfigId', 'historyId',
+]);
+const USER_REF_KEYS = ['userId', 'userRef'];
+const USER_REF_COMMANDS = new Set(['users.listUserApiKeys', 'users.createUserApiKey', 'users.deleteUserApiKey']);
+const NON_PATH_ID_KEYS = new Set(['screenshotId', 'applicationId', 'lastId', 'denominatorGoalId', 'primaryMetricId']);
+function isPathIdKey(key: string): boolean {
+  return PATH_ID_KEYS.has(key) && !NON_PATH_ID_KEYS.has(key);
+}
 const ID_LIST_PARAM = 'ids';
 // Digits only, after trimming; leading zeros are allowed ("05" is 5).
 const DIGITS = /^[0-9]+$/;
@@ -1247,7 +1260,6 @@ const ASSET_ROLE_ID_PARAM = 'assetRoleId';
 const EXPERIMENT_ID_PARAM = 'experimentId';
 const GOAL_ID_PARAM = 'goalId';
 const USER_ID_PARAM = 'userId';
-const CONFIG_KEY_PARAM = 'configKey';
 
 /**
  * Documented deprecated ID aliases (alias -> canonical), per command. Filled
@@ -1273,9 +1285,6 @@ function declaredCoreIdAliases(label: string): Record<string, string> {
   runnerCoreIdAliases ??= {
     ...Object.fromEntries(GOAL_ACCESS_COMMANDS.map((c) => [`goals.${c}`, { [ID_PARAM]: GOAL_ID_PARAM }])),
     'users.updateUser': { [ID_PARAM]: USER_ID_PARAM },
-    // configKey accepts an ID or a name; 2.0 callers passed the core's `id`.
-    'platformconfig.getPlatformConfig': { [ID_PARAM]: CONFIG_KEY_PARAM },
-    'platformconfig.updatePlatformConfig': { [ID_PARAM]: CONFIG_KEY_PARAM },
   };
   return runnerCoreIdAliases[label] ?? {};
 }
@@ -1298,7 +1307,7 @@ function coreIdAliases(entry: CommandEntry): Record<string, string> {
     const marker = `__id_${p.name}`;
     const translated = normalizeCommandParams(entry.group, entry.command, { [p.name]: marker });
     for (const [key, value] of Object.entries(translated)) {
-      if (key !== p.name && value === marker && UNDOCUMENTED_ID_KEY.test(key)) aliases[key] = p.name;
+      if (key !== p.name && value === marker && isPathIdKey(key)) aliases[key] = p.name;
     }
   }
   coreIdAliasCache.set(label, aliases);
@@ -1334,15 +1343,12 @@ export function normalizeIdParams(
   entry: CommandEntry,
   params: Record<string, unknown>,
   options: {
-    // The catalog audit and core-shaped dispatch skip the required check.
+    // executeCommand and the catalog audit skip the required check; only
+    // execute_command validation makes catalog params required.
     checkRequired?: boolean;
-    // Core-shaped dispatch: aliases are validated and normalised but keep
-    // their own (core) name, which is what the core reads.
-    keepAliasNames?: boolean;
   } = {},
 ): Record<string, unknown> {
   const checkRequired = options.checkRequired ?? true;
-  const keepAliasNames = options.keepAliasNames ?? false;
   const label = `${entry.group}.${entry.command}`;
   const invalid: string[] = [];
   const missing: string[] = [];
@@ -1393,7 +1399,7 @@ export function normalizeIdParams(
   // An undocumented ID-named key ("id", "fooId") is the one kind of extra key
   // that can reach a request path, so it must be a positive integer too.
   for (const [key, value] of Object.entries(out)) {
-    if (documentedNames.has(key) || !UNDOCUMENTED_ID_KEY.test(key) || value === undefined) continue;
+    if (documentedNames.has(key) || !isPathIdKey(key) || value === undefined) continue;
     const id = toPositiveInteger(value);
     if (id === undefined) invalid.push(`Param "${key}" for ${label} must be a positive integer ID.`);
     else out[key] = id;
@@ -1405,16 +1411,29 @@ export function normalizeIdParams(
     const value = input[alias];
     if (value === undefined) continue;
     aliasSupplied.add(canonical);
-    if (alias in coreAliases && !keepAliasNames) warnDeprecatedAlias(label, alias, canonical);
+    if (alias in coreAliases) warnDeprecatedAlias(label, alias, canonical);
     const id = toPositiveInteger(value);
     if (id === undefined) {
       invalid.push(`Param "${alias}" for ${label} must be a positive integer ID.`);
     } else if (out[canonical] !== undefined && out[canonical] !== null && toPositiveInteger(out[canonical]) !== id) {
       invalid.push(`Params "${alias}" and "${canonical}" for ${label} disagree; pass only "${canonical}".`);
-    } else if (keepAliasNames) {
-      out[alias] = id;
     } else {
       out[canonical] = out[canonical] ?? id;
+    }
+  }
+
+  // A user ref (users.*ApiKey userId, or the core's userRef) is an ID or an
+  // email; the core turns a numeric one into a path segment, so a numeric one
+  // must be a positive integer ("-5" or "0" is refused, an email passes).
+  for (const key of USER_REF_KEYS) {
+    if (!(key in out) || !USER_REF_COMMANDS.has(label)) continue;
+    const value = out[key];
+    if (value === null || (typeof value !== 'string' && typeof value !== 'number')) {
+      invalid.push(`Param "${key}" for ${label} must be a user ID or email.`);
+    } else if (/^\s*[-+]?\d+\s*$/.test(String(value))) {
+      const id = toPositiveInteger(String(value).trim().replace(/^\+/, ''));
+      if (id === undefined) invalid.push(`Param "${key}" for ${label} must be a positive integer user ID or an email.`);
+      else out[key] = String(id);
     }
   }
 
@@ -1427,6 +1446,13 @@ export function normalizeIdParams(
 
   for (const p of entry.params) {
     if (p.deprecated) continue;
+    const isIdParam = (p.type === 'number' && ID_PARAM_NAME.test(p.name)) || (p.type === 'array' && ID_LIST_PARAMS.has(p.name));
+    // A required ID given as null would become "/null" in a path: always an
+    // error, whether or not required params are checked. An optional null is absent.
+    if (out[p.name] === null && p.required && isIdParam && !aliasSupplied.has(p.name)) {
+      invalid.push(`Param "${p.name}" for ${label} must be a positive integer ID.`);
+      continue;
+    }
     if (out[p.name] === null && !p.required) delete out[p.name];
     const value = out[p.name];
     if (value === undefined || value === null) {
@@ -1457,7 +1483,7 @@ export function normalizeIdParams(
 
 /** Equal once normalised: ID-named keys as integers, anything else structurally. */
 function sameParamValue(key: string, a: unknown, b: unknown): boolean {
-  if (UNDOCUMENTED_ID_KEY.test(key)) {
+  if (isPathIdKey(key)) {
     const [ia, ib] = [toPositiveInteger(a), toPositiveInteger(b)];
     if (ia !== undefined || ib !== undefined) return ia === ib;
   }
@@ -1492,9 +1518,7 @@ export function validateCommandParams(
   // normalizeIdParams owns the rules (required params, IDs, aliases, the
   // deprecated params bag); this adds unknown-param hints on top, since
   // execute_command (unlike direct executeCommand callers) accepts only
-  // catalog params. executeCommand runs normalizeIdParams again on the final
-  // params (with tool defaults added) in its narrower 'ids' mode: a separate,
-  // cheap check, not duplicated work.
+  // catalog params and requires the catalog's required params.
   const errors: string[] = [];
   try {
     normalizeIdParams(entry, provided);
@@ -1914,6 +1938,11 @@ type CommandRunner = (client: ApiClientLike, params: Record<string, unknown>) =>
 
 const BULK_COMMANDS = ['bulkStart', 'bulkStop', 'bulkArchive', 'bulkDevelopment', 'bulkFullOn'] as const;
 // Positional arguments after `names`, per @absmartly/cli core/experiments/bulk.js.
+// Arguments the backend rejects when absent; failing here beats sending `undefined` (as in 2.0.1).
+const BULK_REQUIRED_ARGS: Partial<Record<typeof BULK_COMMANDS[number], string>> = {
+  bulkStop: 'reason',
+  bulkFullOn: 'variant',
+};
 const BULK_EXTRA_ARGS: Record<typeof BULK_COMMANDS[number], string[]> = {
   bulkStart: ['note'],
   bulkStop: ['reason', 'note'],
@@ -1931,8 +1960,12 @@ const experimentsCore = CORE_MODULES.experiments;
  */
 function bulkRunner(command: typeof BULK_COMMANDS[number]): CommandRunner {
   return async (client, params) => {
-    // normalizeIdParams has already made ids a non-empty array of integers.
-    const ids = params[ID_LIST_PARAM] as number[];
+    const required = BULK_REQUIRED_ARGS[command];
+    if (required !== undefined && params[required] === undefined) {
+      throw new Error(`experiments.${command} requires "${required}"`);
+    }
+    // Normalised by normalizeIdParams when given; absent ids stay an empty batch, as in 2.0.1.
+    const ids = Array.isArray(params[ID_LIST_PARAM]) ? params[ID_LIST_PARAM] as number[] : [];
     const extra = BULK_EXTRA_ARGS[command].map((name) => params[name]);
     return experimentsCore[command](client, ids, new Map(), ...extra);
   };
@@ -1980,8 +2013,12 @@ async function resolveAssetRoleId(client: ApiClientLike, role: unknown): Promise
  */
 function accessRunner(group: string, command: string, entityIdParam: string, coreIdParam: string): CommandRunner {
   return async (client, params) => {
-    // normalizeIdParams has checked that role (or its roleId alias) is present.
     const { role, [entityIdParam]: entityId, ...rest } = params;
+    // The role becomes the asset_role_id (and, on revoke, a path segment), so
+    // it is required here; the message is 2.0.1's.
+    if (role === undefined) {
+      throw new Error(`${group}.${command} requires "role" (an asset role ID or name)`);
+    }
     const roleId = await resolveAssetRoleId(client, role);
     return CORE_MODULES[group][command](client, { ...rest, [coreIdParam]: entityId, roleId });
   };
@@ -2084,6 +2121,10 @@ const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
     // The backend merges only the stored secret key (by storage_config_id); the
     // exporter needs type and properties in the body, so read those first.
     testStorageConfig: async (client, params) => {
+      // 2.0 shape: no configId, the whole body in `config` (went straight to the core).
+      if (params.configId === undefined) {
+        return CORE_MODULES.storageconfigs.testStorageConfig(client, { config: params[CONFIG_PARAM] });
+      }
       const { data: stored } = await CORE_MODULES.storageconfigs.getStorageConfig(client, { id: params.configId }) as { data: Record<string, unknown> };
       return CORE_MODULES.storageconfigs.testStorageConfig(client, {
         config: { type: stored.type, properties: stored.properties, storage_config_id: params.configId },
@@ -2138,17 +2179,6 @@ export function normalizeCommandParams(
   return adapt ? adapt(params) : params;
 }
 
-/**
- * A 2.0 core-shaped call passes at least one key the catalog does not
- * document (e.g. `id`, `query`, `note`): it names the core's own params. A
- * call using only catalog keys is a catalog call, and a missing required
- * param is the caller's mistake, not a core shape.
- */
-function isCoreShaped(entry: CommandEntry, params: Record<string, unknown>): boolean {
-  const documented = new Set([...entry.params.map((p) => p.name), ...TOOL_INJECTED_PARAM_NAMES]);
-  return Object.keys(params).some((key) => !documented.has(key) && params[key] !== undefined);
-}
-
 export async function executeCommand(
   client: ApiClientLike,
   group: string,
@@ -2165,29 +2195,21 @@ export async function executeCommand(
     throw new Error(`Unknown group: "${group}". Available: ${CLI_GROUPS.join(', ')}`);
   }
 
-  const fn = mod[command];
+  // The only addition to the 2.0 dispatch: ID safety. Every ID that can reach
+  // a path is a positive integer (null or invalid is an error) and declared
+  // aliases are mapped. Required catalog params are not checked here; that is
+  // execute_command's validation (validateCommandParams), as in 2.0.
+  const idSafeParams = normalizeIdParams(entry, params, { checkRequired: false });
+
   const runner = COMMAND_RUNNERS[group]?.[command];
-  if (typeof fn !== 'function' && !runner) {
+  if (runner) {
+    return runner(client, idSafeParams);
+  }
+
+  const fn = mod[command];
+  if (typeof fn !== 'function') {
     throw new Error(`Function "${command}" not found in core module "${group}". Available: ${Object.keys(mod).filter(k => typeof mod[k] === 'function').join(', ')}`);
   }
 
-  // Entity IDs are normalised before any adapter, runner or core sees them.
-  // The catalog shape (all required catalog params present) goes through the
-  // adapter or runner. A call that is valid except for missing catalog params
-  // is taken as a 2.0 core-shaped call and, as in 2.0, goes straight to the
-  // core: its ID-named keys have still been normalised (any invalid or null
-  // one is an error), and which IDs a path needs is the core's business.
-  let idSafeParams: Record<string, unknown>;
-  try {
-    idSafeParams = normalizeIdParams(entry, params);
-  } catch (e) {
-    if (!(e instanceof IdParamError) || typeof fn !== 'function' || !isCoreShaped(entry, params)) throw e;
-    // A core-shaped call: invalid IDs are still errors (never a path); the
-    // catalog's missing params are not, since the call uses the core's names.
-    if (e.invalid.length > 0) throw new IdParamError(e.invalid);
-    return fn(client, normalizeIdParams(entry, params, { checkRequired: false, keepAliasNames: true }));
-  }
-
-  if (runner) return runner(client, idSafeParams);
   return fn(client, normalizeCommandParams(group, command, idSafeParams));
 }

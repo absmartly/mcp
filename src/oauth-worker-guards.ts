@@ -6,6 +6,7 @@ import { HTTP_STATUS_SERVICE_UNAVAILABLE, HTTP_STATUS_UNAUTHORIZED, isTrustedCim
 const REFRESH_GRANT_TYPE = 'refresh_token';
 const OAUTH_ERROR_INVALID_TOKEN = 'invalid_token';
 const CONTENT_TYPE_JSON = 'application/json';
+const MESSAGE_SIGN_IN_AGAIN = 'Please sign in again.';
 const OAUTH_ERROR_INVALID_GRANT = 'invalid_grant';
 const OAUTH_ERROR_TEMPORARILY_UNAVAILABLE = 'temporarily_unavailable';
 const OAUTH_ERROR_INVALID_CLIENT = 'invalid_client';
@@ -34,7 +35,7 @@ export async function checkBackendSessionOnRefresh(options: TokenExchangeCallbac
     // is turned away (withValidStoredEndpoint).
     const parsedEndpoint = props?.absmartly_endpoint !== undefined ? tryParseAbsmartlyEndpoint(props.absmartly_endpoint) : null;
     if (props?.absmartly_endpoint !== undefined && !parsedEndpoint) {
-        throw new OAuthErrorImpl(OAUTH_ERROR_INVALID_GRANT, { description: `${MESSAGE_INVALID_ENDPOINT}: ${props.absmartly_endpoint}. Please sign in again.` });
+        throw new OAuthErrorImpl(OAUTH_ERROR_INVALID_GRANT, { description: `${MESSAGE_INVALID_ENDPOINT}: ${props.absmartly_endpoint}. ${MESSAGE_SIGN_IN_AGAIN}` });
     }
     if (!props?.oauth_jwt || !parsedEndpoint) return;
     const baseUrl = parsedEndpoint.baseUrl;
@@ -204,7 +205,7 @@ export function withValidStoredEndpoint(handler: ApiHandler, pathPrefix: string)
             if (endpoint !== undefined && !tryParseAbsmartlyEndpoint(endpoint)) {
                 console.error(`${MESSAGE_INVALID_ENDPOINT} in stored grant props: ${endpoint}`);
                 const url = new URL(request.url);
-                return new Response(JSON.stringify({ error: OAUTH_ERROR_INVALID_TOKEN, error_description: `${MESSAGE_INVALID_ENDPOINT}. Please sign in again.` }), {
+                return new Response(JSON.stringify({ error: OAUTH_ERROR_INVALID_TOKEN, error_description: `${MESSAGE_INVALID_ENDPOINT}. ${MESSAGE_SIGN_IN_AGAIN}` }), {
                     status: HTTP_STATUS_UNAUTHORIZED,
                     headers: {
                         'Content-Type': CONTENT_TYPE_JSON,

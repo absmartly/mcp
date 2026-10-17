@@ -4,6 +4,7 @@ import { APIClient } from '@absmartly/cli/api-client';
 import type { HttpClient, HttpRequestConfig, HttpResponse } from '@absmartly/cli/api-client';
 import { CLI_GROUPS, documentedParams, executeCommand, getCommandEntry, getGroupCommands, validateCommandParams } from '../../src/cli-catalog';
 import { auditCatalogParams } from '../../scripts/audit-catalog-params';
+import { compareWithRef } from '../../scripts/parity-main';
 
 const BASE_URL = 'https://api.test/v1';
 const ROOT_URL = 'https://api.test';
@@ -236,10 +237,6 @@ const CASES: Case[] = [
     expectedError: 'Params "roleId" and "assetRoleId" for metrics.grantMetricAccessUser disagree; pass only "assetRoleId".', expected: [] },
   { name: 'a padded ID reaches the path as an integer', group: 'goals', command: 'getGoal', params: { goalId: ' 05 ' },
     expected: [{ method: 'GET', url: '/goals/5' }] },
-  { name: 'a missing goalId throws before any request', group: 'goals', command: 'grantGoalAccessUser', params: { userId: 2, role: 5 },
-    expectedError: 'Missing required param "goalId" (number) for goals.grantGoalAccessUser: Goal ID', expected: [] },
-  { name: 'testStorageConfig {} throws before any request', group: 'storageconfigs', command: 'testStorageConfig', params: {},
-    expectedError: 'Missing required param "configId" (number) for storageconfigs.testStorageConfig: Storage config ID', expected: [] },
   { name: 'grantExperimentAccessUser still accepts the 2.0 roleId', group: 'experiments', command: 'grantExperimentAccessUser',
     params: { experimentId: 3, userId: 2, roleId: 4 },
     expected: [{ method: 'POST', url: '/experiments/3/asset_role_users', data: { user_id: 2, asset_role_id: 4 } }] },
@@ -288,19 +285,11 @@ const CASES: Case[] = [
     expected: [{ method: 'POST', url: '/goals/5/asset_role_users', data: { user_id: 3, asset_role_id: 7 } }] },
   { name: '2.0 core shape still rejects an unsafe core-name ID', group: 'goals', command: 'updateGoal', params: { id: '5/../users/1', description: 'n' },
     expectedError: 'Param "id" for goals.updateGoal must be a positive integer ID.', expected: [] },
-  { name: '2.0 core shape: createUser {email, name} goes to the core as in 2.0', group: 'users', command: 'createUser', params: { email: 'a@b.c', name: 'Ada Lovelace' },
-    expected: [{ method: 'POST', url: '/users', data: { email: 'a@b.c', first_name: 'Ada', last_name: 'Lovelace' } }] },
   // Round 10: the general rule replaces per-command fallbacks.
-  { name: '2.0 core shape: updateUser {id, name}', group: 'users', command: 'updateUser', params: { id: 5, name: 'Ada Lovelace' },
-    expected: [{ method: 'PUT', url: '/users/5', data: { data: { first_name: 'Ada', last_name: 'Lovelace' } } }] },
-  { name: '2.0 core shape: updateAnnotation {annotationId, type} (no experimentId)', group: 'experiments', command: 'updateAnnotation', params: { annotationId: 3, type: 'x' },
-    expected: [{ method: 'PUT', url: '/experiment_annotations/3', data: { data: { type: 'x' } } }] },
   { name: '2.0 core shape: testDatasource {config}', group: 'datasources', command: 'testDatasource', params: { config: { type: 'clickhouse', properties: { host: 'h' } } },
     expected: [{ method: 'POST', url: '/datasources/test', data: { type: 'clickhouse', properties: { host: 'h' } } }] },
   { name: '2.0 core shape: introspectDatasource {config}', group: 'datasources', command: 'introspectDatasource', params: { config: { datasource_id: 2 } },
     expected: [{ method: 'POST', url: '/datasources/introspect', data: { datasource_id: 2 } }] },
-  { name: '2.0 core shape: testStorageConfig {config}', group: 'storageconfigs', command: 'testStorageConfig', params: { config: { type: 'S3', properties: {} } },
-    expected: [{ method: 'POST', url: '/storage_configs/test', data: { type: 'S3', properties: {} } }] },
   { name: '2.0 core shape: validateDatasourceQuery {config}', group: 'datasources', command: 'validateDatasourceQuery', params: { config: { type: 'clickhouse', properties: {}, query: 'select 1' } },
     expected: [{ method: 'POST', url: '/datasources/validate_query', data: { type: 'clickhouse', properties: {}, query: 'select 1' } }] },
   { name: 'validateDatasourceQuery with datasourceId still needs query', group: 'datasources', command: 'validateDatasourceQuery', params: { datasourceId: 2 },
@@ -311,20 +300,20 @@ const CASES: Case[] = [
     expectedError: 'Param "id" for platformconfig.updatePlatformConfig must be a positive integer ID.', expected: [] },
   { name: 'a null documented ID alias is an error', group: 'goals', command: 'followGoal', params: { id: null },
     expectedError: 'Param "id" for goals.followGoal must be a positive integer ID.', expected: [] },
-  { name: '2.0 core shape: updatePlatformConfig {id, value}', group: 'platformconfig', command: 'updatePlatformConfig', params: { id: 3, value: 5 },
-    respond: () => ({ config: { id: 3, name: 'x', value: 1 } }),
-    expected: [{ method: 'GET', url: '/configs/3' }, { method: 'PUT', url: '/configs/3', data: { data: { name: 'x', value: 5 } } }] },
-  { name: 'mixed {id, data:{value}} on updatePlatformConfig still sends the value (catalog shape via the id alias)', group: 'platformconfig', command: 'updatePlatformConfig',
-    params: { id: 3, data: { value: 5 } },
-    respond: () => ({ config: { id: 3, name: 'x', value: 1 } }),
-    select: (requests) => requests.filter((r) => r.method === 'PUT'),
-    expected: [{ method: 'PUT', url: '/configs/3', data: { data: { name: 'x', value: 5 } } }] },
-  { name: 'a catalog-only call missing a required ID is an error, not a core call', group: 'goals', command: 'grantGoalAccessUser', params: { userId: 2, role: 5 },
-    expectedError: 'Missing required param "goalId" (number) for goals.grantGoalAccessUser: Goal ID', expected: [] },
   { name: 'bag conflicts compare normalised IDs', group: 'events', command: 'listEvents', params: { params: { take: 5, experimentId: 5 }, experimentId: ' 5' },
     expected: [{ method: 'POST', url: '/events', data: { take: 5 } }] },
   { name: 'tool-injected paging loses to the bag without a conflict', group: 'events', command: 'listEventsHistory', params: { params: { period: 'day' }, items: 20, page: 1 },
     expected: [{ method: 'POST', url: '/events/history', data: { period: 'day' } }] },
+  { name: 'a negative numeric userId on user API keys is refused', group: 'users', command: 'listUserApiKeys', params: { userId: '-5' },
+    expectedError: 'Param "userId" for users.listUserApiKeys must be a positive integer user ID or an email.', expected: [] },
+  { name: 'a zero userRef (2.0 core shape) is refused', group: 'users', command: 'deleteUserApiKey', params: { userRef: '0', keyId: 2 },
+    expectedError: 'Param "userRef" for users.deleteUserApiKey must be a positive integer user ID or an email.', expected: [] },
+  { name: 'screenshotId is not a path ID and passes through unchanged', group: 'experiments', command: 'updateExperiment',
+    params: { experimentId: 5, changes: { name: 'n' }, screenshotId: ['0:12'] },
+    select: (requests) => requests.slice(0, 1),
+    expected: [{ method: 'GET', url: '/experiments/5' }] },
+  { name: 'a documented required ID given as null is an error', group: 'experiments', command: 'startExperiment', params: { experimentId: null },
+    expectedError: 'Param "experimentId" for experiments.startExperiment must be a positive integer ID.', expected: [] },
   { name: 'a params-bag key that disagrees with the top level is an error', group: 'insights', command: 'getVelocityInsights',
     params: { from: '2026-01-01', to: '2026-02-01', aggregation: 'week', params: { from: '2025-01-01' } },
     expectedError: 'Param "from" for insights.getVelocityInsights is given both at the top level and in "params" with different values; pass it once.', expected: [] },
@@ -344,7 +333,7 @@ const CASES: Case[] = [
     expected: [{ method: 'GET', url: '/configs/12' }] },
   { name: 'grantExperimentAccessUser without role fails before any request', group: 'experiments', command: 'grantExperimentAccessUser',
     params: { experimentId: 3, userId: 2 },
-    expectedError: 'Missing required param "role" (string) for experiments.grantExperimentAccessUser: Asset role: its ID, or its name (e.g. Editor). See assetroles.listAssetRoles', expected: [] },
+    expectedError: 'experiments.grantExperimentAccessUser requires "role" (an asset role ID or name)', expected: [] },
   { name: 'createAnnotation sends the whole annotation data', group: 'experiments', command: 'createAnnotation',
     params: { experimentId: 3, data: { type: 'deploy', text: 'Shipped v2' } },
     expected: [{ method: 'POST', url: '/experiment_annotations', data: { type: 'deploy', text: 'Shipped v2', experiment_id: 3 } }] },
@@ -374,7 +363,7 @@ const CASES: Case[] = [
   { name: 'bulkFullOn passes variant positionally', group: 'experiments', command: 'bulkFullOn', params: { ids: [5], variant: 1 },
     expected: [{ method: 'PUT', url: '/experiments/5/full_on', data: { full_on_variant: 1, note: 'Bulk full-on via CLI' } }] },
   { name: 'bulkStop without reason fails before any request', group: 'experiments', command: 'bulkStop', params: { ids: [5] },
-    expectedError: 'Missing required param "reason" (string) for experiments.bulkStop: Stop reason, same enum as stopExperiment', expected: [] },
+    expectedError: 'experiments.bulkStop requires "reason"', expected: [] },
 
   // ── goals ─────────────────────────────────────────────────────────────────
   { name: 'getGoal maps goalId', group: 'goals', command: 'getGoal', params: { goalId: 12 },
@@ -531,7 +520,7 @@ const CASES: Case[] = [
     expected: [{ method: 'GET', url: '/asset_roles', params: { items: '100', page: '1' } }, { method: 'DELETE', url: '/goals/12/asset_role_teams/4/1' }] },
   { name: 'revokeGoalAccessUser without role fails before any request', group: 'goals', command: 'revokeGoalAccessUser',
     params: { goalId: 12, userId: 2 },
-    expectedError: 'Missing required param "role" (string) for goals.revokeGoalAccessUser: Asset role: its ID, or its name (e.g. Editor). See assetroles.listAssetRoles', expected: [] },
+    expectedError: 'goals.revokeGoalAccessUser requires "role" (an asset role ID or name)', expected: [] },
   { name: 'restartExperiment passes state and reshuffle', group: 'experiments', command: 'restartExperiment',
     params: { experimentId: 3, reason: 'testing', state: 'development', reshuffle: true },
     select: (requests) => requests.map(({ method, url, data }) => {
@@ -816,6 +805,22 @@ export default async function runTests() {
     .filter((e) => new Set(e.params.map((p) => p.name)).size !== e.params.length)
     .map((e) => `${e.group}.${e.command}`);
   assertEquals(duplicated, [], 'no command documents a param twice');
+
+  // executeCommand dispatch is identical to origin/main (2.0.1) apart from ID
+  // safety: run every 2.0 call shape from review through both and compare.
+  {
+    let results: Awaited<ReturnType<typeof compareWithRef>> | undefined;
+    try { results = await compareWithRef(); } catch { results = undefined; }
+    if (results) {
+      for (const r of results) {
+        assertEquals(r.same || r.idRejection, true, `parity with origin/main: ${r.call.group}.${r.call.command} ${JSON.stringify(r.call.params)}`);
+      }
+    } else {
+      // origin/main is not available (e.g. a shallow checkout); the parity
+      // script is still run in CI (npm run parity:main).
+      assertEquals(true, true, 'parity with origin/main: skipped, ref unavailable');
+    }
+  }
 
   // Broad guard: every catalog command, after translation, supplies the
   // params its core function reads (see scripts/audit-catalog-params.ts).

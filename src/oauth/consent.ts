@@ -30,6 +30,7 @@ import { HTTP_STATUS_BAD_REQUEST, HTTP_STATUS_SERVICE_UNAVAILABLE } from "./http
 import { describeRedirectTarget, isAllowedRedirectUri, isLoopbackRedirectUri, isRegisteredRedirectUri, isSharedCallbackRedirectUri } from "./redirect-policy.js";
 
 const APPROVALS_STATE_KEY_PREFIX = "oauth:approvals:";
+const MESSAGE_ENTER_ENDPOINT = "Enter the https:// URL of your ABsmartly instance.";
 const MESSAGE_REQUEST_ENDPOINT_REJECTED = "The ABsmartly URL in the request was not a valid ABsmartly URL, so it was ignored.";
 const ACTION_APPROVE = "approve";
 const ACTION_CANCEL = "cancel";
@@ -271,7 +272,7 @@ export async function beginAuthorization<Req extends AuthorizationRequest>(
 
   if (!endpointReady) {
     const rejected = rejectedExplicit
-      ? `${MESSAGE_REQUEST_ENDPOINT_REJECTED} Enter the https:// URL of your ABsmartly instance.`
+      ? `${MESSAGE_REQUEST_ENDPOINT_REJECTED} ${MESSAGE_ENTER_ENDPOINT}`
       : undefined;
     return respond(htmlResult(renderEndpointForm(options.formAction, transactionId, rejected), [bindingCookie]));
   }
@@ -310,7 +311,7 @@ export async function submitConsent<Req extends AuthorizationRequest>(
     const endpoint = canonicalizeEndpoint(form.endpoint || "");
     if (!endpoint) {
       return respond(htmlResult(
-        renderEndpointForm(options.formAction, transactionId, `${MESSAGE_INVALID_ENDPOINT}: ${form.endpoint}. Enter the https:// URL of your ABsmartly instance.`),
+        renderEndpointForm(options.formAction, transactionId, `${MESSAGE_INVALID_ENDPOINT}. ${MESSAGE_ENTER_ENDPOINT}`),
         [], HTTP_STATUS_BAD_REQUEST,
       ));
     }

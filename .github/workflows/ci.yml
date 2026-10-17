@@ -32,6 +32,13 @@ jobs:
       - name: Endpoint manifest is current
         run: npm run manifest:check
 
+      # executeCommand must dispatch exactly as main does, apart from ID
+      # safety (#66). Compares recorded requests against main's catalog.
+      - name: Dispatch parity with main
+        run: |
+          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          npm run parity:main
+
       - name: Build (ESM + CommonJS)
         run: npm run build
 
