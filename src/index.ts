@@ -14,6 +14,7 @@ import { DXT_BUNDLE_BASE64, DXT_BUNDLE_SHA } from "./dxt-bundle.js";
 import { APIClient } from "@absmartly/cli/api-client";
 import type { CustomSectionField } from "@absmartly/cli/api-client";
 import { FetchHttpClient } from "./fetch-adapter.js";
+import { withPathIdGuard } from "./path-id-guard.js";
 import { setupTools } from "./tools.js";
 import type { ToolContext } from "./tools.js";
 import {
@@ -166,7 +167,7 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             this.props.absmartly_endpoint,
             { authToken, authType }
         );
-        this.apiClient = new APIClient(fetchHttpClient);
+        this.apiClient = withPathIdGuard(new APIClient(fetchHttpClient));
 
         debug("API client initialized successfully");
     }
@@ -559,7 +560,7 @@ Steps:
 async function verifyApiKey(apiKey: string, endpoint: string): Promise<{ ok: boolean; user?: any; error?: string }> {
     try {
         const httpClient = new FetchHttpClient(endpoint, { authToken: apiKey, authType: 'api-key' });
-        const client = new APIClient(httpClient);
+        const client = withPathIdGuard(new APIClient(httpClient));
         const user = await client.getCurrentUser();
         return { ok: true, user };
     } catch (error: any) {

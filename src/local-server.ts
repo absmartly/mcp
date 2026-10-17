@@ -7,6 +7,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { APIClient } from "@absmartly/cli/api-client";
 import { FetchHttpClient } from "./fetch-adapter.js";
+import { withPathIdGuard } from "./path-id-guard.js";
 import { MCP_VERSION } from "./version.js";
 import { buildServerContext } from "./server-context.js";
 import { registerLocalServer } from "./local-registration.js";
@@ -126,7 +127,7 @@ async function main() {
         authToken: config.apiKey,
         authType: 'api-key',
     });
-    const apiClient = new APIClient(fetchHttpClient);
+    const apiClient = withPathIdGuard(new APIClient(fetchHttpClient));
 
     const mcpServer = new McpServer(
         {

@@ -4,7 +4,6 @@ import { APIClient } from '@absmartly/cli/api-client';
 import type { HttpClient, HttpRequestConfig, HttpResponse } from '@absmartly/cli/api-client';
 import { CLI_GROUPS, documentedParams, executeCommand, getCommandEntry, getGroupCommands, validateCommandParams } from '../../src/cli-catalog';
 import { auditCatalogParams } from '../../scripts/audit-catalog-params';
-import { compareWithRef, RefUnavailableError } from '../../scripts/parity-main';
 
 const BASE_URL = 'https://api.test/v1';
 const ROOT_URL = 'https://api.test';
@@ -827,28 +826,6 @@ export default async function runTests() {
     .filter((e) => new Set(e.params.map((p) => p.name)).size !== e.params.length)
     .map((e) => `${e.group}.${e.command}`);
   assertEquals(duplicated, [], 'no command documents a param twice');
-
-  // executeCommand dispatch is identical to origin/main (2.0.1) apart from ID
-  // safety: run every 2.0 call shape from review through both and compare.
-  {
-    let results: Awaited<ReturnType<typeof compareWithRef>> | undefined;
-    try {
-      results = await compareWithRef();
-    } catch (e) {
-      // Only a missing ref is a skip; any other failure fails the suite.
-      if (!(e instanceof RefUnavailableError)) throw e;
-      results = undefined;
-    }
-    if (results) {
-      for (const r of results) {
-        assertEquals(r.ok, true, `parity with origin/main: ${r.call.group}.${r.call.command} ${JSON.stringify(r.call.params)}${r.expected ? ` (expected difference: ${r.expected})` : ''}`);
-      }
-    } else {
-      // origin/main is not available (e.g. a shallow checkout); the parity
-      // script is still run in CI (npm run parity:main).
-      assertEquals(true, true, 'parity with origin/main: skipped, ref unavailable');
-    }
-  }
 
   // Broad guard: every catalog command, after translation, supplies the
   // params its core function reads (see scripts/audit-catalog-params.ts).

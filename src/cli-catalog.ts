@@ -2182,7 +2182,9 @@ export async function executeCommand(
   // execute_command's validation (validateCommandParams), as in 2.0.
   const idSafeParams = normalizeIdParams(entry, params, { checkRequired: false });
   // Whatever reaches a request path, by any route (top level, inside `data`,
-  // a core-name key), is checked where the APIClient builds the path.
+  // a core-name key), is checked where the APIClient builds the path. Clients
+  // this package creates are already guarded (wrapping is idempotent); this
+  // covers a host passing its own APIClient.
   const guardedClient = withPathIdGuard(client);
 
   const runner = COMMAND_RUNNERS[group]?.[command];

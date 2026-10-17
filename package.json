@@ -128,7 +128,7 @@
     "zod": "^3.25.67"
   },
   "peerDependencies": {
-    "@absmartly/cli": ">=1.7.0 <2",
+    "@absmartly/cli": "1.16.2",
     "@cloudflare/workers-oauth-provider": "^0.10.3",
     "agents": "^0.0.95",
     "hono": "^4.12.25"
@@ -145,7 +145,7 @@
     }
   },
   "devDependencies": {
-    "@absmartly/cli": "^1.16.2",
+    "@absmartly/cli": "1.16.2",
     "@cloudflare/workers-oauth-provider": "^0.10.3",
     "@cloudflare/workers-types": "^4.20241106.0",
     "@types/node": "^20.11.0",

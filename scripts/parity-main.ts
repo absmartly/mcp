@@ -1,8 +1,11 @@
-// Runs 2.0-style executeCommand calls through origin/main's cli-catalog and
-// this branch's, over a recording HttpClient, and compares the requests, the
-// error (present or not, and its class) and the resolved value. A call may
-// differ only if it is in EXPECTED_DIFFERENCES, with the reason.
-// Usage: npx tsx scripts/parity-main.ts [git-ref]  (default origin/main)
+// Runs 2.0-style executeCommand calls through the 2.0.1 release's cli-catalog
+// and this branch's, over a recording HttpClient, and compares the requests,
+// the error (present or not, and its class) and the resolved value. A call may
+// differ only if it is in EXPECTED_DIFFERENCES, with the reason and the exact
+// outcome this branch must produce.
+// The baseline is pinned to the 2.0.1 commit, not origin/main: once this
+// branch merges, main is this branch and every difference would read as stale.
+// Usage: npx tsx scripts/parity-main.ts [git-ref]  (default: the 2.0.1 commit)
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -12,45 +15,103 @@ import type { HttpClient, HttpRequestConfig, HttpResponse } from "@absmartly/cli
 import { executeCommand as executeBranch } from "../src/cli-catalog.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const REF = process.argv[2] ?? "origin/main";
+// 2.0.1 (#64, squash-merged as f8331b6; published to npm as 2.0.1).
+export const PARITY_BASELINE = "f8331b6d6dff803a8bdbafd6e943d125d6a09605";
+const ARGS = process.argv.slice(2);
+const REF = ARGS.find((a) => !a.startsWith("--")) ?? PARITY_BASELINE;
 
 type Call = { group: string; command: string; params: Record<string, unknown> };
 
 const callKey = (c: Call) => `${c.group}.${c.command} ${JSON.stringify(c.params)}`;
 
-/**
- * Intentional differences from 2.0.1 for direct executeCommand callers, each
- * with its reason. Keep in step with CHANGELOG.md ("Behaviour changes for
- * direct executeCommand callers").
- */
-type Outcome = { errorClass?: string; requests?: number };
+type Recorded = { method: string; url: string; params?: unknown; data?: unknown };
+/** What a call produced: the requests it sent, its error class if it threw, and its resolved value. */
+type Outcome = { requests: Recorded[]; errorClass?: string; result?: unknown };
 
 /**
  * Intentional differences from 2.0.1 for direct executeCommand callers: the
- * reason, and the outcome this branch must produce (its error class, and how
- * many requests it sends), so a regression that differs in another way still
- * fails. Keep in step with CHANGELOG.md ("Behaviour changes for direct
- * executeCommand callers").
+ * reason, and the exact outcome this branch must produce (every request, the
+ * error class, the resolved value), so a regression that differs in any way
+ * still fails. Keep in step with CHANGELOG.md ("Behaviour changes for direct
+ * executeCommand callers"). `npm run parity:main -- --print` prints the
+ * branch outcomes in this shape.
  */
-export const EXPECTED_DIFFERENCES: Record<string, { reason: string; branch: Outcome }> = {
-  'goals.getGoal {"goalId":"1/../users"}': { reason: "ID safety: a path ID must be a positive integer", branch: { errorClass: "IdParamError", requests: 0 } },
-  'platformconfig.getPlatformConfig {"id":null}': { reason: "2.0.1 errored too; the message now names the invalid config", branch: { errorClass: "Error", requests: 0 } },
-  'experiments.startExperiment {"experimentId":null}': { reason: "ID safety: null would become /experiments/null", branch: { errorClass: "IdParamError", requests: 0 } },
-  'platformconfig.updatePlatformConfig {"id":3,"value":5}': { reason: "2.0.1 errored too (configKey missing); same failure, clearer message", branch: { errorClass: "Error", requests: 0 } },
-  'goals.updateGoal {"data":{"id":"abc","description":"x"}}': { reason: "ID safety: an ID nested in data is checked at the path", branch: { errorClass: "PathIdError", requests: 0 } },
-  'experiments.startExperiment {}': { reason: "ID safety: 2.0.1 sent GET /experiments/undefined", branch: { errorClass: "PathIdError", requests: 0 } },
-  'experiments.revokeExperimentAccessUser {"experimentId":5,"userId":3,"role":"Editor"}': { reason: "2.0.1 sent DELETE .../3/undefined (core ignored role); role is now resolved by name (the recorder has no \"Editor\" role, so: not found)", branch: { errorClass: "Error", requests: 1 } },
-  'experiments.listCustomFields {}': { reason: "Default type \"test\" (2.0.1 filtered on undefined and always returned none)", branch: { requests: 1 } },
-  'experiments.generateTemplate {}': { reason: "Default name \"My Experiment\" (2.0.1 generated a template from name undefined, so \"my_experiment\")", branch: { requests: 3 } },
-  'goals.getGoal {"goalId":5,"id":6}': { reason: "A declared alias that disagrees with its documented param is an error (2.0.1 silently used id)", branch: { errorClass: "IdParamError", requests: 0 } },
-  'goals.grantGoalAccessUser {"goalId":5,"userId":3,"roleId":7,"role":"x"}': { reason: "roleId and role disagree: an error (2.0.1 ignored role and used roleId)", branch: { errorClass: "IdParamError", requests: 0 } },
-  'experiments.grantExperimentAccessUser {"experimentId":5,"userId":3,"roleId":"Editor"}': { reason: "roleId is an asset role ID; a name belongs in role (2.0.1 sent asset_role_id \"Editor\")", branch: { errorClass: "IdParamError", requests: 0 } },
-  'datasources.testDatasource {}': { reason: "Nothing to test: needs datasourceId or config (2.0.1 posted an empty body)", branch: { errorClass: "Error", requests: 0 } },
-  'datasources.validateDatasourceQuery {"datasourceId":2}': { reason: "With datasourceId, query is required (2.0.1 posted no query, and no datasource)", branch: { errorClass: "Error", requests: 0 } },
-  'datasources.introspectDatasource {"datasourceId":2}': { reason: "datasourceId is sent as datasource_id (2.0.1 ignored it and posted an empty body)", branch: { requests: 1 } },
-  'storageconfigs.testStorageConfig {"configId":3}': { reason: "configId tests the saved config (2.0.1 ignored it and posted an empty body)", branch: { requests: 2 } },
-  'teams.addTeamMembers {"teamId":1,"userIds":["2"]}': { reason: "ID values are normalised to integers in bodies too (user_ids [2], was [\"2\"])", branch: { requests: 1 } },
-  'experiments.createAnnotation {"experimentId":"5","data":{"type":"x"}}': { reason: "ID values are normalised to integers in bodies too (experiment_id 5, was \"5\")", branch: { requests: 1 } },
+export const EXPECTED_DIFFERENCES: Record<string, { reason: string; branch: Outcome; resultIncludes?: string[] }> = {
+  "goals.getGoal {\"goalId\":\"1/../users\"}": {
+    reason: "ID safety: a path ID must be a positive integer",
+    branch: {"requests": [], "errorClass": "IdParamError"},
+  },
+  "platformconfig.getPlatformConfig {\"id\":null}": {
+    reason: "2.0.1 errored too; the message now names the invalid config",
+    branch: {"requests": [], "errorClass": "Error"},
+  },
+  "experiments.startExperiment {\"experimentId\":null}": {
+    reason: "ID safety: null would become /experiments/null",
+    branch: {"requests": [], "errorClass": "IdParamError"},
+  },
+  "platformconfig.updatePlatformConfig {\"id\":3,\"value\":5}": {
+    reason: "2.0.1 errored too (configKey missing); same failure, clearer message",
+    branch: {"requests": [], "errorClass": "Error"},
+  },
+  "goals.updateGoal {\"data\":{\"id\":\"abc\",\"description\":\"x\"}}": {
+    reason: "ID safety: an ID nested in data is checked at the path",
+    branch: {"requests": [], "errorClass": "PathIdError"},
+  },
+  "experiments.startExperiment {}": {
+    reason: "ID safety: 2.0.1 sent GET /experiments/undefined",
+    branch: {"requests": [], "errorClass": "PathIdError"},
+  },
+  "experiments.revokeExperimentAccessUser {\"experimentId\":5,\"userId\":3,\"role\":\"Editor\"}": {
+    reason: "2.0.1 sent DELETE .../3/undefined (core ignored role); role is now resolved by name (the recorder has no \"Editor\" role, so: not found)",
+    branch: {"requests": [{"method": "GET", "url": "/asset_roles", "params": {"items": "100", "page": "1"}}], "errorClass": "Error"},
+  },
+  "experiments.listCustomFields {}": {
+    reason: "Default type \"test\" (2.0.1 filtered on undefined and always returned none)",
+    branch: {"requests": [{"method": "GET", "url": "/experiment_custom_section_fields", "params": {"items": "100", "page": "1"}}], "result": {"data": [], "rows": [], "pagination": {"page": 1, "items": 100, "hasMore": false}}},
+  },
+  "experiments.generateTemplate {}": {
+    reason: "Default name \"My Experiment\" (2.0.1 generated a template from name undefined, so \"my_experiment\")",
+    // The template embeds today's date and the local timezone: pin the
+    // requests, and check the result for the stable default name.
+    branch: {"requests": [{"method": "GET", "url": "/applications", "params": {}}, {"method": "GET", "url": "/unit_types", "params": {}}, {"method": "GET", "url": "/metrics", "params": {}}]},
+    resultIncludes: ["name: My Experiment", "display_name: My Experiment"],
+  },
+  "goals.getGoal {\"goalId\":5,\"id\":6}": {
+    reason: "A declared alias that disagrees with its documented param is an error (2.0.1 silently used id)",
+    branch: {"requests": [], "errorClass": "IdParamError"},
+  },
+  "goals.grantGoalAccessUser {\"goalId\":5,\"userId\":3,\"roleId\":7,\"role\":\"x\"}": {
+    reason: "roleId and role disagree: an error (2.0.1 ignored role and used roleId)",
+    branch: {"requests": [], "errorClass": "IdParamError"},
+  },
+  "experiments.grantExperimentAccessUser {\"experimentId\":5,\"userId\":3,\"roleId\":\"Editor\"}": {
+    reason: "roleId is an asset role ID; a name belongs in role (2.0.1 sent asset_role_id \"Editor\")",
+    branch: {"requests": [], "errorClass": "IdParamError"},
+  },
+  "datasources.testDatasource {}": {
+    reason: "Nothing to test: needs datasourceId or config (2.0.1 posted an empty body)",
+    branch: {"requests": [], "errorClass": "Error"},
+  },
+  "datasources.validateDatasourceQuery {\"datasourceId\":2}": {
+    reason: "With datasourceId, query is required (2.0.1 posted no query, and no datasource)",
+    branch: {"requests": [], "errorClass": "Error"},
+  },
+  "datasources.introspectDatasource {\"datasourceId\":2}": {
+    reason: "datasourceId is sent as datasource_id (2.0.1 ignored it and posted an empty body)",
+    branch: {"requests": [{"method": "POST", "url": "/datasources/introspect", "data": {"datasource_id": 2}}], "result": {"data": {}}},
+  },
+  "storageconfigs.testStorageConfig {\"configId\":3}": {
+    reason: "configId tests the saved config (2.0.1 ignored it and posted an empty body)",
+    branch: {"requests": [{"method": "GET", "url": "/storage_configs/3"}, {"method": "POST", "url": "/storage_configs/test", "data": {"storage_config_id": 3}}], "result": {"data": {"success": true}}},
+  },
+  "teams.addTeamMembers {\"teamId\":1,\"userIds\":[\"2\"]}": {
+    reason: "ID values are normalised to integers in bodies too (user_ids [2], was [\"2\"])",
+    branch: {"requests": [{"method": "PUT", "url": "/teams/1/members/add", "data": {"user_ids": [2]}}], "result": {"data": {"teamId": 1, "addedUsers": 1}}},
+  },
+  "experiments.createAnnotation {\"experimentId\":\"5\",\"data\":{\"type\":\"x\"}}": {
+    reason: "ID values are normalised to integers in bodies too (experiment_id 5, was \"5\")",
+    branch: {"requests": [{"method": "POST", "url": "/experiment_annotations", "data": {"type": "x", "experiment_id": 5}}], "result": {"data": [{"id": 1, "name": "entity"}]}},
+  },
 };
 // Every 2.0 call shape raised in review rounds 9-11, plus catalog-shaped ones.
 export const PARITY_CALLS: Call[] = [
@@ -123,7 +184,7 @@ function permissive(config: HttpRequestConfig): unknown {
 }
 
 class Recorder implements HttpClient {
-  requests: unknown[] = [];
+  requests: Recorded[] = [];
   getBaseUrl() { return "https://api.test/v1"; }
   async request<T>(config: HttpRequestConfig): Promise<HttpResponse<T>> {
     this.requests.push({ method: config.method, url: config.url, params: config.params, data: config.data });
@@ -139,7 +200,7 @@ function stable(value: unknown): unknown {
   }
 }
 
-async function run(execute: typeof executeBranch, call: Call) {
+async function run(execute: typeof executeBranch, call: Call): Promise<Outcome> {
   const http = new Recorder();
   let errorClass: string | undefined;
   let result: unknown;
@@ -148,17 +209,30 @@ async function run(execute: typeof executeBranch, call: Call) {
   } catch (e: any) {
     errorClass = e?.name ?? "Error";
   }
-  return { requests: http.requests, errorClass, result };
+  return stable({ requests: http.requests, errorClass, result }) as Outcome;
 }
 
-/** Thrown when the comparison ref is not available (e.g. a shallow checkout). */
+const canonical = (o: Outcome) => JSON.stringify({ requests: o.requests, errorClass: o.errorClass, result: o.result ?? null });
+function matchesExpectation(actual: Outcome, expected: { branch: Outcome; resultIncludes?: string[] }): boolean {
+  if (!expected.resultIncludes) return canonical(actual) === canonical(expected.branch);
+  const text = JSON.stringify(actual.result ?? null);
+  return canonical({ ...actual, result: null }) === canonical({ ...expected.branch, result: null })
+    && expected.resultIncludes.every((part) => text.includes(JSON.stringify(part).slice(1, -1)));
+}
+
+/** Thrown when the comparison ref is not in the repository (e.g. not fetched). */
 export class RefUnavailableError extends Error {}
 
 export async function compareWithRef(ref = REF) {
   try {
     execFileSync("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], { cwd: ROOT, stdio: "ignore" });
-  } catch {
-    throw new RefUnavailableError(`git ref ${ref} is not available`);
+  } catch (e: any) {
+    // Only git's own "no such commit" (a non-zero exit) means the ref is
+    // missing; git not found (ENOENT), a signal or any other failure is fatal.
+    if (typeof e?.status === "number" && e.status !== 0) {
+      throw new RefUnavailableError(`git ref ${ref} is not available; fetch it (git fetch origin ${ref})`);
+    }
+    throw e;
   }
   // The whole src/ tree at the ref, so its cli-catalog.ts imports its own
   // siblings, whatever they are. It sits under ROOT so node_modules resolves.
@@ -175,11 +249,7 @@ export async function compareWithRef(ref = REF) {
       const expectation = EXPECTED_DIFFERENCES[callKey(call)];
       // An expected difference must still differ, and the branch must produce
       // the stated outcome; anything else must be the same.
-      const ok = expectation
-        ? !same
-          && b.errorClass === expectation.branch.errorClass
-          && (expectation.branch.requests === undefined || b.requests.length === expectation.branch.requests)
-        : same;
+      const ok = expectation ? !same && matchesExpectation(b, expectation) : same;
       results.push({ call, same, ok, expected: expectation?.reason, main: m, branch: b });
     }
     return results;
@@ -190,6 +260,10 @@ export async function compareWithRef(ref = REF) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const results = await compareWithRef();
+  if (ARGS.includes("--print")) {
+    for (const r of results.filter((x) => x.expected)) console.log(`${JSON.stringify(callKey(r.call))}: ${JSON.stringify(r.branch)},`);
+    process.exit(0);
+  }
   let bad = 0;
   for (const r of results) {
     const ok = r.ok;

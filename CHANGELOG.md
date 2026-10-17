@@ -11,7 +11,8 @@
 
 - `FetchHttpClient` only sends requests under `<base>/v1/` or the root `/auth/current-user` paths. Dot segments in any encoding, backslashes, encoded separators, control characters and `undefined`/`null`/`NaN` path segments are refused before `fetch`.
 - ABsmartly endpoints are parsed by one function (`parseAbsmartlyEndpoint`) everywhere they enter: OAuth consent, API-key requests, the `/register` link, stored props and `FetchHttpClient`.
-- Every argument an APIClient method puts into a request path must be a positive integer, whichever route it came by (`withPathIdGuard`). Path arguments are read from the installed `@absmartly/cli` at runtime, so the guard holds for any CLI version in the peer range; a method it cannot read fails closed. The `absmartly://<entity>/{id}` resource templates get the same check.
+- Every argument an APIClient method puts into a request path is checked before the method runs, whichever route it came by (`withPathIdGuard`, applied once where this package creates its client and again in `executeCommand` for a host's own client). Path arguments come from `src/api-path-args.ts`, generated from the `@absmartly/cli` build and looked up by parameter name: an ID must be a positive integer, and a word (uploadFile's `usage`) must not contain `/ \ . % ? #`. `request`/`rawRequest` validate their path (leading `/`, no dot segment in any encoding, no backslash). Any method not in the table fails closed: non-primitive arguments, strings with path characters and numbers that are not positive integers are refused. The `absmartly://<entity>/{id}` resource templates get the same check.
+- `@absmartly/cli` is pinned to exactly `1.16.2` (peer and dev dependency; the peer range was `>=1.7.0 <2`), the build the path table was generated from. The installed version is checked at load; on any other version no mapping is trusted and every method is treated as unknown.
 
 ### Behaviour changes for direct executeCommand callers
 
