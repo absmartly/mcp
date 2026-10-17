@@ -160,11 +160,12 @@ export function normalizeEndpoint(raw: string): string {
  * parse, if any (for a "was ignored" notice; it comes from the request, so do
  * not echo it on a trusted page).
  */
-export function firstValidEndpoint(candidates: Array<string | null | undefined>): { endpoint: string | null; rejected: string | null } {
+export function firstValidEndpoint(candidates: Array<string | null | undefined>): { endpoint: AbsmartlyEndpoint | null; rejected: string | null } {
   let rejected: string | null = null;
   for (const candidate of candidates) {
     if (!candidate) continue;
-    if (tryParseAbsmartlyEndpoint(candidate)) return { endpoint: candidate, rejected };
+    const parsed = tryParseAbsmartlyEndpoint(candidate);
+    if (parsed) return { endpoint: parsed, rejected };
     rejected ??= candidate;
   }
   return { endpoint: null, rejected };

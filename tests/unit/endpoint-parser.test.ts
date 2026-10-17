@@ -52,8 +52,8 @@ export default async function runTests() {
   }
 
   // firstValidEndpoint: an invalid higher-priority source never hides a valid one.
-  assertEquals(firstValidEndpoint(['bad host', null, 'acme.absmartly.com']), { endpoint: 'acme.absmartly.com', rejected: 'bad host' }, 'firstValidEndpoint skips an invalid source');
-  assertEquals(firstValidEndpoint([undefined, 'https://a.absmartly.com', 'ftp://x']), { endpoint: 'https://a.absmartly.com', rejected: null }, 'firstValidEndpoint takes the first valid one');
+  assertEquals(firstValidEndpoint(['bad host', null, 'acme.absmartly.com']), { endpoint: parseAbsmartlyEndpoint('acme.absmartly.com'), rejected: 'bad host' }, 'firstValidEndpoint skips an invalid source and returns the parsed one');
+  assertEquals(firstValidEndpoint([undefined, 'https://a.absmartly.com', 'ftp://x']).endpoint?.baseUrl, 'https://a.absmartly.com', 'firstValidEndpoint takes the first valid one');
   assertEquals(firstValidEndpoint(['ftp://x', '']), { endpoint: null, rejected: 'ftp://x' }, 'firstValidEndpoint reports a rejection with no valid source');
 
   return { success: failed === 0, message: `${passed} passed, ${failed} failed`, testCount: passed + failed, details };

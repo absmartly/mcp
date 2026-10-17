@@ -20,6 +20,9 @@ const QUERY_FORBIDDEN = /[\\\u0000-\u001f\u007f]/;
 // A path segment: RFC 3986 unreserved characters, or percent-escapes of them.
 const PATH_SEGMENT = /^(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2})+$/;
 const UNRESERVED = /^[A-Za-z0-9._~-]+$/;
+// What a missing value becomes when a path template interpolates it; never a
+// real API path segment.
+const MISSING_VALUE_SEGMENTS = new Set(['undefined', 'null', 'NaN']);
 const MESSAGE_INVALID_PATH = 'Invalid API path';
 
 /**
@@ -32,7 +35,7 @@ function isAllowedPathSuffix(path: string): boolean {
   return segments.every((segment, i) => {
     if (segment === '') return i === segments.length - 1 && i > 0;
     const decoded = PATH_SEGMENT.test(segment) ? decodeOrNull(segment) : null;
-    return decoded !== null && UNRESERVED.test(decoded) && !DOT_SEGMENT.test(decoded);
+    return decoded !== null && UNRESERVED.test(decoded) && !DOT_SEGMENT.test(decoded) && !MISSING_VALUE_SEGMENTS.has(decoded);
   });
 }
 

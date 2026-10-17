@@ -330,6 +330,23 @@ export default async function run() {
     assert.ok(body.includes('role="status"') && body.includes('was not a valid ABsmartly URL') && !body.includes('bad.example'), 'notice, no echo');
   });
 
+  await asyncTest('a rejected request endpoint substituted by a valid lower-priority one keeps the notice and is not auto-approved', async () => {
+    const store = memoryStore();
+    const extra: Partial<ConsentOptions> = { requireEndpoint: true, rememberApprovals: true };
+    const first = await beginAuthorization({ authRequest: request(), endpoint: 'https://other.absmartly.com', cookieHeader: null }, options(store, extra));
+    if (first.type !== 'respond') throw new Error('unreachable');
+    const transactionId = (first.response.body ?? '').match(/name="transaction_id" value="([^"]+)"/)?.[1] || '';
+    const approved = await submitConsent({ form: { action: 'approve', transactionId }, cookieHeader: cookiePair(first.response.setCookies[0] || '') }, options(store, extra));
+    if (approved.type !== 'approved') throw new Error('expected approval');
+    const approvalsCookie = cookiePair(approved.setCookies.find((c) => c.includes('approv')) ?? '');
+    // What the worker passes when the resource endpoint is invalid but a header endpoint is valid.
+    const substituted = await beginAuthorization(
+      { authRequest: request(), endpoint: 'bad host', fallbackEndpoint: 'https://other.absmartly.com', cookieHeader: approvalsCookie },
+      options(store, extra),
+    );
+    assert.ok(substituted.type === 'respond' && (substituted.response.body ?? '').includes('role="status"'), 'notice shown, no auto-approve');
+  });
+
   return {
     success: failed === 0,
     message: `${passed} passed, ${failed} failed`,

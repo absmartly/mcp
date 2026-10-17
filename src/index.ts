@@ -720,7 +720,7 @@ async function handleMcpTransportRequest(
             extractEndpointFromPath(url.pathname, route.pathPrefix),
             endpoint,
         ]);
-        const pendingEndpoint = tryParseAbsmartlyEndpoint(requested.endpoint)?.baseUrl;
+        const pendingEndpoint = requested.endpoint?.baseUrl;
         if (pendingEndpoint) {
             await safeKvPut(env.OAUTH_KV, `oauth_endpoint_pending:${clientFingerprint}`, pendingEndpoint, {
                 expirationTtl: OAUTH_STATE_TTL_SECONDS,

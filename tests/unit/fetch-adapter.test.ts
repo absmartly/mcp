@@ -339,6 +339,18 @@ export default async function runTests() {
     });
   }
 
+  await asyncTest('Path hardening: a missing interpolated value (undefined/null/NaN segment) never reaches fetch', async () => {
+    const client = new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'jwt' });
+    let fetched = false;
+    mockFetch(async () => { fetched = true; return new Response('{}'); });
+    let threw = 0;
+    for (const path of ['/goals/undefined', '/configs/null', '/teams/NaN/members']) {
+      try { await client.request({ method: 'GET', url: path }); } catch { threw++; }
+    }
+    ok(threw === 3 && !fetched, 'Path hardening: undefined/null/NaN segments rejected before fetch', `threw ${threw}/3`);
+    restoreFetch();
+  });
+
   await asyncTest('Path hardening: a decoded query (from rawRequest) is re-encoded, not rejected', async () => {
     const client = new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'jwt' });
     const urls: string[] = [];
