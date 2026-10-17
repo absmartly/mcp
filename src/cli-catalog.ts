@@ -1214,6 +1214,8 @@ export function documentedParams(entry: CommandEntry): CommandParam[] {
 // positive integers (a numeric string is accepted): "../users/5" must never
 // reach a path template.
 const ID_PARAM_NAME = /Id\d*$/;
+// Keys the cores interpolate into paths: "id" or any "...Id".
+const UNDOCUMENTED_ID_KEY = /^id$|Id\d*$/;
 const ID_LIST_PARAM = 'ids';
 // Digits only, after trimming; leading zeros are allowed ("05" is 5).
 const DIGITS = /^[0-9]+$/;
@@ -1242,7 +1244,6 @@ export const TOOL_INJECTED_PARAMS = {
   always: ['apiEndpoint'],
   listCommands: ['items', 'page'],
 } as const;
-const TOOL_INJECTED_PARAM_NAMES = new Set<string>([...TOOL_INJECTED_PARAMS.always, ...TOOL_INJECTED_PARAMS.listCommands]);
 
 /** Commands the tool layer gives default paging (TOOL_INJECTED_PARAMS.listCommands). */
 export function isListCommand(command: string): boolean {
@@ -1307,7 +1308,8 @@ function warnDeprecatedAlias(label: string, alias: string, canonical: string): v
  * - a deprecated alias (documented, like roleId, or a 2.0 core name, like
  *   `id`) is validated and moved to its canonical param, and conflicts with a
  *   different canonical value; a core-name alias logs a one-time warning;
- * - any other undocumented key is dropped, so it can never reach the core;
+ * - any other key passes through unchanged (as in 2.0), except that an
+ *   undocumented ID-named key ("id", "...Id") must also be a positive integer;
  * - a required param that is missing (counting aliases) is reported, so no
  *   path is built with "undefined".
  * Throws an IdParamError listing every problem.
@@ -1339,10 +1341,23 @@ export function normalizeIdParams(
   const documented = documentedAliases(label);
   const coreAliases = Object.fromEntries(Object.entries(coreIdAliases(entry)).filter(([alias]) => !(alias in documented)));
   const aliases: Record<string, string> = { ...coreAliases, ...documented };
-  const known = new Set([...entry.params.map((p) => p.name), ...TOOL_INJECTED_PARAM_NAMES]);
+  // Every other key passes through unchanged, as in 2.0: only ID params are
+  // owned here. execute_command still rejects unknown keys up front
+  // (validateCommandParams); direct executeCommand callers may pass core-only
+  // options.
+  const documentedNames = new Set(entry.params.map((p) => p.name));
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input)) {
-    if (known.has(key) && !(key in aliases) && !(bagParam && key === PARAMS_PARAM)) out[key] = value;
+    if (!(key in aliases) && !(bagParam && key === PARAMS_PARAM)) out[key] = value;
+  }
+
+  // An undocumented ID-named key ("id", "fooId") is the one kind of extra key
+  // that can reach a request path, so it must be a positive integer too.
+  for (const [key, value] of Object.entries(out)) {
+    if (documentedNames.has(key) || !UNDOCUMENTED_ID_KEY.test(key) || value === undefined || value === null) continue;
+    const id = toPositiveInteger(value);
+    if (id === undefined) errors.push(`Param "${key}" for ${label} must be a positive integer ID.`);
+    else out[key] = id;
   }
 
   for (const [alias, canonical] of Object.entries(aliases)) {
@@ -1359,10 +1374,11 @@ export function normalizeIdParams(
     }
   }
 
-  // Deprecated params (ignored by the core, e.g. dismissAlert's experimentId)
-  // are dropped, so no unchecked value ever reaches it.
+  // Deprecated ID params the core ignores (e.g. dismissAlert's experimentId)
+  // are dropped, so no unchecked ID ever reaches it. Other deprecated params
+  // pass through.
   for (const p of entry.params) {
-    if (p.deprecated && out[p.name] !== undefined && !(p.name in aliases)) delete out[p.name];
+    if (p.deprecated && ID_PARAM_NAME.test(p.name) && out[p.name] !== undefined && !(p.name in aliases)) delete out[p.name];
   }
 
   for (const p of entry.params) {
