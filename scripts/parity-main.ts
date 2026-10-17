@@ -4,7 +4,7 @@
 // differ only if it is in EXPECTED_DIFFERENCES, with the reason.
 // Usage: npx tsx scripts/parity-main.ts [git-ref]  (default origin/main)
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { APIClient } from "@absmartly/cli/api-client";
@@ -23,18 +23,35 @@ const callKey = (c: Call) => `${c.group}.${c.command} ${JSON.stringify(c.params)
  * with its reason. Keep in step with CHANGELOG.md ("Behaviour changes for
  * direct executeCommand callers").
  */
-export const EXPECTED_DIFFERENCES: Record<string, string> = {
-  'goals.getGoal {"goalId":"1/../users"}': "ID safety: a path ID must be a positive integer",
-  'platformconfig.getPlatformConfig {"id":null}': "2.0.1 errored too; the message now names the invalid config",
-  'experiments.startExperiment {"experimentId":null}': "ID safety: null would become /experiments/null",
-  'platformconfig.updatePlatformConfig {"id":3,"value":5}': "2.0.1 errored too (configKey missing); same failure, clearer message",
-  'goals.updateGoal {"data":{"id":"abc","description":"x"}}': "ID safety: an ID nested in data is checked at the path",
-  'experiments.startExperiment {}': "ID safety: 2.0.1 sent GET /experiments/undefined",
-  'experiments.revokeExperimentAccessUser {"experimentId":5,"userId":3,"role":"Editor"}': "2.0.1 sent DELETE .../3/undefined (core ignored role); role is now resolved",
-  'experiments.listCustomFields {}': "Default type \"test\" (2.0.1 filtered on undefined and always returned none)",
-  'experiments.generateTemplate {}': "Default name \"My Experiment\" and type \"test\" (2.0.1 generated a template with name undefined)",
-};
+type Outcome = { errorClass?: string; requests?: number };
 
+/**
+ * Intentional differences from 2.0.1 for direct executeCommand callers: the
+ * reason, and the outcome this branch must produce (its error class, and how
+ * many requests it sends), so a regression that differs in another way still
+ * fails. Keep in step with CHANGELOG.md ("Behaviour changes for direct
+ * executeCommand callers").
+ */
+export const EXPECTED_DIFFERENCES: Record<string, { reason: string; branch: Outcome }> = {
+  'goals.getGoal {"goalId":"1/../users"}': { reason: "ID safety: a path ID must be a positive integer", branch: { errorClass: "IdParamError", requests: 0 } },
+  'platformconfig.getPlatformConfig {"id":null}': { reason: "2.0.1 errored too; the message now names the invalid config", branch: { errorClass: "Error", requests: 0 } },
+  'experiments.startExperiment {"experimentId":null}': { reason: "ID safety: null would become /experiments/null", branch: { errorClass: "IdParamError", requests: 0 } },
+  'platformconfig.updatePlatformConfig {"id":3,"value":5}': { reason: "2.0.1 errored too (configKey missing); same failure, clearer message", branch: { errorClass: "Error", requests: 0 } },
+  'goals.updateGoal {"data":{"id":"abc","description":"x"}}': { reason: "ID safety: an ID nested in data is checked at the path", branch: { errorClass: "PathIdError", requests: 0 } },
+  'experiments.startExperiment {}': { reason: "ID safety: 2.0.1 sent GET /experiments/undefined", branch: { errorClass: "PathIdError", requests: 0 } },
+  'experiments.revokeExperimentAccessUser {"experimentId":5,"userId":3,"role":"Editor"}': { reason: "2.0.1 sent DELETE .../3/undefined (core ignored role); role is now resolved by name (the recorder has no \"Editor\" role, so: not found)", branch: { errorClass: "Error", requests: 1 } },
+  'experiments.listCustomFields {}': { reason: "Default type \"test\" (2.0.1 filtered on undefined and always returned none)", branch: { requests: 1 } },
+  'experiments.generateTemplate {}': { reason: "Default name \"My Experiment\" (2.0.1 generated a template from name undefined, so \"my_experiment\")", branch: { requests: 3 } },
+  'goals.getGoal {"goalId":5,"id":6}': { reason: "A declared alias that disagrees with its documented param is an error (2.0.1 silently used id)", branch: { errorClass: "IdParamError", requests: 0 } },
+  'goals.grantGoalAccessUser {"goalId":5,"userId":3,"roleId":7,"role":"x"}': { reason: "roleId and role disagree: an error (2.0.1 ignored role and used roleId)", branch: { errorClass: "IdParamError", requests: 0 } },
+  'experiments.grantExperimentAccessUser {"experimentId":5,"userId":3,"roleId":"Editor"}': { reason: "roleId is an asset role ID; a name belongs in role (2.0.1 sent asset_role_id \"Editor\")", branch: { errorClass: "IdParamError", requests: 0 } },
+  'datasources.testDatasource {}': { reason: "Nothing to test: needs datasourceId or config (2.0.1 posted an empty body)", branch: { errorClass: "Error", requests: 0 } },
+  'datasources.validateDatasourceQuery {"datasourceId":2}': { reason: "With datasourceId, query is required (2.0.1 posted no query, and no datasource)", branch: { errorClass: "Error", requests: 0 } },
+  'datasources.introspectDatasource {"datasourceId":2}': { reason: "datasourceId is sent as datasource_id (2.0.1 ignored it and posted an empty body)", branch: { requests: 1 } },
+  'storageconfigs.testStorageConfig {"configId":3}': { reason: "configId tests the saved config (2.0.1 ignored it and posted an empty body)", branch: { requests: 2 } },
+  'teams.addTeamMembers {"teamId":1,"userIds":["2"]}': { reason: "ID values are normalised to integers in bodies too (user_ids [2], was [\"2\"])", branch: { requests: 1 } },
+  'experiments.createAnnotation {"experimentId":"5","data":{"type":"x"}}': { reason: "ID values are normalised to integers in bodies too (experiment_id 5, was \"5\")", branch: { requests: 1 } },
+};
 // Every 2.0 call shape raised in review rounds 9-11, plus catalog-shaped ones.
 export const PARITY_CALLS: Call[] = [
   { group: "experiments", command: "searchExperiments", params: { query: "checkout" } },
@@ -81,6 +98,16 @@ export const PARITY_CALLS: Call[] = [
   { group: "experiments", command: "startExperiment", params: { experimentId: null } },
   { group: "goals", command: "updateGoal", params: { data: { id: "abc", description: "x" } } },
   { group: "experiments", command: "startExperiment", params: {} },
+  // Round 13 additions.
+  { group: "goals", command: "getGoal", params: { goalId: 5, id: 6 } },
+  { group: "goals", command: "grantGoalAccessUser", params: { goalId: 5, userId: 3, roleId: 7, role: "x" } },
+  { group: "experiments", command: "grantExperimentAccessUser", params: { experimentId: 5, userId: 3, roleId: "Editor" } },
+  { group: "datasources", command: "testDatasource", params: {} },
+  { group: "datasources", command: "validateDatasourceQuery", params: { datasourceId: 2 } },
+  { group: "datasources", command: "introspectDatasource", params: { datasourceId: 2 } },
+  { group: "storageconfigs", command: "testStorageConfig", params: { configId: 3 } },
+  { group: "teams", command: "addTeamMembers", params: { teamId: 1, userIds: ["2"] } },
+  { group: "experiments", command: "createAnnotation", params: { experimentId: "5", data: { type: "x" } } },
 ];
 
 const EXPERIMENT = {
@@ -124,19 +151,36 @@ async function run(execute: typeof executeBranch, call: Call) {
   return { requests: http.requests, errorClass, result };
 }
 
+/** Thrown when the comparison ref is not available (e.g. a shallow checkout). */
+export class RefUnavailableError extends Error {}
+
 export async function compareWithRef(ref = REF) {
+  try {
+    execFileSync("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], { cwd: ROOT, stdio: "ignore" });
+  } catch {
+    throw new RefUnavailableError(`git ref ${ref} is not available`);
+  }
+  // The whole src/ tree at the ref, so its cli-catalog.ts imports its own
+  // siblings, whatever they are. It sits under ROOT so node_modules resolves.
   const dir = mkdtempSync(join(ROOT, ".parity-"));
   try {
-    const source = execFileSync("git", ["show", `${ref}:src/cli-catalog.ts`], { cwd: ROOT, encoding: "utf-8" })
-      .replace(/from "\.\/api-client-like\.js"/, `from "${join(ROOT, "src", "api-client-like.js")}"`);
-    const file = join(dir, "cli-catalog.ts");
-    writeFileSync(file, source);
+    const archive = execFileSync("git", ["archive", "--format=tar", ref, "src"], { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 });
+    execFileSync("tar", ["-x", "-C", dir], { input: archive });
+    const file = join(dir, "src", "cli-catalog.ts");
     const main = await import(file);
-    const results: Array<{ call: Call; same: boolean; expected?: string; main: unknown; branch: unknown }> = [];
+    const results: Array<{ call: Call; same: boolean; ok: boolean; expected?: string; main: unknown; branch: unknown }> = [];
     for (const call of PARITY_CALLS) {
       const [m, b] = [await run(main.executeCommand, call), await run(executeBranch, call)];
       const same = JSON.stringify(m) === JSON.stringify(b);
-      results.push({ call, same, expected: EXPECTED_DIFFERENCES[callKey(call)], main: m, branch: b });
+      const expectation = EXPECTED_DIFFERENCES[callKey(call)];
+      // An expected difference must still differ, and the branch must produce
+      // the stated outcome; anything else must be the same.
+      const ok = expectation
+        ? !same
+          && b.errorClass === expectation.branch.errorClass
+          && (expectation.branch.requests === undefined || b.requests.length === expectation.branch.requests)
+        : same;
+      results.push({ call, same, ok, expected: expectation?.reason, main: m, branch: b });
     }
     return results;
   } finally {
@@ -148,9 +192,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const results = await compareWithRef();
   let bad = 0;
   for (const r of results) {
-    // An expected difference that no longer differs is stale: fail, so the list stays exact.
-    const ok = r.expected ? !r.same : r.same;
-    const tag = r.same ? (r.expected ? "STALE" : "same") : r.expected ? "EXPECTED" : "DIFFERENT";
+    const ok = r.ok;
+    const tag = r.same ? (r.expected ? "STALE" : "same") : r.expected ? (r.ok ? "EXPECTED" : "WRONG") : "DIFFERENT";
     if (!ok) bad++;
     console.log(`${tag.padEnd(10)} ${callKey(r.call)}${r.expected ? `  (${r.expected})` : ""}`);
     if (!ok) console.log(`  main:   ${JSON.stringify(r.main)}\n  branch: ${JSON.stringify(r.branch)}`);

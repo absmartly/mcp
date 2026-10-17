@@ -1322,8 +1322,9 @@ function warnDeprecatedAlias(label: string, alias: string, canonical: string): v
  * - a deprecated alias (documented, like roleId, or a 2.0 core name, like
  *   `id`) is validated and moved to its canonical param, and conflicts with a
  *   different canonical value; a core-name alias logs a one-time warning;
- * - any other key passes through unchanged (as in 2.0), except that an
- *   undocumented ID-named key ("id", "...Id") must also be a positive integer;
+ * - any other key passes through unchanged (as in 2.0); an undocumented key
+ *   that reaches a request path is checked where the APIClient builds the
+ *   path (withPathIdGuard), not here;
  * - a required param that is missing (counting aliases) is reported, so no
  *   path is built with "undefined".
  * Throws an IdParamError listing every problem.

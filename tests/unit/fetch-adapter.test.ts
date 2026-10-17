@@ -415,6 +415,21 @@ export default async function runTests() {
     }
   });
 
+  await asyncTest('Base path with characters URL encodes ({, ", `) still reaches the root auth paths', async () => {
+    const urls: string[] = [];
+    mockFetch(async (url) => { urls.push(String(url)); return new Response(JSON.stringify({ user: { id: 1 } }), { headers: { 'content-type': 'application/json' } }); });
+    for (const base of ['https://host/a{b}/v1', 'https://host/a"b', 'https://host/a`b', 'https://host/a|b']) {
+      await new APIClient(new FetchHttpClient(base, { authToken: 't', authType: 'jwt' })).getCurrentUser();
+    }
+    assertEquals(urls, [
+      'https://host/a%7Bb%7D/auth/current-user',
+      'https://host/a%22b/auth/current-user',
+      'https://host/a%60b/auth/current-user',
+      'https://host/a|b/auth/current-user',
+    ], 'Base path encoding: the parsed (encoded) base path is used throughout');
+    restoreFetch();
+  });
+
   await asyncTest('Base URL: parsed first; /v1 stripped; scheme defaults to https', async () => {
     for (const [input, expected] of [
       ['https://example.com/v1', 'https://example.com/v1'],

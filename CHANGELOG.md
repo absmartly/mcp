@@ -11,7 +11,7 @@
 
 - `FetchHttpClient` only sends requests under `<base>/v1/` or the root `/auth/current-user` paths. Dot segments in any encoding, backslashes, encoded separators, control characters and `undefined`/`null`/`NaN` path segments are refused before `fetch`.
 - ABsmartly endpoints are parsed by one function (`parseAbsmartlyEndpoint`) everywhere they enter: OAuth consent, API-key requests, the `/register` link, stored props and `FetchHttpClient`.
-- Every argument an APIClient method puts into a request path (`src/api-path-args.ts`, generated from the CLI build) must be a positive integer, whichever route it came by.
+- Every argument an APIClient method puts into a request path must be a positive integer, whichever route it came by (`withPathIdGuard`). Path arguments are read from the installed `@absmartly/cli` at runtime, so the guard holds for any CLI version in the peer range; a method it cannot read fails closed. The `absmartly://<entity>/{id}` resource templates get the same check.
 
 ### Behaviour changes for direct executeCommand callers
 
@@ -22,4 +22,7 @@
 - `listCustomFields` without `type` defaults to `"test"` (2.0.1 filtered on `undefined` and always returned no fields).
 - `generateTemplate` without `name`/`type` defaults to `"My Experiment"`/`"test"` (2.0.1 generated a template named `undefined`).
 - `platformconfig.getPlatformConfig {id: null}` and `updatePlatformConfig {id, value}` fail as in 2.0.1, with a message naming the config problem.
+- ID values are normalised to integers in request bodies and results too (`userIds: ["2"]` sends `user_ids: [2]`; `createAnnotation {experimentId: "5"}` sends `experiment_id: 5`).
+- Datasource and storage tests: `datasourceId`/`configId` now test the saved config (2.0.1 ignored them and posted an empty body); `validateDatasourceQuery` with `datasourceId` requires `query`; a call with neither an ID nor `config` is an error.
+- `grantExperimentAccessUser {roleId: "Editor"}`: `roleId` must be an asset role ID; pass a name in `role` (2.0.1 sent `asset_role_id: "Editor"`).
 - Declared aliases that disagree with their documented param (`roleId` vs `role`/`assetRoleId`, `id` vs the documented ID) are an error; 2.0.1 silently picked one.

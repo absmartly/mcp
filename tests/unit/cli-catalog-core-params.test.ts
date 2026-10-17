@@ -4,7 +4,7 @@ import { APIClient } from '@absmartly/cli/api-client';
 import type { HttpClient, HttpRequestConfig, HttpResponse } from '@absmartly/cli/api-client';
 import { CLI_GROUPS, documentedParams, executeCommand, getCommandEntry, getGroupCommands, validateCommandParams } from '../../src/cli-catalog';
 import { auditCatalogParams } from '../../scripts/audit-catalog-params';
-import { compareWithRef } from '../../scripts/parity-main';
+import { compareWithRef, RefUnavailableError } from '../../scripts/parity-main';
 
 const BASE_URL = 'https://api.test/v1';
 const ROOT_URL = 'https://api.test';
@@ -832,10 +832,16 @@ export default async function runTests() {
   // safety: run every 2.0 call shape from review through both and compare.
   {
     let results: Awaited<ReturnType<typeof compareWithRef>> | undefined;
-    try { results = await compareWithRef(); } catch { results = undefined; }
+    try {
+      results = await compareWithRef();
+    } catch (e) {
+      // Only a missing ref is a skip; any other failure fails the suite.
+      if (!(e instanceof RefUnavailableError)) throw e;
+      results = undefined;
+    }
     if (results) {
       for (const r of results) {
-        assertEquals(r.expected ? !r.same : r.same, true, `parity with origin/main: ${r.call.group}.${r.call.command} ${JSON.stringify(r.call.params)}${r.expected ? ` (expected difference: ${r.expected})` : ''}`);
+        assertEquals(r.ok, true, `parity with origin/main: ${r.call.group}.${r.call.command} ${JSON.stringify(r.call.params)}${r.expected ? ` (expected difference: ${r.expected})` : ''}`);
       }
     } else {
       // origin/main is not available (e.g. a shallow checkout); the parity
