@@ -21,7 +21,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { pathToFileURL } from "url";
 import { resolveTestCredentials, SKIP_MESSAGE } from "./test-credentials.js";
-import { skipScenario, skipSuite, workerUrl } from "./gate.js";
+import { skipSuite, workerUrl } from "./gate.js";
 
 const LOCAL_MCP_URL = `${workerUrl()}/sse`;
 const POLL_INTERVAL_MS = 1_000;
@@ -288,23 +288,7 @@ async function run() {
     });
 
     await test('feature flag lifecycle: create → ready → dev → start → stop → archive', async () => {
-        let flagId: number;
-        try {
-            flagId = await createAndConfirm('feature', 'sdk_flag');
-        } catch (err: any) {
-            const msg = err?.message || String(err);
-            // test-1 has returned HTTP 500 for every feature-flag create that
-            // carries analysis fields (analysis_type, required_alpha, ...),
-            // and the template path always sends them. A local run skips
-            // this scenario; a gated run fails, because it means feature
-            // flags can't be created through the MCP.
-            if (msg.includes('Internal Server Error')) {
-                skipScenario(`backend returned Internal Server Error on feature-flag create: ${msg.slice(0, 300)}`);
-                process.stdout.write('    ');
-                return;
-            }
-            throw err;
-        }
+        const flagId = await createAndConfirm('feature', 'sdk_flag');
 
         await callExecute(client, 'experiments', 'updateExperiment', { experimentId: flagId, changes: { state: 'ready' } });
         const ready = await pollState(client, flagId, 'ready');
