@@ -147,7 +147,7 @@
     }
   },
   "devDependencies": {
-    "@absmartly/cli": "^1.16.2",
+    "@absmartly/cli": "^1.17.0",
     "@cloudflare/workers-oauth-provider": "^0.10.3",
     "@cloudflare/workers-types": "^4.20241106.0",
     "@types/node": "^20.11.0",
