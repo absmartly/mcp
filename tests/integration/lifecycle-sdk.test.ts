@@ -204,6 +204,10 @@ async function run() {
     // when a scenario fails part-way. A failed gated run must not leave
     // running feature flags or experiments on the shared test-1 instance.
     const createdEntities = new Map<number, 'test' | 'feature'>();
+    // Names of confirmed creates whose response gave no id (lost, malformed or
+    // an MCP error). The backend may still have committed them, so cleanup
+    // looks each one up by name.
+    const unresolvedCreates = new Map<string, 'test' | 'feature'>();
 
     async function createAndConfirm(type: 'test' | 'feature', prefix: string): Promise<number> {
         // The test-1 backend occasionally returns "Internal Server Error" from
@@ -216,10 +220,12 @@ async function run() {
             try {
                 // First call returns preview (no confirmed). Second call with confirmed:true creates.
                 await callExecute(client, 'experiments', 'createExperimentFromTemplate', { templateContent });
+                unresolvedCreates.set(name, type);
                 const created = await callExecute(client, 'experiments', 'createExperimentFromTemplate', { templateContent }, { confirmed: true });
                 const id = created.data?.id ?? created.data?.experiment?.id ?? created.data?.data?.id;
                 if (id) {
                     createdEntities.set(id as number, type);
+                    unresolvedCreates.delete(name);
                     return id as number;
                 }
                 lastError = `attempt ${attempt}/3: ${created.text.slice(0, 400)}`;
@@ -258,6 +264,22 @@ async function run() {
     // instead of stopping at the first, and returns them so the suite fails.
     async function cleanup(): Promise<string[]> {
         const errors: string[] = [];
+        // Recover creates that may have committed without returning an id.
+        // A name that can't be checked is reported so an operator can clean
+        // it up by hand.
+        for (const [name, type] of unresolvedCreates) {
+            try {
+                const { data } = await callExecute(client, 'experiments', 'listExperiments', { search: name, items: 10 });
+                const rows: any[] = Array.isArray(data) ? data : (data?.experiments ?? data?.items ?? []);
+                const match = rows.find(r => r?.name === name);
+                if (match?.id) {
+                    console.log(`\n  cleanup: recovered ${type} ${match.id} (${name}) created without an id in the response`);
+                    createdEntities.set(Number(match.id), type);
+                }
+            } catch (err: any) {
+                errors.push(`${type} "${name}" may exist on the backend but could not be looked up for cleanup: ${err?.message || err}`);
+            }
+        }
         for (const [id, type] of createdEntities) {
             try {
                 const before = await readFields(id);
