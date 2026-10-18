@@ -65,49 +65,16 @@ jobs:
   # The release gate. 2.0.0 and 2.0.1 were published while the Worker could
   # not start (Cloudflare error 10021): every Worker-backed suite reported
   # "skipped", and nothing ran the e2e suite before `npm publish`. This job
-  # runs the Worker smoke test and the e2e suite in gated mode. In that mode
-  # a Worker that won't start, missing credentials, a skipped suite, or too
-  # few executed tests all fail the job, and `publish` needs it.
+  # runs the shared gated e2e workflow (e2e.yml, also the PR merge gate). A
+  # Worker that won't start, missing credentials, a skipped suite, or too few
+  # executed tests all fail it, and `publish` needs it.
   e2e:
     needs: version-check
     if: needs.version-check.outputs.changed == 'true'
-    runs-on: ubuntu-latest
-    env:
-      REQUIRE_E2E: '1'
-      WRANGLER_SEND_METRICS: 'false'
-      # test-1 credentials for the live-API suites (api-client-listings,
-      # mcp-schema, lifecycle-sdk). Repo secrets; see tests/README.md.
+    uses: ./.github/workflows/e2e.yml
+    secrets:
       ABSMARTLY_API_KEY: ${{ secrets.ABSMARTLY_API_KEY }}
       ABSMARTLY_API_ENDPOINT: ${{ secrets.ABSMARTLY_API_ENDPOINT }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - run: npm ci
-
-      - name: Require test-1 credentials
-        run: |
-          if [ -z "$ABSMARTLY_API_KEY" ] || [ -z "$ABSMARTLY_API_ENDPOINT" ]; then
-            echo "::error::ABSMARTLY_API_KEY and ABSMARTLY_API_ENDPOINT repo secrets are required to publish (see tests/README.md)."
-            exit 1
-          fi
-
-      - name: Sync src/version.ts to package.json version
-        run: node scripts/sync-version.js
-
-      - name: Ensure DXT bundle stub
-        run: ./scripts/ensure-dxt-bundle.sh
-
-      - name: Worker startup smoke test
-        run: npm run smoke:worker
-
-      - name: E2E suite (gated)
-        run: npm run test:e2e
 
   publish:
     needs: [version-check, e2e]

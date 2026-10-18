@@ -58,6 +58,12 @@ the run stayed green.
 - `.github/workflows/npm-publish.yml` has `version-check` → `e2e` → `publish`.
   `publish` needs `e2e`, and `npm publish` there runs `prepublishOnly` again.
   The release-triggered `publish.yml` also needs a gated e2e job.
+- Every pull request runs the same gated job (check name `e2e / e2e` in
+  `ci.yml`). All three callers use the reusable `.github/workflows/e2e.yml`,
+  so the merge gate and the release gate can't drift. Runs share one
+  concurrency group because they all create and archive entities on test-1.
+  Pull requests from forks get no secrets, so the job fails for them with an
+  explicit message; push the branch to `absmartly/mcp` instead.
 
 Required repo secrets (Settings → Secrets → Actions):
 
@@ -66,7 +72,7 @@ Required repo secrets (Settings → Secrets → Actions):
 | `ABSMARTLY_API_KEY` | API key for the test-1 instance |
 | `ABSMARTLY_API_ENDPOINT` | `https://test-1.absmartly.com/v1` |
 
-Without them the `e2e` job fails, and nothing is published.
+Without them the `e2e` job fails, so nothing merges (once it's a required check) and nothing is published.
 
 Outside gated mode (`npm run test:integration`), the suites still skip when
 credentials or the Worker are missing, so you can run them locally. Each skip
