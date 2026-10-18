@@ -81,6 +81,10 @@ is logged as `SKIPPED (local run only; a gated run fails here)`. Credentials
 come from `ABSMARTLY_API_KEY`/`ABSMARTLY_API_ENDPOINT` (or `.env.local`), or
 from `--profile <name>`.
 
+`multi-tenant-oauth`, `oauth-flow` and `resources-prompts-flow` are left out
+of gated runs: they target fixed ports (or return a zero-test result) and
+can't exercise the fresh Worker. #70 replaces them with SDK-driven suites.
+
 The `claude-*.test.js` suites drive a real model through `claude -p`. They're
 opt-in (`npm run test:claude`) and aren't part of the gate.
 

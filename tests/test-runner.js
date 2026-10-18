@@ -19,6 +19,18 @@ const __dirname = dirname(__filename);
 // directly (npm run test:claude) or pass --include-claude.
 const OPT_IN_SUITE = /^claude-/;
 
+// Legacy suites that cannot run against the gated run's fresh Worker: two
+// target fixed ports (localhost:8787 / :3000) with fake credentials, and one
+// returns a zero-test "superseded" result unconditionally. In a gated run they
+// can only skip or test the wrong server, so they are left out of the gated
+// set. They still run in local (non-gated) runs. Their replacements are the
+// SDK-driven suites in #70, which deletes these files.
+const NOT_GATED_LEGACY_SUITES = new Set([
+  'multi-tenant-oauth.test.js',
+  'oauth-flow.test.js',
+  'resources-prompts-flow.test.js',
+]);
+
 // A gated run must execute at least this many integration tests. It stops a
 // gated run from passing when a whole suite quietly stops running. The
 // release suites currently total about 120. Raise this when you add suites.
@@ -132,6 +144,11 @@ class TestRunner {
         .filter(file => {
           if (options.includeClaude || !OPT_IN_SUITE.test(file)) return true;
           this.log(`Not running ${file}: opt-in suite (npm run test:claude or --include-claude)`, 'info');
+          return false;
+        })
+        .filter(file => {
+          if (!options.gated || !NOT_GATED_LEGACY_SUITES.has(file)) return true;
+          this.log(`Not running ${file} in a gated run: legacy suite that cannot target the fresh Worker`, 'info');
           return false;
         });
 
