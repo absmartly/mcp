@@ -17,6 +17,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { resolveTestCredentials } from './test-credentials.js';
 import { ensureWranglerDev, stopWranglerDev } from './wrangler-fixture.js';
+import { workerUrl } from './gate.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CLAUDE_TESTS_DIR = join(__dirname, 'claude-tests');
@@ -34,9 +35,9 @@ if (!credentials) {
 
 const API_KEY = credentials.apiKey;
 const API_ENDPOINT = credentials.endpoint;
-const LOCAL_MCP_PORT = 8787;
+const LOCAL_MCP_PORT = Number(new URL(workerUrl()).port);
 const LIVE_MCP_URL = 'https://mcp.absmartly.com/sse';
-const LOCAL_MCP_URL = `http://127.0.0.1:${LOCAL_MCP_PORT}/sse`;
+const LOCAL_MCP_URL = `${workerUrl()}/sse`;
 const MCP_URL = LIVE_MODE ? LIVE_MCP_URL : LOCAL_MCP_URL;
 const CLAUDE_TIMEOUT_MS = 120_000;
 

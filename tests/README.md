@@ -36,6 +36,47 @@ tests/
 └── fixtures/                # Test data and fixtures
 ```
 
+## Release gate
+
+`npm publish` can't go ahead unless the e2e suite has actually run and passed.
+2.0.0 and 2.0.1 reached npm with a Worker that crashed at module load
+(Cloudflare error 10021). Every Worker-backed suite reported "skipped", and
+the run stayed green.
+
+- `npm run test:e2e` runs the integration suites in **gated mode** (`--gated`;
+  `REQUIRE_E2E=1` or `CI=true` also turn it on). It starts a fresh
+  `wrangler dev` from this checkout on a free port and never reuses a server
+  that's already running. The run fails when:
+  - the Worker doesn't become healthy (wrangler's output is printed);
+  - any suite or scenario would skip (no credentials, server unreachable,
+    backend error);
+  - fewer than `GATED_MIN_INTEGRATION_TESTS` (in `tests/test-runner.js`)
+    integration tests ran.
+- `npm run verify:release` runs typecheck, unit tests, build, the Worker
+  startup smoke test (`scripts/worker-smoke.sh`) and `test:e2e`.
+  `prepublishOnly` runs it, so a local `npm publish` is gated too.
+- `.github/workflows/npm-publish.yml` has `version-check` → `e2e` → `publish`.
+  `publish` needs `e2e`, and `npm publish` there runs `prepublishOnly` again.
+  It's the only CI publish path.
+
+Required repo secrets (Settings → Secrets → Actions):
+
+| Secret | Value |
+|---|---|
+| `ABSMARTLY_API_KEY` | API key for the test-1 instance |
+| `ABSMARTLY_API_ENDPOINT` | `https://test-1.absmartly.com/v1` |
+
+Without them the `e2e` job fails, and nothing is published.
+
+Outside gated mode (`npm run test:integration`), the suites still skip when
+credentials or the Worker are missing, so you can run them locally. Each skip
+is logged as `SKIPPED (local run only; a gated run fails here)`. Credentials
+come from `ABSMARTLY_API_KEY`/`ABSMARTLY_API_ENDPOINT` (or `.env.local`), or
+from `--profile <name>`.
+
+The `claude-*.test.js` suites drive a real model through `claude -p`. They're
+opt-in (`npm run test:claude`) and aren't part of the gate.
+
 ## Test Categories
 
 ### Unit Tests
@@ -46,7 +87,7 @@ Test isolated functionality without external dependencies:
 - **Legacy Features**: Migrated tests from individual scripts ensuring backwards compatibility
 
 ### Integration Tests
-Test deployed functionality against live endpoints:
+Test the local Worker (a fresh `wrangler dev`) and the test-1 API:
 
 - **Health Check**: Validates deployed health endpoint
 - **Authentication**: Tests authentication flow and endpoint accessibility

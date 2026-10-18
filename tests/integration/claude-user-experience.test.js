@@ -19,6 +19,7 @@ import { execFileSync } from 'child_process';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { skipSuite, workerUrl } from './gate.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CLAUDE_TESTS_DIR = join(__dirname, 'claude-tests');
@@ -27,9 +28,8 @@ const MCP_CONFIG_PATH = join(CLAUDE_TESTS_DIR, 'mcp-config.json');
 const SHOW_RESPONSES = process.argv.includes('--show-responses');
 const LIVE_MODE = process.argv.includes('--live');
 
-const LOCAL_MCP_PORT = 8787;
 const LIVE_MCP_URL = 'https://mcp.absmartly.com/sse';
-const LOCAL_MCP_URL = `http://127.0.0.1:${LOCAL_MCP_PORT}/sse`;
+const LOCAL_MCP_URL = `${workerUrl()}/sse`;
 const MCP_URL = LIVE_MODE ? LIVE_MCP_URL : LOCAL_MCP_URL;
 const CLAUDE_TIMEOUT_MS = 120_000;
 const LIFECYCLE_TIMEOUT_MS = 300_000;
@@ -272,8 +272,7 @@ async function isLocalMcpReachable() {
 
 async function run() {
   if (!(await isLocalMcpReachable())) {
-    console.log(`\n  Skipped: local MCP not reachable at ${MCP_URL}. Start wrangler dev or pass --live.`);
-    return { success: true, message: 'Skipped: local MCP not reachable', testCount: 0, details: [] };
+    return skipSuite(`local MCP not reachable at ${MCP_URL}; start wrangler dev or pass --live`);
   }
 
   let passed = 0;

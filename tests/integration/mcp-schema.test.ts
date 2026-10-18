@@ -1,29 +1,16 @@
 #!/usr/bin/env node
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { readFileSync } from "fs";
-import { execFileSync } from "child_process";
-import { join } from "path";
-import { homedir } from "os";
 import { pathToFileURL } from "url";
+import { resolveTestCredentials, SKIP_MESSAGE } from "./test-credentials.js";
+import { skipSuite, workerUrl } from "./gate.js";
 
-const LOCAL_MCP_URL = 'http://127.0.0.1:8787/sse';
-
-function loadTestProfile() {
-    const configPath = join(homedir(), '.config', 'absmartly', 'config.yaml');
-    const configText = readFileSync(configPath, 'utf-8');
-    const match = configText.match(/test-1:\s*\n\s+api:\s*\n\s+endpoint:\s*(\S+)/);
-    if (!match) throw new Error('test-1 profile not found');
-
-    const apiKey = execFileSync('security', [
-        'find-generic-password', '-s', 'absmartly-cli', '-a', 'api-key-test-1', '-w'
-    ], { encoding: 'utf-8' }).trim();
-
-    return { endpoint: match[1], apiKey };
-}
+const LOCAL_MCP_URL = `${workerUrl()}/sse`;
 
 async function run() {
-    const { endpoint, apiKey } = loadTestProfile();
+    const credentials = await resolveTestCredentials();
+    if (!credentials) return skipSuite(SKIP_MESSAGE);
+    const { endpoint, apiKey } = credentials;
     let passed = 0;
     let failed = 0;
     const failures: string[] = [];
@@ -290,25 +277,29 @@ async function run() {
     console.log();
 
     await client.close();
-    return failed === 0;
+    return {
+        success: failed === 0,
+        message: `${passed} passed, ${failed} failed`,
+        testCount: passed + failed,
+        details: failures.map(name => ({ name, status: 'FAIL', error: 'assertion failed' })),
+    };
 }
 
 export default async function runWrapped() {
     try {
-        const ok = await run();
-        return { success: ok, message: ok ? 'passed' : 'failed' };
+        return await run();
     } catch (err: any) {
         const msg = err?.message || String(err);
         if (msg.includes('ECONNREFUSED') || msg.includes('fetch failed')) {
-            return { success: true, message: 'MCP server not reachable - tests skipped', testCount: 0 };
+            return skipSuite(`MCP server not reachable at ${LOCAL_MCP_URL}`);
         }
         return { success: false, message: msg };
     }
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
-    run()
-        .then(ok => process.exit(ok ? 0 : 1))
+    runWrapped()
+        .then(result => process.exit(result.success ? 0 : 1))
         .catch(err => {
             console.error('Fatal:', err);
             process.exit(1);

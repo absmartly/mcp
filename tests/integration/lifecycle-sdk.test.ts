@@ -19,30 +19,15 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { readFileSync } from "fs";
-import { execFileSync } from "child_process";
-import { join, dirname } from "path";
-import { homedir } from "os";
-import { fileURLToPath, pathToFileURL } from "url";
+import { pathToFileURL } from "url";
+import { resolveTestCredentials, SKIP_MESSAGE } from "./test-credentials.js";
+import { skipScenario, skipSuite, workerUrl } from "./gate.js";
 
-const LOCAL_MCP_URL = 'http://127.0.0.1:8787/sse';
+const LOCAL_MCP_URL = `${workerUrl()}/sse`;
 const POLL_INTERVAL_MS = 1_000;
 const POLL_DEFAULT_MAX_RETRIES = 10;
 
 type ToolCallResult = { content: Array<{ type: string; text?: string }> };
-
-function loadTestProfile(): { endpoint: string; apiKey: string } {
-    const configPath = join(homedir(), '.config', 'absmartly', 'config.yaml');
-    const configText = readFileSync(configPath, 'utf-8');
-    const match = configText.match(/test-1:\s*\n\s+api:\s*\n\s+endpoint:\s*(\S+)/);
-    if (!match) throw new Error('test-1 profile not found in ~/.config/absmartly/config.yaml');
-
-    const apiKey = execFileSync('security', [
-        'find-generic-password', '-s', 'absmartly-cli', '-a', 'api-key-test-1', '-w'
-    ], { encoding: 'utf-8' }).trim();
-
-    return { endpoint: match[1], apiKey };
-}
 
 async function isLocalMcpReachable(): Promise<boolean> {
     try {
@@ -124,11 +109,12 @@ interface TestResult {
 
 async function run() {
     if (!(await isLocalMcpReachable())) {
-        console.log(`\n  Skipped: local MCP not reachable at ${LOCAL_MCP_URL}. Start wrangler dev or pass --live.`);
-        return { success: true, message: 'Skipped: local MCP not reachable', testCount: 0, details: [] };
+        return skipSuite(`local MCP not reachable at ${LOCAL_MCP_URL}; start wrangler dev`);
     }
 
-    const { endpoint, apiKey } = loadTestProfile();
+    const credentials = await resolveTestCredentials();
+    if (!credentials) return skipSuite(SKIP_MESSAGE);
+    const { endpoint, apiKey } = credentials;
     const transport = new SSEClientTransport(
         new URL(LOCAL_MCP_URL),
         { requestInit: { headers: { 'Authorization': apiKey, 'x-absmartly-endpoint': endpoint } } }
@@ -307,8 +293,13 @@ async function run() {
             flagId = await createAndConfirm('feature', 'sdk_flag');
         } catch (err: any) {
             const msg = err?.message || String(err);
+            // test-1 has returned HTTP 500 for every feature-flag create that
+            // carries analysis fields (analysis_type, required_alpha, ...),
+            // and the template path always sends them. A local run skips
+            // this scenario; a gated run fails, because it means feature
+            // flags can't be created through the MCP.
             if (msg.includes('Internal Server Error')) {
-                console.log(`\n    (skip: backend returned Internal Server Error on feature-flag create — known intermittent issue on test-1)`);
+                skipScenario(`backend returned Internal Server Error on feature-flag create: ${msg.slice(0, 300)}`);
                 process.stdout.write('    ');
                 return;
             }

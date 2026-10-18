@@ -34,6 +34,14 @@ jobs:
       - name: Unit tests
         run: npm run test:unit
 
+      # Start the Worker locally before uploading it. A module-load crash
+      # fails here, with the real stack trace, instead of in the Cloudflare
+      # API upload (error 10021).
+      - name: Worker startup smoke test
+        run: npm run smoke:worker
+        env:
+          WRANGLER_SEND_METRICS: 'false'
+
       - name: Deploy to Cloudflare Workers
         run: npx wrangler deploy
         env:
