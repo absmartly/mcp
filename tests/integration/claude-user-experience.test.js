@@ -19,7 +19,7 @@ import { execFileSync } from 'child_process';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { skipSuite, workerUrl } from './gate.js';
+import { skipScenario, skipSuite, workerUrl } from './gate.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CLAUDE_TESTS_DIR = join(__dirname, 'claude-tests');
@@ -576,7 +576,7 @@ Tell me the experiment ID.`,
       output.trim() === ''
     );
     if (backendDegraded) {
-      console.log(`\n    (skip: feature-flag create returned empty/HTTP 500 — known intermittent on test-1)`);
+      skipScenario('feature-flag create returned empty/HTTP 500');
       process.stdout.write('    ');
       state.flagSkipped = true;
       return result;
@@ -597,7 +597,7 @@ Tell me the experiment ID.`,
 
   await test('user moves feature flag through lifecycle to running', () => {
     if (state.flagSkipped) {
-      console.log(`\n    (skip: feature flag create was skipped)`);
+      skipScenario('feature flag create was skipped');
       process.stdout.write('    ');
       return;
     }
@@ -615,7 +615,7 @@ Tell me the experiment ID.`,
 
   await test('user stops and archives the feature flag', () => {
     if (state.flagSkipped) {
-      console.log(`\n    (skip: feature flag create was skipped)`);
+      skipScenario('feature flag create was skipped');
       process.stdout.write('    ');
       return;
     }
@@ -685,7 +685,7 @@ When done, tell me the experiment ID and final state.`,
 
   await test('user cleans up the full-on experiment', () => {
     if (!state.advId) {
-      console.log('\n    (skipping — no experiment ID from previous test)');
+      skipScenario('no experiment ID from previous test');
       return { ok: true, output: 'skipped', toolResults: [], toolCalls: [] };
     }
     const result = runClaude(

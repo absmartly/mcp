@@ -18,7 +18,7 @@ import { execFileSync } from 'child_process';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { skipSuite, workerUrl } from './gate.js';
+import { skipScenario, skipSuite, workerUrl } from './gate.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CLAUDE_TESTS_DIR = join(__dirname, 'claude-tests');
@@ -598,7 +598,7 @@ After each transition, observe the resulting state. Return ONLY a JSON object:
       && (output.toLowerCase().includes('createexperimentfromtemplate')
           || toolResultsBlob.toLowerCase().includes('createexperimentfromtemplate'))
     ) {
-      console.log(`\n    (skip: backend returned HTTP 500 on feature-flag createExperimentFromTemplate — known intermittent issue on test-1)`);
+      skipScenario('backend returned HTTP 500 on feature-flag createExperimentFromTemplate');
       process.stdout.write('    ');
       return result;
     }

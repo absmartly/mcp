@@ -57,7 +57,7 @@ the run stayed green.
   `prepublishOnly` runs it, so a local `npm publish` is gated too.
 - `.github/workflows/npm-publish.yml` has `version-check` → `e2e` → `publish`.
   `publish` needs `e2e`, and `npm publish` there runs `prepublishOnly` again.
-  It's the only CI publish path.
+  The release-triggered `publish.yml` also needs a gated e2e job.
 
 Required repo secrets (Settings → Secrets → Actions):
 
