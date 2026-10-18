@@ -47,7 +47,7 @@ export default async function runTests() {
 
   // A version mismatch trusts no mapping.
   assertEquals(pathTableFor(PATH_TABLE_CLI_VERSION) === API_PATH_METHODS, true, 'pathTableFor(pinned) is the generated table');
-  assertEquals(pathTableFor('1.17.0'), {}, 'pathTableFor(another version) is empty: every method is unknown');
+  assertEquals(pathTableFor('9.9.9'), {}, 'pathTableFor(another version) is empty: every method is unknown');
 
   // Version detection: a bundle uses the build-time version; a read failure is a mismatch.
   const fail = () => { throw new Error('x'); };

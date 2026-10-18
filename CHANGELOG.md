@@ -2,6 +2,10 @@
 
 ## 2.1.0 (unreleased)
 
+### Dependencies
+
+- The `@absmartly/cli` devDependency is `1.17.0` (pinned exactly). Feature flags created from a template no longer get experiment-only analysis fields, which made test-1 return HTTP 500. Feature metrics are sent as guardrails, as in the UI.
+
 ### Catalog contract
 
 - 23 commands whose documented params did not match the CLI core now document what the core needs: `role` on access grant/revoke, `unitType` on `estimateParticipants`, `oldPassword`/`newPassword` on `resetMyPassword`, top-level filters on insights/activity/events, and more. `refreshFields` is removed. See the 2.1.0 PR for the full table.
@@ -12,7 +16,7 @@
 - `FetchHttpClient` only sends requests under `<base>/v1/` or the root `/auth/current-user` paths. Dot segments in any encoding, backslashes, encoded separators, control characters and `undefined`/`null`/`NaN` path segments are refused before `fetch`.
 - ABsmartly endpoints are parsed by one function (`parseAbsmartlyEndpoint`) everywhere they enter: OAuth consent, API-key requests, the `/register` link, stored props and `FetchHttpClient`. An endpoint is parsed once where it enters; what is stored or passed on is its `apiUrl`, which parses back to the same endpoint, so a base path that itself ends in `/v1` (an API at `/tenant/v1/v1`) is kept through consent, the redirect and the callback. `ConsentOutcome` (approved) and `onApprove` also carry the parsed endpoint.
 - Every argument an APIClient method puts into a request path is checked before the method runs, whichever route it came by (`withPathIdGuard`, applied once where this package creates its client and again in `executeCommand` for a host's own client). Path arguments come from `src/api-path-args.ts`, generated from the `@absmartly/cli` build and looked up by parameter name: an ID must be a positive integer, and a word (uploadFile's `usage`) must not contain `/ \ . % ? #`. `request`/`rawRequest` validate their path (leading `/`, no dot segment in any encoding, no backslash). Any method not in the table fails closed: non-primitive arguments, strings with path characters and numbers that are not positive integers are refused. The `absmartly://<entity>/{id}` resource templates get the same check.
-- The path table is generated from `@absmartly/cli` `1.16.2`, the exact devDependency. The peer range is unchanged (`>=1.7.0 <2`). The installed version is checked at load. On any other version (or one that cannot be read) the guard logs one warning naming both versions and treats every method as unknown: strings with path characters and numbers that are not positive integers are refused, while plain-object and array arguments (bodies, options) pass. Leftover risk on such an install: a CLI method that builds a path from a field of an object argument is not checked. `request`/`rawRequest` are always checked. Install `1.16.2` for exact checks.
+- The path table is generated from `@absmartly/cli` `1.17.0`, the exact devDependency. The peer range is unchanged (`>=1.7.0 <2`). The installed version is checked at load. On any other version (or one that cannot be read) the guard logs one warning naming both versions and treats every method as unknown: strings with path characters and numbers that are not positive integers are refused, while plain-object and array arguments (bodies, options) pass. Leftover risk on such an install: a CLI method that builds a path from a field of an object argument is not checked. `request`/`rawRequest` are always checked. Install `1.17.0` for exact checks.
 
 ### Behaviour changes for direct executeCommand callers
 
