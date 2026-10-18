@@ -105,7 +105,7 @@ export const EXPECTED_DIFFERENCES: Record<string, { reason: string; branch: Outc
   },
   "storageconfigs.testStorageConfig {\"configId\":3}": {
     reason: "configId tests the saved config (2.0.1 ignored it and posted an empty body)",
-    branch: {"requests": [{"method": "GET", "url": "/storage_configs/3"}, {"method": "POST", "url": "/storage_configs/test", "data": {"storage_config_id": 3}}], "result": {"data": {"success": true}}},
+    branch: {"requests": [{"method": "GET", "url": "/storage_configs/3"}, {"method": "POST", "url": "/storage_configs/test", "data": {"name": "entity", "storage_config_id": 3}}], "result": {"data": {"success": true}}},
   },
   "teams.addTeamMembers {\"teamId\":1,\"userIds\":[\"2\"]}": {
     reason: "ID values are normalised to integers in bodies too (user_ids [2], was [\"2\"])",

@@ -604,7 +604,7 @@ const CASES: Case[] = [
       : { ok: true, test: {} }),
     expected: [
       { method: 'GET', url: '/storage_configs/5' },
-      { method: 'POST', url: '/storage_configs/test', data: { type: 'S3', properties: { bucket: 'b', accessKey: 'AK' }, storage_config_id: 5 } },
+      { method: 'POST', url: '/storage_configs/test', data: { name: 's3', type: 'S3', properties: { bucket: 'b', accessKey: 'AK' }, storage_config_id: 5 } },
     ] },
 ];
 

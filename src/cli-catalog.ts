@@ -2100,7 +2100,8 @@ const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
   datasources: Object.fromEntries(DATASOURCE_CONFIG_COMMANDS.map((c) => [c, datasourceRunner(c)])),
   storageconfigs: {
     // The backend merges only the stored secret key (by storage_config_id); the
-    // exporter needs type and properties in the body, so read those first.
+    // exporter validates the body as a whole StorageConfig (name, type and
+    // properties are required), so read those first.
     testStorageConfig: async (client, params) => {
       // A given `config` is the whole request body, as in 2.0.
       if (params[CONFIG_PARAM] !== undefined || params.configId === undefined) {
@@ -2108,7 +2109,7 @@ const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
       }
       const { data: stored } = await CORE_MODULES.storageconfigs.getStorageConfig(client, { id: params.configId }) as { data: Record<string, unknown> };
       return CORE_MODULES.storageconfigs.testStorageConfig(client, {
-        config: { type: stored.type, properties: stored.properties, storage_config_id: params.configId },
+        config: { name: stored.name, type: stored.type, properties: stored.properties, storage_config_id: params.configId },
       });
     },
   },
