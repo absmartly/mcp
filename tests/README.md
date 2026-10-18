@@ -81,8 +81,10 @@ is logged as `SKIPPED (local run only; a gated run fails here)`. Credentials
 come from `ABSMARTLY_API_KEY`/`ABSMARTLY_API_ENDPOINT` (or `.env.local`), or
 from `--profile <name>`.
 
-The `claude-*.test.js` suites drive a real model through `claude -p`. They're
-opt-in (`npm run test:claude`) and aren't part of the gate.
+Every Worker-backed suite calls the Worker through the official MCP SDK
+client, with no model in the loop, so the results are deterministic. They
+check what the server returns. Whether a model picks the right tool for a
+natural-language request is not tested.
 
 ## Test Categories
 
@@ -98,6 +100,9 @@ Test the local Worker (a fresh `wrangler dev`) and the test-1 API:
 
 - **Health Check**: Validates deployed health endpoint
 - **Authentication**: Tests authentication flow and endpoint accessibility
+- **MCP tools, resources, prompts** (`sdk-tools.test.ts`): discovery, command docs, identity, listings, entity reads, search, error paths, resources, prompts, transports and tenant resolution
+- **Lifecycles** (`lifecycle-sdk.test.ts`, `sdk-lifecycle-extra.test.ts`): experiment and feature flag create → ready → development → running → stopped → restart → full on → archive on test-1, with cleanup in a finally block
+- **Worker OAuth** (`oauth-worker-flow.test.ts`): discovery, client registration, consent, callback, token, refresh and revocation through the Worker's real endpoints, with a loopback upstream that proxies API calls to test-1
 
 ## Test Commands
 
