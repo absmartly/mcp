@@ -208,12 +208,16 @@ async function run() {
         for (let attempt = 1; attempt <= 3; attempt++) {
             const name = `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
             const templateContent = buildTemplate(name, type);
-            // First call returns preview (no confirmed). Second call with confirmed:true creates.
-            await callExecute(client, 'experiments', 'createExperimentFromTemplate', { templateContent });
-            const created = await callExecute(client, 'experiments', 'createExperimentFromTemplate', { templateContent }, { confirmed: true });
-            const id = created.data?.id ?? created.data?.experiment?.id ?? created.data?.data?.id;
-            if (id) return id as number;
-            lastError = `attempt ${attempt}/3: ${created.text.slice(0, 400)}`;
+            try {
+                // First call returns preview (no confirmed). Second call with confirmed:true creates.
+                await callExecute(client, 'experiments', 'createExperimentFromTemplate', { templateContent });
+                const created = await callExecute(client, 'experiments', 'createExperimentFromTemplate', { templateContent }, { confirmed: true });
+                const id = created.data?.id ?? created.data?.experiment?.id ?? created.data?.data?.id;
+                if (id) return id as number;
+                lastError = `attempt ${attempt}/3: ${created.text.slice(0, 400)}`;
+            } catch (err: any) {
+                lastError = `attempt ${attempt}/3: ${(err?.message || String(err)).slice(0, 400)}`;
+            }
             if (attempt < 3) await new Promise(resolve => setTimeout(resolve, 2_000));
         }
         throw new Error(`createExperimentFromTemplate returned no id after 3 attempts. last: ${lastError}`);
