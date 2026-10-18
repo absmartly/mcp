@@ -88,6 +88,15 @@ export default async function run() {
   test('extractEndpointFromPath returns null for prefix without trailing content', () => {
     assert.strictEqual(extractEndpointFromPath('/sse/', '/sse'), null);
   });
+  test('extractEndpointFromPath ignores the SSE transport message path', () => {
+    assert.strictEqual(extractEndpointFromPath('/sse/message', ['/sse', '/mcp']), null);
+  });
+  test('detectApiKey keeps the subdomain from the header on the SSE message path', () => {
+    const req = new Request('https://mcp.example.com/sse/message?sessionId=abc', {
+      headers: { Authorization: `demo-1 ${TEST_API_KEY}` },
+    });
+    assert.deepStrictEqual(detectApiKey(req), { apiKey: TEST_API_KEY, endpoint: `https://demo-1.${DEFAULT_ABSMARTLY_DOMAIN}` });
+  });
   test('extractEndpointFromPath appends domain for shortname', () => {
     assert.strictEqual(extractEndpointFromPath('/sse/dev1', '/sse'), `https://dev1.${DEFAULT_ABSMARTLY_DOMAIN}`);
   });
