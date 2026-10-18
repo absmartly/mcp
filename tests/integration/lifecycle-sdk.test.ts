@@ -27,7 +27,7 @@ const LOCAL_MCP_URL = `${workerUrl()}/sse`;
 const POLL_INTERVAL_MS = 1_000;
 const POLL_DEFAULT_MAX_RETRIES = 10;
 
-type ToolCallResult = { content: Array<{ type: string; text?: string }> };
+type ToolCallResult = { isError?: boolean; content: Array<{ type: string; text?: string }> };
 
 async function isLocalMcpReachable(): Promise<boolean> {
     try {
@@ -69,6 +69,7 @@ async function callExecute(
         arguments: { group, command, params, ...extras },
     }) as ToolCallResult;
     const text = extractText(result);
+    if (result.isError || /^Error executing /.test(text)) throw new Error(text);
     const parsed = parseExecuteCommandResponse(text);
     return { data: parsed.data, text };
 }
@@ -77,14 +78,15 @@ async function pollState(
     client: Client,
     experimentId: number,
     expectedState: string,
-    maxRetries = POLL_DEFAULT_MAX_RETRIES
+    maxRetries = POLL_DEFAULT_MAX_RETRIES,
+    field: 'state' | 'feature_state' = 'state'
 ): Promise<{ matched: boolean; observed: string; attempts: number; history: string[] }> {
     const history: string[] = [];
     let attempts = 0;
     while (attempts < maxRetries) {
         attempts++;
-        const { data, text } = await callExecute(client, 'experiments', 'getExperiment', { experimentId });
-        const observed = data?.state ?? data?.experiment?.state ?? '<unknown>';
+        const { data, text } = await callExecute(client, 'experiments', 'getExperiment', { experimentId, show: ['feature_state'] });
+        const observed = data?.[field] ?? data?.experiment?.[field] ?? data?.data?.experiment?.[field] ?? '<unknown>';
         history.push(observed);
         if (observed === expectedState) {
             return { matched: true, observed, attempts, history };
@@ -302,9 +304,11 @@ async function run() {
         const running = await pollState(client, flagId, 'running');
         if (!running.matched) throw new Error(`stuck in "${running.observed}" after startExperiment (history: ${JSON.stringify(running.history)})`);
 
-        await transition('stopExperiment', flagId, { reason: 'hypothesis_iteration' });
-        const stopped = await pollState(client, flagId, 'stopped');
-        if (!stopped.matched) throw new Error(`stuck in "${stopped.observed}" after stopExperiment (history: ${JSON.stringify(stopped.history)})`);
+        await transition('stopExperiment', flagId, { reason: 'implementation_issue' });
+        // UI feature status uses feature_state: stopping turns it off while
+        // the experiment state can remain running.
+        const stopped = await pollState(client, flagId, 'off', POLL_DEFAULT_MAX_RETRIES, 'feature_state');
+        if (!stopped.matched) throw new Error(`feature_state stuck in "${stopped.observed}" after stopExperiment (history: ${JSON.stringify(stopped.history)})`);
 
         const archResp = await transition('archiveExperiment', flagId);
         if (archResp.text.toLowerCase().includes('error')) {
