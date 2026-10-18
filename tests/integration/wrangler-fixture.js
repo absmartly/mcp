@@ -73,7 +73,15 @@ export async function ensureWranglerDev({ port, fresh = false } = {}) {
   }
 
   const listenPort = port ?? (fresh ? await findFreePort() : DEFAULT_WRANGLER_PORT);
-  const child = spawn('npx', ['wrangler', 'dev', '--port', String(listenPort), '--ip', '127.0.0.1'], {
+  // wrangler.jsonc routes the Worker to the mcp.absmartly.com custom domain,
+  // so by default request.url carries that origin and OAuth discovery
+  // advertises production. --local-upstream keeps the origin on this local
+  // Worker. It must be `localhost`, not 127.0.0.1: test-1 accepts loopback
+  // OAuth callbacks only as http://localhost/... (any port).
+  const child = spawn('npx', [
+    'wrangler', 'dev', '--port', String(listenPort), '--ip', '127.0.0.1',
+    '--local-upstream', `localhost:${listenPort}`, '--upstream-protocol', 'http',
+  ], {
     cwd: PROJECT_ROOT,
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true
