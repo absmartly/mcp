@@ -61,8 +61,8 @@ the run stayed green.
 - Every pull request runs the same gated job (check name `e2e / e2e` in
   `ci.yml`). All three callers use the reusable `.github/workflows/e2e.yml`,
   so the merge gate and the release gate can't drift. Concurrency is per
-  workflow and ref: a new push to a PR cancels that PR's older run, and
-  publish runs are never cancelled.
+  workflow and ref, and a running job is never cancelled (that would skip the
+  lifecycle cleanup). A newer push only replaces the run still pending.
   Pull requests from forks get no secrets, so the job fails for them with an
   explicit message; push the branch to `absmartly/mcp` instead.
 

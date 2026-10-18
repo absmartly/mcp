@@ -30,13 +30,15 @@ jobs:
   e2e:
     name: e2e
     runs-on: ubuntu-latest
-    # Per caller workflow and ref. Runs on different refs don't conflict on
-    # test-1: entities get unique names and each run cleans up its own. A new
-    # push to a PR cancels that PR's older run; publish runs are never
-    # cancelled. github.workflow and github.ref are the caller's here.
+    # Per caller workflow and ref (github.* is the caller's context here).
+    # Runs on different refs don't conflict on test-1: entities get unique
+    # names and each run cleans up its own. Never cancel a running job:
+    # cancellation kills it before the lifecycle cleanup can archive what it
+    # created. A newer push only replaces the pending run, which hasn't
+    # started yet.
     concurrency:
       group: e2e-${{ github.workflow }}-${{ github.ref }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+      cancel-in-progress: false
     env:
       REQUIRE_E2E: '1'
       WRANGLER_SEND_METRICS: 'false'
