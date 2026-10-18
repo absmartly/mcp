@@ -101,7 +101,6 @@
     "test:server": "node test-server.js",
     "test:bridge": "node test-bridge.js",
     "test:api": "node test-local-api.js",
-    "test:claude": "tsx tests/test-runner.js --integration-only --include-claude",
     "test:dynamic": "node test-dynamic-fields-complete.js",
     "test:dynamic:full": "./run-dynamic-fields-test.sh",
     "precommit": "npm run test",
