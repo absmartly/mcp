@@ -583,8 +583,6 @@ const oauthProvider = new OAuthProvider({
     defaultHandler: oauthHandler as unknown as ExportedHandler,
 });
 
-type McpTransportRoute = ApiKeyTransportRoute;
-
 function isTransportPath(pathname: string, prefix: string): boolean {
     return pathname === prefix || pathname.startsWith(`${prefix}/`);
 }
@@ -602,7 +600,7 @@ async function handleMcpTransportRequest(
     request: Request,
     env: any,
     ctx: any,
-    route: McpTransportRoute,
+    route: ApiKeyTransportRoute,
     detected: { apiKey: string | null; endpoint: string | null },
     clientFingerprint: string
 ): Promise<Response> {
