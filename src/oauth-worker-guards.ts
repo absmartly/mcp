@@ -1,7 +1,7 @@
 import type { OAuthError, TokenExchangeCallbackOptions } from "@cloudflare/workers-oauth-provider";
 import { debug } from "./config.js";
 import { CORS_HEADERS, type ABsmartlyProps } from "./shared.js";
-import { isTrustedCimdClientId } from "./oauth/index.js";
+import { isTrustedCimdClientId, SCOPE_MCP_ACCESS } from "./oauth/index.js";
 
 const REFRESH_GRANT_TYPE = 'refresh_token';
 const OAUTH_ERROR_INVALID_GRANT = 'invalid_grant';
@@ -130,6 +130,12 @@ export async function rejectUntrustedCimdClient(request: Request, url: URL): Pro
 
 export function protectedResourceMetadataUrl(url: URL, pathPrefix: string): string {
     return `${url.origin}${PROTECTED_RESOURCE_METADATA_PATH}${pathPrefix}`;
+}
+
+// RFC 6750/9728 challenge sent with every 401 on an MCP transport. MCP clients
+// read it as "(re)start OAuth", so it must never accompany a 403.
+export function oauthBearerChallenge(url: URL, pathPrefix: string): string {
+    return `Bearer realm="OAuth", resource_metadata="${protectedResourceMetadataUrl(url, pathPrefix)}", scope="${SCOPE_MCP_ACCESS}"`;
 }
 
 function toOriginResource(resource: string, origin: string): { resource: string; endpoint: string | null } {
