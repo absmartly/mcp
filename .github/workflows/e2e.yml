@@ -44,6 +44,9 @@ jobs:
       WRANGLER_SEND_METRICS: 'false'
       ABSMARTLY_API_KEY: ${{ secrets.ABSMARTLY_API_KEY }}
       ABSMARTLY_API_ENDPOINT: ${{ secrets.ABSMARTLY_API_ENDPOINT }}
+      # OAuth provider for backend-oauth-constraints; independent of the
+      # API credentials above.
+      ABSMARTLY_TEST_BACKEND: https://test-1.absmartly.com
 
     steps:
       - name: Require test-1 credentials

@@ -16,18 +16,11 @@
 
 import { skipSuite } from './gate.js';
 
-// The backend the gated run targets: ABSMARTLY_TEST_BACKEND if set, else the
-// origin of ABSMARTLY_API_ENDPOINT (test-1 in CI). No hardcoded instance.
-function resolveBackend() {
-  if (process.env.ABSMARTLY_TEST_BACKEND) return process.env.ABSMARTLY_TEST_BACKEND.replace(/\/+$/, '');
-  try {
-    return new URL(process.env.ABSMARTLY_API_ENDPOINT).origin;
-  } catch {
-    return null;
-  }
-}
-
-const BACKEND = resolveBackend();
+// The OAuth provider under test. Configured on its own, never derived from
+// the API-client suites' ABSMARTLY_API_ENDPOINT credential, so those
+// credentials can't retarget or disable this suite. CI sets it explicitly in
+// .github/workflows/e2e.yml.
+const BACKEND = (process.env.ABSMARTLY_TEST_BACKEND || 'https://test-1.absmartly.com').replace(/\/+$/, '');
 const CLIENT_ID = process.env.ABSMARTLY_TEST_CLIENT_ID || 'mcp-absmartly-universal';
 const REDIRECT_URI = 'https://mcp.absmartly.com/oauth/callback';
 const FETCH_TIMEOUT_MS = 10000;
@@ -72,10 +65,6 @@ export default async function run() {
       failed++;
       details.push({ name, status: 'FAIL', error: e.message });
     }
-  }
-
-  if (!BACKEND) {
-    return skipSuite('no backend configured (set ABSMARTLY_API_ENDPOINT or ABSMARTLY_TEST_BACKEND)');
   }
 
   // Reachability check. Outside a gated run, skip (and log) when the backend is unreachable.
