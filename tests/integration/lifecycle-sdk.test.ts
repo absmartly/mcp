@@ -200,6 +200,11 @@ async function run() {
         ].join('\n');
     }
 
+    // Every entity the suite creates, so cleanup can stop and archive it even
+    // when a scenario fails part-way. A failed gated run must not leave
+    // running feature flags or experiments on the shared test-1 instance.
+    const createdEntities = new Map<number, 'test' | 'feature'>();
+
     async function createAndConfirm(type: 'test' | 'feature', prefix: string): Promise<number> {
         // The test-1 backend occasionally returns "Internal Server Error" from
         // createExperimentFromTemplate (especially for type=feature). Retry
@@ -213,7 +218,10 @@ async function run() {
                 await callExecute(client, 'experiments', 'createExperimentFromTemplate', { templateContent });
                 const created = await callExecute(client, 'experiments', 'createExperimentFromTemplate', { templateContent }, { confirmed: true });
                 const id = created.data?.id ?? created.data?.experiment?.id ?? created.data?.data?.id;
-                if (id) return id as number;
+                if (id) {
+                    createdEntities.set(id as number, type);
+                    return id as number;
+                }
                 lastError = `attempt ${attempt}/3: ${created.text.slice(0, 400)}`;
             } catch (err: any) {
                 lastError = `attempt ${attempt}/3: ${(err?.message || String(err)).slice(0, 400)}`;
@@ -231,6 +239,44 @@ async function run() {
         return callExecute(client, 'experiments', commandName, { experimentId, ...extraParams }, { confirmed: true });
     }
 
+    async function readFields(experimentId: number): Promise<Record<string, any>> {
+        const { data } = await callExecute(client, 'experiments', 'getExperiment', {
+            experimentId, show: ['feature_state', 'archived'],
+        });
+        return data?.experiment ?? data ?? {};
+    }
+
+    async function archiveAndConfirm(experimentId: number): Promise<void> {
+        await transition('archiveExperiment', experimentId);
+        const after = await readFields(experimentId);
+        if (after.archived !== true) {
+            throw new Error(`experiment ${experimentId} not archived after archiveExperiment (archived=${after.archived})`);
+        }
+    }
+
+    // Stops anything still live, then archives. Collects every failure
+    // instead of stopping at the first, and returns them so the suite fails.
+    async function cleanup(): Promise<string[]> {
+        const errors: string[] = [];
+        for (const [id, type] of createdEntities) {
+            try {
+                const before = await readFields(id);
+                if (before.archived === true) continue;
+                const live = before.state === 'running' || before.state === 'development'
+                    || (type === 'feature' && before.feature_state === 'on');
+                if (live) {
+                    const reason = type === 'feature' ? 'implementation_issue' : 'hypothesis_iteration';
+                    await transition('stopExperiment', id, { reason, note: 'lifecycle test cleanup' });
+                }
+                await archiveAndConfirm(id);
+            } catch (err: any) {
+                errors.push(`${type} ${id}: ${err?.message || err}`);
+            }
+        }
+        return errors;
+    }
+
+    try {
     await test('experiment lifecycle: create → ready → dev → start → stop → restart → full_on → stop → archive', async () => {
         const expId = await createAndConfirm('test', 'sdk_exp');
 
@@ -262,6 +308,7 @@ async function run() {
         if (!newId || newId === expId) {
             throw new Error(`restartExperiment did not return a new id. response: ${restartResult.text.slice(0, 400)}`);
         }
+        createdEntities.set(newId, 'test');
         const runningAgain = await pollState(client, newId, 'running');
         if (!runningAgain.matched) throw new Error(`new experiment ${newId} stuck in "${runningAgain.observed}" after restart (history: ${JSON.stringify(runningAgain.history)})`);
 
@@ -283,11 +330,9 @@ async function run() {
 
         // stopped → archived. Same caveat as full_on: archiveExperiment sets
         // `archived: true` on the record but the `state` field stays "stopped"
-        // — there is no terminal "archived" state. Verify the call succeeded.
-        const archivedResp = await transition('archiveExperiment', newId);
-        if (archivedResp.text.toLowerCase().includes('error')) {
-            throw new Error(`archiveExperiment failed: ${archivedResp.text.slice(0, 300)}`);
-        }
+        // — there is no terminal "archived" state. Cleanup archives the first
+        // iteration too and checks `archived` on both.
+        await archiveAndConfirm(newId);
 
         console.log(`\n    experiment_id=${expId} restarted_id=${newId} progression OK`);
         process.stdout.write('    ');
@@ -314,16 +359,21 @@ async function run() {
         const stopped = await pollState(client, flagId, 'off', POLL_DEFAULT_MAX_RETRIES, 'feature_state');
         if (!stopped.matched) throw new Error(`feature_state stuck in "${stopped.observed}" after stopExperiment (history: ${JSON.stringify(stopped.history)})`);
 
-        const archResp = await transition('archiveExperiment', flagId);
-        if (archResp.text.toLowerCase().includes('error')) {
-            throw new Error(`archiveExperiment failed: ${archResp.text.slice(0, 300)}`);
-        }
+        await archiveAndConfirm(flagId);
 
         console.log(`\n    flag_id=${flagId} progression OK`);
         process.stdout.write('    ');
     });
-
-    await client.close();
+    } finally {
+        const cleanupErrors = await cleanup();
+        if (cleanupErrors.length > 0) {
+            results.push({ name: 'cleanup: stop and archive created entities', status: 'FAIL', error: cleanupErrors.join('; ') });
+            console.log(`\n  cleanup FAILED:\n    ${cleanupErrors.join('\n    ')}`);
+        } else {
+            console.log(`\n  cleanup: archived ${[...createdEntities.keys()].join(', ') || 'nothing'}`);
+        }
+        await client.close();
+    }
 
     const passed = results.filter(r => r.status === 'PASS').length;
     const failed = results.filter(r => r.status === 'FAIL').length;
