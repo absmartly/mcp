@@ -30,13 +30,13 @@ jobs:
   e2e:
     name: e2e
     runs-on: ubuntu-latest
-    # Every gated run creates and archives entities on the shared test-1
-    # instance. One run at a time, across PRs and publishes. GitHub keeps at
-    # most one run pending per group and cancels an older pending one, which
-    # leaves that check failed (fail-closed); re-run it.
+    # Per caller workflow and ref. Runs on different refs don't conflict on
+    # test-1: entities get unique names and each run cleans up its own. A new
+    # push to a PR cancels that PR's older run; publish runs are never
+    # cancelled. github.workflow and github.ref are the caller's here.
     concurrency:
-      group: absmartly-mcp-e2e-test-1
-      cancel-in-progress: false
+      group: e2e-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     env:
       REQUIRE_E2E: '1'
       WRANGLER_SEND_METRICS: 'false'

@@ -60,8 +60,9 @@ the run stayed green.
   The release-triggered `publish.yml` also needs a gated e2e job.
 - Every pull request runs the same gated job (check name `e2e / e2e` in
   `ci.yml`). All three callers use the reusable `.github/workflows/e2e.yml`,
-  so the merge gate and the release gate can't drift. Runs share one
-  concurrency group because they all create and archive entities on test-1.
+  so the merge gate and the release gate can't drift. Concurrency is per
+  workflow and ref: a new push to a PR cancels that PR's older run, and
+  publish runs are never cancelled.
   Pull requests from forks get no secrets, so the job fails for them with an
   explicit message; push the branch to `absmartly/mcp` instead.
 
