@@ -1,7 +1,7 @@
 /**
  * Live integration tests against the ABsmartly backend OAuth provider.
  *
- * These hit https://demo-2.absmartly.com directly — they document and
+ * These hit the test-1 backend directly — they document and
  * regress the constraints the worker has to satisfy when redirecting
  * users into ABsmartly's OAuth flow:
  *
@@ -16,7 +16,18 @@
 
 import { skipSuite } from './gate.js';
 
-const BACKEND = process.env.ABSMARTLY_TEST_BACKEND || 'https://demo-2.absmartly.com';
+// The backend the gated run targets: ABSMARTLY_TEST_BACKEND if set, else the
+// origin of ABSMARTLY_API_ENDPOINT (test-1 in CI). No hardcoded instance.
+function resolveBackend() {
+  if (process.env.ABSMARTLY_TEST_BACKEND) return process.env.ABSMARTLY_TEST_BACKEND.replace(/\/+$/, '');
+  try {
+    return new URL(process.env.ABSMARTLY_API_ENDPOINT).origin;
+  } catch {
+    return null;
+  }
+}
+
+const BACKEND = resolveBackend();
 const CLIENT_ID = process.env.ABSMARTLY_TEST_CLIENT_ID || 'mcp-absmartly-universal';
 const REDIRECT_URI = 'https://mcp.absmartly.com/oauth/callback';
 const FETCH_TIMEOUT_MS = 10000;
@@ -61,6 +72,10 @@ export default async function run() {
       failed++;
       details.push({ name, status: 'FAIL', error: e.message });
     }
+  }
+
+  if (!BACKEND) {
+    return skipSuite('no backend configured (set ABSMARTLY_API_ENDPOINT or ABSMARTLY_TEST_BACKEND)');
   }
 
   // Reachability check. Outside a gated run, skip (and log) when the backend is unreachable.
