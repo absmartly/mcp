@@ -1,4 +1,5 @@
 import type { HttpClient, HttpRequestConfig, HttpResponse } from '@absmartly/cli/api-client';
+import { APIError } from '@absmartly/cli/api-client';
 import { debug } from './config.js';
 import { MCP_VERSION, CLI_CORE_VERSION } from './version.js';
 import { decodeOrNull, DOT_SEGMENT, parseAbsmartlyEndpoint, PRINTABLE_ASCII } from './oauth/endpoint.js';
@@ -70,6 +71,23 @@ function credentialHeaders(options: FetchHttpClientOptions): Record<string, stri
     };
   }
   return { 'Authorization': options.authType === 'jwt' ? `JWT ${options.authToken}` : `Api-Key ${options.authToken}` };
+}
+
+// Thrown when no HTTP response arrived (DNS, connection, TLS, timeout), so a
+// caller can tell "the backend is unreachable" apart from an HTTP error status.
+export class FetchNetworkError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'FetchNetworkError';
+  }
+}
+
+function parseErrorBody(body: string): unknown {
+  try {
+    return JSON.parse(body);
+  } catch {
+    return body;
+  }
 }
 
 export class FetchHttpClient implements HttpClient {
@@ -195,9 +213,9 @@ export class FetchHttpClient implements HttpClient {
       response = await fetch(url, fetchOptions);
     } catch (error) {
       if (error instanceof DOMException && error.name === 'TimeoutError') {
-        throw new Error(`Request timed out after ${this.timeout}ms: ${config.method} ${url}`);
+        throw new FetchNetworkError(`Request timed out after ${this.timeout}ms: ${config.method} ${url}`);
       }
-      throw new Error(`Network error for ${config.method} ${url}: ${error instanceof Error ? error.message : String(error)}`);
+      throw new FetchNetworkError(`Network error for ${config.method} ${url}: ${error instanceof Error ? error.message : String(error)}`);
     }
 
     if (!response.ok) {
@@ -207,7 +225,9 @@ export class FetchHttpClient implements HttpClient {
       } catch {
         errorBody = 'Unable to read response body';
       }
-      throw new Error(`HTTP ${response.status} for ${config.method} ${url}: ${errorBody}`);
+      // APIError (statusCode + parsed body) is the error contract of the CLI's
+      // own HttpClient, so callers branch on the status instead of the message.
+      throw new APIError(`HTTP ${response.status} for ${config.method} ${url}: ${errorBody}`, response.status, parseErrorBody(errorBody));
     }
 
     let data: T;

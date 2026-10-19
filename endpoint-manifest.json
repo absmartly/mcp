@@ -1,7 +1,7 @@
 {
   "manifestVersion": 1,
   "generatedFrom": {
-    "@absmartly/cli": "1.17.0"
+    "@absmartly/cli": "1.17.1"
   },
   "endpoints": [
     {
@@ -3640,9 +3640,14 @@
     },
     "users.createUser": {
       "apiMethods": [
-        "createUser"
+        "createUser",
+        "listRoles"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/roles"
+        },
         {
           "method": "POST",
           "path": "/v1/users"
@@ -3651,9 +3656,14 @@
     },
     "users.updateUser": {
       "apiMethods": [
+        "listRoles",
         "updateUser"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/roles"
+        },
         {
           "method": "PUT",
           "path": "/v1/users/{id}"

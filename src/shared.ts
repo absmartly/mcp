@@ -31,6 +31,9 @@ export const CORS_HEADERS = {
 export const SSE_PATH = "/sse";
 export const MCP_PATH = "/mcp";
 export const TRANSPORT_PREFIXES = [SSE_PATH, MCP_PATH] as const;
+// The SSE transport (agents' McpAgent.serveSSE) receives client messages on
+// `${SSE_PATH}/message`. That segment is part of the transport, not a tenant.
+const TRANSPORT_MESSAGE_SEGMENT = "message";
 
 export type ABsmartlyProps = {
   email: string;
@@ -57,7 +60,7 @@ export function extractEndpointFromPath(pathname: string, prefix: string | reado
   for (const p of prefixes) {
     if (!pathname.startsWith(p + '/')) continue;
     const hostPart = pathname.slice(p.length + 1).replace(/\/+$/, '');
-    if (!hostPart) continue;
+    if (!hostPart || hostPart === TRANSPORT_MESSAGE_SEGMENT) continue;
     const host = hostPart.includes('.') ? hostPart : `${hostPart}.${DEFAULT_ABSMARTLY_DOMAIN}`;
     if (!HOSTNAME_PATTERN.test(host)) return null;
     return `https://${host}`;

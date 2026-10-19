@@ -9,6 +9,7 @@
 import { APIClient } from '@absmartly/cli/api-client';
 import { FetchHttpClient } from '../../src/fetch-adapter.ts';
 import { resolveTestCredentials, SKIP_MESSAGE } from './test-credentials.js';
+import { skipSuite } from './gate.js';
 
 function stripV1(endpoint) {
   return endpoint.endsWith('/v1') ? endpoint.slice(0, -3) : endpoint;
@@ -39,7 +40,7 @@ export default async function runApiClientListingsTests() {
 
   const credentials = await resolveTestCredentials();
   if (!credentials) {
-    return { success: true, testCount: 0, message: SKIP_MESSAGE, details: [] };
+    return skipSuite(SKIP_MESSAGE);
   }
 
   const client = buildClient(credentials);

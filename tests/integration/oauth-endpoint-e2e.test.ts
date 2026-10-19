@@ -15,14 +15,15 @@
  *   - endpoints with no host (`http:///x`) are rejected (API-key transport → 400,
  *     /authorize → the endpoint form, never a redirect).
  *
- * Needs a local Worker; skips when none is reachable (MCP_WORKER_URL overrides
- * the default http://127.0.0.1:8787).
+ * Needs a local Worker (MCP_WORKER_URL, see gate.js): skips locally without
+ * one and fails a gated run.
  */
 
 import { createHash, randomBytes } from "crypto";
 import { pathToFileURL } from "url";
+import { skipSuite, workerUrl } from "./gate.js";
 
-const WORKER_URL = process.env.MCP_WORKER_URL || 'http://127.0.0.1:8787';
+const WORKER_URL = workerUrl();
 const REDIRECT_URI = 'http://127.0.0.1:53682/callback';
 const BACKEND_AUTHORIZE_PATH = '/auth/oauth/authorize';
 const FAKE_HOST = 'https://tenant-e2e.absmartly.invalid';
@@ -117,10 +118,7 @@ function expectBackendRedirect(response: Response, expectedAuthorize: string): v
 }
 
 async function run() {
-    if (!(await isWorkerReachable())) {
-        console.log(`\n  Skipped: local Worker not reachable at ${WORKER_URL}.`);
-        return { success: true, message: 'Skipped: local Worker not reachable', testCount: 0, details: [] };
-    }
+    if (!(await isWorkerReachable())) return skipSuite(`local Worker not reachable at ${WORKER_URL}`);
 
     const results: TestResult[] = [];
     async function test(name: string, fn: () => Promise<void>) {

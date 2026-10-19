@@ -19,30 +19,15 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { readFileSync } from "fs";
-import { execFileSync } from "child_process";
-import { join, dirname } from "path";
-import { homedir } from "os";
-import { fileURLToPath, pathToFileURL } from "url";
+import { pathToFileURL } from "url";
+import { resolveTestCredentials, SKIP_MESSAGE } from "./test-credentials.js";
+import { skipSuite, workerUrl } from "./gate.js";
 
-const LOCAL_MCP_URL = 'http://127.0.0.1:8787/sse';
+const LOCAL_MCP_URL = `${workerUrl()}/sse`;
 const POLL_INTERVAL_MS = 1_000;
 const POLL_DEFAULT_MAX_RETRIES = 10;
 
-type ToolCallResult = { content: Array<{ type: string; text?: string }> };
-
-function loadTestProfile(): { endpoint: string; apiKey: string } {
-    const configPath = join(homedir(), '.config', 'absmartly', 'config.yaml');
-    const configText = readFileSync(configPath, 'utf-8');
-    const match = configText.match(/test-1:\s*\n\s+api:\s*\n\s+endpoint:\s*(\S+)/);
-    if (!match) throw new Error('test-1 profile not found in ~/.config/absmartly/config.yaml');
-
-    const apiKey = execFileSync('security', [
-        'find-generic-password', '-s', 'absmartly-cli', '-a', 'api-key-test-1', '-w'
-    ], { encoding: 'utf-8' }).trim();
-
-    return { endpoint: match[1], apiKey };
-}
+type ToolCallResult = { isError?: boolean; content: Array<{ type: string; text?: string }> };
 
 async function isLocalMcpReachable(): Promise<boolean> {
     try {
@@ -84,6 +69,7 @@ async function callExecute(
         arguments: { group, command, params, ...extras },
     }) as ToolCallResult;
     const text = extractText(result);
+    if (result.isError || /^Error executing /.test(text)) throw new Error(text);
     const parsed = parseExecuteCommandResponse(text);
     return { data: parsed.data, text };
 }
@@ -92,14 +78,15 @@ async function pollState(
     client: Client,
     experimentId: number,
     expectedState: string,
-    maxRetries = POLL_DEFAULT_MAX_RETRIES
+    maxRetries = POLL_DEFAULT_MAX_RETRIES,
+    field: 'state' | 'feature_state' = 'state'
 ): Promise<{ matched: boolean; observed: string; attempts: number; history: string[] }> {
     const history: string[] = [];
     let attempts = 0;
     while (attempts < maxRetries) {
         attempts++;
-        const { data, text } = await callExecute(client, 'experiments', 'getExperiment', { experimentId });
-        const observed = data?.state ?? data?.experiment?.state ?? '<unknown>';
+        const { data, text } = await callExecute(client, 'experiments', 'getExperiment', { experimentId, show: ['feature_state'] });
+        const observed = data?.[field] ?? data?.experiment?.[field] ?? data?.data?.experiment?.[field] ?? '<unknown>';
         history.push(observed);
         if (observed === expectedState) {
             return { matched: true, observed, attempts, history };
@@ -124,11 +111,12 @@ interface TestResult {
 
 async function run() {
     if (!(await isLocalMcpReachable())) {
-        console.log(`\n  Skipped: local MCP not reachable at ${LOCAL_MCP_URL}. Start wrangler dev or pass --live.`);
-        return { success: true, message: 'Skipped: local MCP not reachable', testCount: 0, details: [] };
+        return skipSuite(`local MCP not reachable at ${LOCAL_MCP_URL}; start wrangler dev`);
     }
 
-    const { endpoint, apiKey } = loadTestProfile();
+    const credentials = await resolveTestCredentials();
+    if (!credentials) return skipSuite(SKIP_MESSAGE);
+    const { endpoint, apiKey } = credentials;
     const transport = new SSEClientTransport(
         new URL(LOCAL_MCP_URL),
         { requestInit: { headers: { 'Authorization': apiKey, 'x-absmartly-endpoint': endpoint } } }
@@ -212,6 +200,15 @@ async function run() {
         ].join('\n');
     }
 
+    // Every entity the suite creates, so cleanup can stop and archive it even
+    // when a scenario fails part-way. A failed gated run must not leave
+    // running feature flags or experiments on the shared test-1 instance.
+    const createdEntities = new Map<number, 'test' | 'feature'>();
+    // Names of confirmed creates whose response gave no id (lost, malformed or
+    // an MCP error). The backend may still have committed them, so cleanup
+    // looks each one up by name.
+    const unresolvedCreates = new Map<string, 'test' | 'feature'>();
+
     async function createAndConfirm(type: 'test' | 'feature', prefix: string): Promise<number> {
         // The test-1 backend occasionally returns "Internal Server Error" from
         // createExperimentFromTemplate (especially for type=feature). Retry
@@ -220,12 +217,21 @@ async function run() {
         for (let attempt = 1; attempt <= 3; attempt++) {
             const name = `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
             const templateContent = buildTemplate(name, type);
-            // First call returns preview (no confirmed). Second call with confirmed:true creates.
-            await callExecute(client, 'experiments', 'createExperimentFromTemplate', { templateContent });
-            const created = await callExecute(client, 'experiments', 'createExperimentFromTemplate', { templateContent }, { confirmed: true });
-            const id = created.data?.id ?? created.data?.experiment?.id ?? created.data?.data?.id;
-            if (id) return id as number;
-            lastError = `attempt ${attempt}/3: ${created.text.slice(0, 400)}`;
+            try {
+                // First call returns preview (no confirmed). Second call with confirmed:true creates.
+                await callExecute(client, 'experiments', 'createExperimentFromTemplate', { templateContent });
+                unresolvedCreates.set(name, type);
+                const created = await callExecute(client, 'experiments', 'createExperimentFromTemplate', { templateContent }, { confirmed: true });
+                const id = created.data?.id ?? created.data?.experiment?.id ?? created.data?.data?.id;
+                if (id) {
+                    createdEntities.set(id as number, type);
+                    unresolvedCreates.delete(name);
+                    return id as number;
+                }
+                lastError = `attempt ${attempt}/3: ${created.text.slice(0, 400)}`;
+            } catch (err: any) {
+                lastError = `attempt ${attempt}/3: ${(err?.message || String(err)).slice(0, 400)}`;
+            }
             if (attempt < 3) await new Promise(resolve => setTimeout(resolve, 2_000));
         }
         throw new Error(`createExperimentFromTemplate returned no id after 3 attempts. last: ${lastError}`);
@@ -239,6 +245,69 @@ async function run() {
         return callExecute(client, 'experiments', commandName, { experimentId, ...extraParams }, { confirmed: true });
     }
 
+    async function readFields(experimentId: number): Promise<Record<string, any>> {
+        const { data } = await callExecute(client, 'experiments', 'getExperiment', {
+            experimentId, show: ['feature_state', 'archived'],
+        });
+        return data?.experiment ?? data ?? {};
+    }
+
+    async function archiveAndConfirm(experimentId: number): Promise<void> {
+        await transition('archiveExperiment', experimentId);
+        const after = await readFields(experimentId);
+        if (after.archived !== true) {
+            throw new Error(`experiment ${experimentId} not archived after archiveExperiment (archived=${after.archived})`);
+        }
+    }
+
+    // Stops anything still live, then archives. Collects every failure
+    // instead of stopping at the first, and returns them so the suite fails.
+    async function cleanup(): Promise<string[]> {
+        const errors: string[] = [];
+        // Recover creates that may have committed without returning an id.
+        // A name that can't be checked is reported so an operator can clean
+        // it up by hand.
+        for (const [name, type] of unresolvedCreates) {
+            try {
+                const { data } = await callExecute(client, 'experiments', 'listExperiments', { search: name, items: 10 });
+                const rows: any[] = Array.isArray(data) ? data : (data?.experiments ?? data?.items ?? []);
+                const match = rows.find(r => r?.name === name);
+                if (match?.id) {
+                    console.log(`\n  cleanup: recovered ${type} ${match.id} (${name}) created without an id in the response`);
+                    createdEntities.set(Number(match.id), type);
+                }
+            } catch (err: any) {
+                errors.push(`${type} "${name}" may exist on the backend but could not be looked up for cleanup: ${err?.message || err}`);
+            }
+        }
+        for (const [id, type] of createdEntities) {
+            try {
+                const before = await readFields(id);
+                if (before.archived === true) continue;
+                // A stopped feature flag keeps state "running" with
+                // feature_state "off", so for flags only feature_state "on"
+                // (or development) means it still needs stopping.
+                const live = type === 'feature'
+                    ? before.feature_state === 'on' || before.state === 'development'
+                    : before.state === 'running' || before.state === 'development';
+                if (live) {
+                    const reason = type === 'feature' ? 'implementation_issue' : 'hypothesis_iteration';
+                    // A failed stop is reported but doesn't skip the archive.
+                    try {
+                        await transition('stopExperiment', id, { reason, note: 'lifecycle test cleanup' });
+                    } catch (err: any) {
+                        errors.push(`${type} ${id}: stop failed: ${err?.message || err}`);
+                    }
+                }
+                await archiveAndConfirm(id);
+            } catch (err: any) {
+                errors.push(`${type} ${id}: ${err?.message || err}`);
+            }
+        }
+        return errors;
+    }
+
+    try {
     await test('experiment lifecycle: create → ready → dev → start → stop → restart → full_on → stop → archive', async () => {
         const expId = await createAndConfirm('test', 'sdk_exp');
 
@@ -270,6 +339,7 @@ async function run() {
         if (!newId || newId === expId) {
             throw new Error(`restartExperiment did not return a new id. response: ${restartResult.text.slice(0, 400)}`);
         }
+        createdEntities.set(newId, 'test');
         const runningAgain = await pollState(client, newId, 'running');
         if (!runningAgain.matched) throw new Error(`new experiment ${newId} stuck in "${runningAgain.observed}" after restart (history: ${JSON.stringify(runningAgain.history)})`);
 
@@ -291,29 +361,16 @@ async function run() {
 
         // stopped → archived. Same caveat as full_on: archiveExperiment sets
         // `archived: true` on the record but the `state` field stays "stopped"
-        // — there is no terminal "archived" state. Verify the call succeeded.
-        const archivedResp = await transition('archiveExperiment', newId);
-        if (archivedResp.text.toLowerCase().includes('error')) {
-            throw new Error(`archiveExperiment failed: ${archivedResp.text.slice(0, 300)}`);
-        }
+        // — there is no terminal "archived" state. Cleanup archives the first
+        // iteration too and checks `archived` on both.
+        await archiveAndConfirm(newId);
 
         console.log(`\n    experiment_id=${expId} restarted_id=${newId} progression OK`);
         process.stdout.write('    ');
     });
 
     await test('feature flag lifecycle: create → ready → dev → start → stop → archive', async () => {
-        let flagId: number;
-        try {
-            flagId = await createAndConfirm('feature', 'sdk_flag');
-        } catch (err: any) {
-            const msg = err?.message || String(err);
-            if (msg.includes('Internal Server Error')) {
-                console.log(`\n    (skip: backend returned Internal Server Error on feature-flag create — known intermittent issue on test-1)`);
-                process.stdout.write('    ');
-                return;
-            }
-            throw err;
-        }
+        const flagId = await createAndConfirm('feature', 'sdk_flag');
 
         await callExecute(client, 'experiments', 'updateExperiment', { experimentId: flagId, changes: { state: 'ready' } });
         const ready = await pollState(client, flagId, 'ready');
@@ -327,20 +384,27 @@ async function run() {
         const running = await pollState(client, flagId, 'running');
         if (!running.matched) throw new Error(`stuck in "${running.observed}" after startExperiment (history: ${JSON.stringify(running.history)})`);
 
-        await transition('stopExperiment', flagId, { reason: 'hypothesis_iteration' });
-        const stopped = await pollState(client, flagId, 'stopped');
-        if (!stopped.matched) throw new Error(`stuck in "${stopped.observed}" after stopExperiment (history: ${JSON.stringify(stopped.history)})`);
+        await transition('stopExperiment', flagId, { reason: 'implementation_issue' });
+        // UI feature status uses feature_state: stopping turns it off while
+        // the experiment state can remain running.
+        const stopped = await pollState(client, flagId, 'off', POLL_DEFAULT_MAX_RETRIES, 'feature_state');
+        if (!stopped.matched) throw new Error(`feature_state stuck in "${stopped.observed}" after stopExperiment (history: ${JSON.stringify(stopped.history)})`);
 
-        const archResp = await transition('archiveExperiment', flagId);
-        if (archResp.text.toLowerCase().includes('error')) {
-            throw new Error(`archiveExperiment failed: ${archResp.text.slice(0, 300)}`);
-        }
+        await archiveAndConfirm(flagId);
 
         console.log(`\n    flag_id=${flagId} progression OK`);
         process.stdout.write('    ');
     });
-
-    await client.close();
+    } finally {
+        const cleanupErrors = await cleanup();
+        if (cleanupErrors.length > 0) {
+            results.push({ name: 'cleanup: stop and archive created entities', status: 'FAIL', error: cleanupErrors.join('; ') });
+            console.log(`\n  cleanup FAILED:\n    ${cleanupErrors.join('\n    ')}`);
+        } else {
+            console.log(`\n  cleanup: archived ${[...createdEntities.keys()].join(', ') || 'nothing'}`);
+        }
+        await client.close();
+    }
 
     const passed = results.filter(r => r.status === 'PASS').length;
     const failed = results.filter(r => r.status === 'FAIL').length;

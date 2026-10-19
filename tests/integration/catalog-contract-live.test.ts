@@ -15,16 +15,17 @@
  *     apiUrl, so a base URL, a trailing slash or /v1 all reach the same API.
  *
  * Credentials: ABSMARTLY_API_KEY + ABSMARTLY_API_ENDPOINT, or `--profile <name>`
- * (see test-credentials.js). Skips without credentials or a reachable Worker
- * (MCP_WORKER_URL overrides http://127.0.0.1:8787), so normal CI needs neither.
+ * (see test-credentials.js). Without credentials or a reachable Worker
+ * (MCP_WORKER_URL, see gate.js) it skips locally and fails a gated run.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { pathToFileURL } from "url";
 import { resolveTestCredentials, SKIP_MESSAGE } from "./test-credentials.js";
+import { skipScenario, skipSuite, workerUrl } from "./gate.js";
 
-const WORKER_URL = process.env.MCP_WORKER_URL || 'http://127.0.0.1:8787';
+const WORKER_URL = workerUrl();
 const SSE_URL = `${WORKER_URL}/sse`;
 const PROBE_TIMEOUT_MS = 1500;
 const TEST_NAME_PREFIX = 'mcp_e2e_contract';
@@ -133,14 +134,8 @@ async function archiveGoal(apiKey: string, endpoint: string, goalId: number): Pr
 
 async function run() {
     const creds = await resolveTestCredentials();
-    if (!creds) {
-        console.log(`\n  ${SKIP_MESSAGE}`);
-        return { success: true, message: SKIP_MESSAGE, testCount: 0, details: [] };
-    }
-    if (!(await isWorkerReachable())) {
-        console.log(`\n  Skipped: local Worker not reachable at ${WORKER_URL}.`);
-        return { success: true, message: 'Skipped: local Worker not reachable', testCount: 0, details: [] };
-    }
+    if (!creds) return skipSuite(SKIP_MESSAGE);
+    if (!(await isWorkerReachable())) return skipSuite(`local Worker not reachable at ${WORKER_URL}`);
 
     const { apiKey, endpoint } = creds;
     console.log(`\n  API: ${baseUrlOf(endpoint)}  Worker: ${WORKER_URL}`);
@@ -244,7 +239,7 @@ async function run() {
         const configs = await expectOk(client, 'storageconfigs', 'listStorageConfigs');
         const s3 = Array.isArray(configs) ? configs.find((c: any) => c.type === 'S3' && !c.is_internal_export_config) : undefined;
         if (!s3?.id) {
-            console.log('\n    (no S3 storage config on this instance; skipped)');
+            skipScenario('no S3 storage config on this instance');
             return;
         }
         const result = await expectOk(client, 'storageconfigs', 'testStorageConfig', { configId: s3.id });

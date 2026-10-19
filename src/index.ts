@@ -6,7 +6,7 @@ import { z } from "zod";
 import { ABsmartlyResources } from "./resources.js";
 import { ABsmartlyOAuthHandler } from "./absmartly-oauth-handler.js";
 import { SCOPE_MCP_ACCESS, SUPPORTED_SCOPES, validateClientRegistration } from "./oauth/index.js";
-import { checkBackendSessionOnRefresh, normalizeResourceParameter, protectedResourceMetadataUrl, rejectUntrustedCimdClient, withValidStoredEndpoint } from "./oauth-worker-guards.js";
+import { checkBackendSessionOnRefresh, normalizeResourceParameter, oauthBearerChallenge, rejectUntrustedCimdClient, withValidStoredEndpoint } from "./oauth-worker-guards.js";
 import { Env } from "./types.js";
 import { debug } from "./config.js";
 import { MCP_VERSION } from "./version.js";
@@ -15,6 +15,7 @@ import { APIClient } from "@absmartly/cli/api-client";
 import type { CustomSectionField } from "@absmartly/cli/api-client";
 import { FetchHttpClient } from "./fetch-adapter.js";
 import { withPathIdGuard } from "./path-id-guard.js";
+import { handleApiKeyTransportRequest, type ApiKeyTransportRoute } from "./api-key-auth.js";
 import { setupTools } from "./tools.js";
 import type { ToolContext } from "./tools.js";
 import {
@@ -36,21 +37,9 @@ import {
     safeKvPut,
     safeKvGet,
 } from "./shared.js";
-import {
-    HTTP_STATUS_BAD_REQUEST,
-    HTTP_STATUS_SERVICE_UNAVAILABLE,
-    HTTP_STATUS_UNAUTHORIZED,
-    firstValidEndpoint,
-    MESSAGE_INVALID_ENDPOINT,
-    tryParseAbsmartlyEndpoint,
-} from "./oauth/index.js";
+import { firstValidEndpoint, tryParseAbsmartlyEndpoint } from "./oauth/index.js";
 
 const ENTITY_LIST_PAGE_SIZE = 100;
-const VERIFY_ERROR_SERVER = 'server_error';
-const VERIFY_ERROR_NETWORK = 'network_error';
-const VERIFY_ERROR_UNAUTHORIZED = 'unauthorized';
-const MESSAGE_SERVICE_UNAVAILABLE = 'ABsmartly service temporarily unavailable';
-const MESSAGE_UNAUTHORIZED = 'Unauthorized';
 const ENTITY_LIST_FIRST_PAGE = 1;
 const ACCESS_TOKEN_TTL_SECONDS = 3600;
 // workers-oauth-provider 0.10.x defaults both of these; pin them explicitly (at the
@@ -557,21 +546,6 @@ Steps:
     }
 }
 
-async function verifyApiKey(apiKey: string, endpoint: string): Promise<{ ok: boolean; user?: any; error?: string }> {
-    try {
-        const httpClient = new FetchHttpClient(endpoint, { authToken: apiKey, authType: 'api-key' });
-        const client = withPathIdGuard(new APIClient(httpClient));
-        const user = await client.getCurrentUser();
-        return { ok: true, user };
-    } catch (error: any) {
-        const msg = error.message || String(error);
-        console.error('API key verification error:', msg);
-        if (msg.includes('HTTP 5')) return { ok: false, error: VERIFY_ERROR_SERVER };
-        if (msg.includes('Network error') || msg.includes('timed out')) return { ok: false, error: VERIFY_ERROR_NETWORK };
-        return { ok: false, error: VERIFY_ERROR_UNAUTHORIZED };
-    }
-}
-
 const sseMcpHandler = ABsmartlyMCP.serveSSE(SSE_PATH, {
     corsOptions: MCP_CORS_OPTIONS
 });
@@ -613,11 +587,6 @@ const oauthProvider = new OAuthProvider({
     defaultHandler: oauthHandler as unknown as ExportedHandler,
 });
 
-type McpTransportRoute = {
-    pathPrefix: string;
-    handler: { fetch: (request: Request, env: any, ctx: any) => Promise<Response> };
-};
-
 function isTransportPath(pathname: string, prefix: string): boolean {
     return pathname === prefix || pathname.startsWith(`${prefix}/`);
 }
@@ -635,7 +604,7 @@ async function handleMcpTransportRequest(
     request: Request,
     env: any,
     ctx: any,
-    route: McpTransportRoute,
+    route: ApiKeyTransportRoute,
     detected: { apiKey: string | null; endpoint: string | null },
     clientFingerprint: string
 ): Promise<Response> {
@@ -643,68 +612,7 @@ async function handleMcpTransportRequest(
     const { apiKey, endpoint } = detected;
 
     if (apiKey) {
-        debug(`API key detected on ${route.pathPrefix}, bypassing OAuth flow`);
-
-        try {
-            // Parse the endpoint where it enters, and store the canonical form.
-            const parsed = tryParseAbsmartlyEndpoint(endpoint || DEFAULT_ABSMARTLY_ENDPOINT);
-            if (!parsed) {
-                console.error(`Rejected API key request: ${MESSAGE_INVALID_ENDPOINT}: ${endpoint}`);
-                return new Response(MESSAGE_INVALID_ENDPOINT, { status: HTTP_STATUS_BAD_REQUEST, headers: CORS_HEADERS });
-            }
-            const apiUrl = parsed.apiUrl;
-
-            const verifyResult = await verifyApiKey(apiKey, apiUrl);
-
-            if (!verifyResult.ok) {
-                const isTransient = verifyResult.error === VERIFY_ERROR_SERVER || verifyResult.error === VERIFY_ERROR_NETWORK;
-                console.error(`Failed to verify API key: ${verifyResult.error}`);
-                return new Response(isTransient ? MESSAGE_SERVICE_UNAVAILABLE : MESSAGE_UNAUTHORIZED, {
-                    status: isTransient ? HTTP_STATUS_SERVICE_UNAVAILABLE : HTTP_STATUS_UNAUTHORIZED,
-                    headers: CORS_HEADERS,
-                });
-            }
-
-            const userData = verifyResult.user;
-            const userId = userData.id?.toString() || userData.email;
-
-            if (!userData.email) {
-                debug('No email found in API response for API key authentication, user data:', userData);
-            }
-
-            const props: ABsmartlyProps = {
-                email: userData.email || DEFAULT_API_KEY_USER_EMAIL,
-                name: `${userData.first_name || ''} ${userData.last_name || ''}`.trim() || userData.email || DEFAULT_API_KEY_USER_NAME,
-                absmartly_endpoint: apiUrl,
-                absmartly_api_key: apiKey,
-                user_id: userId
-            };
-
-            debug(`API key authenticated for user: ${props.email}`);
-
-            const session = {
-                userId,
-                email: props.email,
-                name: props.name,
-                absmartly_endpoint: props.absmartly_endpoint,
-                absmartly_api_key: apiKey,
-                createdAt: Date.now(),
-                expiresAt: Date.now() + (SESSION_TTL_SECONDS * 1000)
-            };
-
-            await safeKvPut(env.OAUTH_KV, `session:${userId}`, JSON.stringify(session), {
-                expirationTtl: SESSION_TTL_SECONDS,
-            });
-
-            ctx.props = props;
-            return await route.handler.fetch(request, env, ctx);
-        } catch (error) {
-            console.error("Error during API key authentication:", error);
-            return new Response("Internal Server Error", {
-                status: 500,
-                headers: CORS_HEADERS,
-            });
-        }
+        return await handleApiKeyTransportRequest(request, env, ctx, route, apiKey, endpoint);
     }
 
     const authHeader = request.headers.get("Authorization");
@@ -734,7 +642,7 @@ async function handleMcpTransportRequest(
             status: 401,
             headers: {
                 ...CORS_HEADERS,
-                "WWW-Authenticate": `Bearer realm="OAuth", resource_metadata="${protectedResourceMetadataUrl(url, route.pathPrefix)}", scope="${SCOPE_MCP_ACCESS}"`,
+                "WWW-Authenticate": oauthBearerChallenge(url, route.pathPrefix),
             },
         });
     }

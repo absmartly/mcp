@@ -1,6 +1,6 @@
 import assert from 'node:assert';
-import { APIClient } from '@absmartly/cli/api-client';
-import { FetchHttpClient } from '../../src/fetch-adapter';
+import { APIClient, APIError } from '@absmartly/cli/api-client';
+import { FetchHttpClient, FetchNetworkError } from '../../src/fetch-adapter';
 
 const originalFetch = globalThis.fetch;
 
@@ -139,6 +139,42 @@ export default async function runTests() {
     try { await client.request({ method: 'GET', url: '/experiments' }); }
     catch (e: any) { threw = true; ok(e.message.includes('HTTP 500'), 'Error: includes status code'); }
     ok(threw, 'Error: non-OK response throws');
+    restoreFetch();
+  });
+
+  await asyncTest('Error: non-OK response is an APIError carrying the status and parsed body', async () => {
+    const client = new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'api-key' });
+    mockFetch(async () => new Response(JSON.stringify({ ok: false, errors: ['User does not have the required access.'] }), { status: 403, headers: { 'content-type': 'application/json' } }));
+    let caught: unknown;
+    try { await client.request({ method: 'GET', url: '/experiments' }); } catch (e) { caught = e; }
+    ok(caught instanceof APIError, 'Error: non-OK response throws the CLI APIError');
+    assertEquals((caught as APIError).statusCode, 403, 'Error: APIError.statusCode is the HTTP status');
+    assertEquals((caught as APIError).response, { ok: false, errors: ['User does not have the required access.'] }, 'Error: APIError.response is the parsed JSON body');
+    ok((caught as Error).message.includes('HTTP 403'), 'Error: message still includes the status');
+    restoreFetch();
+  });
+
+  await asyncTest('Error: non-JSON error body is kept as text on APIError.response', async () => {
+    const client = new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'api-key' });
+    mockFetch(async () => new Response('Bad Gateway', { status: 502, headers: { 'content-type': 'text/plain' } }));
+    let caught: unknown;
+    try { await client.request({ method: 'GET', url: '/experiments' }); } catch (e) { caught = e; }
+    assertEquals((caught as APIError).statusCode, 502, 'Error: 5xx status on APIError');
+    assertEquals((caught as APIError).response, 'Bad Gateway', 'Error: text body kept as a string');
+    restoreFetch();
+  });
+
+  await asyncTest('Error: network failure and timeout are FetchNetworkError, not APIError', async () => {
+    const client = new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'api-key', timeout: 5 });
+    mockFetch(async () => { throw new TypeError('fetch failed'); });
+    let network: unknown;
+    try { await client.request({ method: 'GET', url: '/experiments' }); } catch (e) { network = e; }
+    ok(network instanceof FetchNetworkError && !(network instanceof APIError), 'Error: network failure is a FetchNetworkError');
+    mockFetch(async () => { throw new DOMException('timed out', 'TimeoutError'); });
+    let timeout: unknown;
+    try { await client.request({ method: 'GET', url: '/experiments' }); } catch (e) { timeout = e; }
+    ok(timeout instanceof FetchNetworkError, 'Error: timeout is a FetchNetworkError');
+    ok((timeout as Error).message.includes('timed out'), 'Error: timeout message kept');
     restoreFetch();
   });
 

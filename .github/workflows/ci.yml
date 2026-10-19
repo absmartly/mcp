@@ -4,7 +4,6 @@ on:
   push:
     branches: [main, feat/**]
   pull_request:
-    branches: [main]
 
 jobs:
   test:
@@ -28,6 +27,12 @@ jobs:
 
       - name: Unit tests
         run: npm run test:unit
+
+      # The Worker must start: a module-load crash passes typecheck and unit
+      # tests but fails every deploy (Cloudflare error 10021). wrangler dev runs
+      # locally and needs no Cloudflare credentials.
+      - name: Worker starts (wrangler dev + /health)
+        run: ./scripts/worker-smoke.sh
 
       - name: Endpoint manifest is current
         run: npm run manifest:check
@@ -55,3 +60,16 @@ jobs:
 
       - name: Type-check a Node16 CommonJS consumer
         run: npm run check:cjs-consumer
+
+  # Merge gate: the same gated e2e run the publish workflows use. Runs on every
+  # pull request, including fork PRs, which it fails with an explicit message
+  # because they get no secrets. Never skipped on a PR: a skipped required
+  # check would count as passing.
+  e2e:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/e2e.yml
+    with:
+      fork: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+    secrets:
+      ABSMARTLY_API_KEY: ${{ secrets.ABSMARTLY_API_KEY }}
+      ABSMARTLY_API_ENDPOINT: ${{ secrets.ABSMARTLY_API_ENDPOINT }}

@@ -724,25 +724,31 @@ npx @absmartly/mcp              # Run stdio server
 ### Testing
 
 ```bash
-npm run test:unit     # Unit tests
-npm run typecheck     # TypeScript type checking
+npm run test:unit       # Unit tests
+npm run typecheck       # TypeScript type checking
+npm run smoke:worker    # Worker starts under wrangler dev and serves /health
+npm run test:e2e        # Gated e2e suite: fresh Worker + test-1 API, no skips allowed
+npm run verify:release  # Everything above; runs automatically on npm publish
 npx tsx scripts/audit-catalog-params.ts   # Compare every catalog command's params with its CLI core function
 ```
 
 `tests/unit/cli-catalog-core-params.test.ts` runs catalog commands through the real `@absmartly/cli` core over a fake HTTP client, and fails if the audit finds any catalog/core param mismatch.
 
-Integration tests (require credentials):
+`test:e2e` needs `ABSMARTLY_API_KEY` and `ABSMARTLY_API_ENDPOINT` (test-1)
+and fails without them. See [tests/README.md](tests/README.md#release-gate).
+
+The e2e suites call the Worker through the official MCP SDK client, with no
+model in the loop. To run one against a Worker you started yourself:
 ```bash
-node tests/integration/claude-mcp-tools.test.js --profile test-1
-node tests/integration/claude-user-experience.test.js --profile test-1
-node tests/integration/claude-tool-discovery.test.js --profile test-1
+MCP_WORKER_URL=http://127.0.0.1:8787 npx tsx tests/integration/sdk-tools.test.ts --profile test-1
 ```
 
 ### CI/CD
 
 GitHub Actions runs automatically:
-- **CI** (every push/PR): typecheck + unit tests
-- **Deploy** (push to main): tests + Cloudflare Workers deployment
+- **CI** (every push/PR): typecheck, unit tests, Worker startup smoke test
+- **Deploy** (push to main): tests, Worker smoke test, Cloudflare Workers deployment
+- **Publish to npm** (push to main with a version bump): gated e2e job, then `npm publish` (which runs `verify:release` again)
 
 ### Deployment
 

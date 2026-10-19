@@ -16,10 +16,10 @@
  * The server reads its profile from $HOME/.config/absmartly, so each run gets a
  * temporary HOME holding a profile for the resolved credentials (removed after).
  * Needs `npm run build` first. Credentials: ABSMARTLY_API_KEY +
- * ABSMARTLY_API_ENDPOINT, or `--profile <name>` (see test-credentials.js); skips
- * without them. The mismatch case packs this package and npm-installs it, in a
+ * ABSMARTLY_API_ENDPOINT, or `--profile <name>` (see test-credentials.js);
+ * without them it skips locally and fails a gated run. The mismatch case packs this package and npm-installs it, in a
  * temporary directory, with another @absmartly/cli (MCP_E2E_MISMATCH_CLI picks
- * the version); it skips if that install fails.
+ * the version); if that install fails it skips locally and fails a gated run.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -30,6 +30,7 @@ import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { resolveTestCredentials, SKIP_MESSAGE } from "./test-credentials.js";
+import { skipScenario, skipSuite } from "./gate.js";
 import { PATH_TABLE_CLI_VERSION } from "../../src/api-path-args.js";
 
 const PROJECT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -133,10 +134,7 @@ function makeInstallWithCli(version: string): { root: string; packageRoot: strin
 
 async function run() {
     const creds = await resolveTestCredentials();
-    if (!creds) {
-        console.log(`\n  ${SKIP_MESSAGE}`);
-        return { success: true, message: SKIP_MESSAGE, testCount: 0, details: [] };
-    }
+    if (!creds) return skipSuite(SKIP_MESSAGE);
     if (!existsSync(join(PROJECT_ROOT, 'dist', 'local-server.js'))) {
         throw new Error('dist/local-server.js is missing: run `npm run build` first');
     }
@@ -171,13 +169,13 @@ async function run() {
 
         const otherVersion = mismatchedCliVersion();
         if (!otherVersion) {
-            console.log('\n  (mismatched CLI case skipped: no other @absmartly/cli version found)');
+            skipScenario('mismatched CLI case: no other @absmartly/cli version found');
         } else {
             let install: { root: string; packageRoot: string } | undefined;
             try {
                 install = makeInstallWithCli(otherVersion);
             } catch (err: any) {
-                console.log(`\n  (mismatched CLI case skipped: could not install ${CLI_PACKAGE}@${otherVersion}: ${err?.message})`);
+                skipScenario(`mismatched CLI case: could not install ${CLI_PACKAGE}@${otherVersion}: ${err?.message}`);
             }
             if (install) {
                 await test(`stdio server on mismatched CLI ${otherVersion}: one warning, objects pass, unsafe IDs refused`, async () => {
