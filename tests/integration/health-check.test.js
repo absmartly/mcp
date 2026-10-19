@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 /**
  * Integration Tests for Health Check Endpoint
- * Tests the deployed health check endpoint functionality
+ * Tests the health check endpoint of the local Worker
  */
 
-const BASE_URL = 'https://mcp.absmartly.com';
+import { workerUrl } from './gate.js';
+
+// The Worker under test: the runner's fresh `wrangler dev` (MCP_WORKER_URL),
+// not production, which only ever shows the previous release.
+const BASE_URL = workerUrl();
 const FETCH_TIMEOUT_MS = 10000;
 const MAX_HEALTHY_RESPONSE_MS = 5000;
 

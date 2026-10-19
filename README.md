@@ -715,11 +715,17 @@ npx @absmartly/mcp              # Run stdio server
 ### Testing
 
 ```bash
-npm run test:unit     # Unit tests
-npm run typecheck     # TypeScript type checking
+npm run test:unit       # Unit tests
+npm run typecheck       # TypeScript type checking
+npm run smoke:worker    # Worker starts under wrangler dev and serves /health
+npm run test:e2e        # Gated e2e suite: fresh Worker + test-1 API, no skips allowed
+npm run verify:release  # Everything above; runs automatically on npm publish
 ```
 
-Integration tests (require credentials):
+`test:e2e` needs `ABSMARTLY_API_KEY` and `ABSMARTLY_API_ENDPOINT` (test-1)
+and fails without them. See [tests/README.md](tests/README.md#release-gate).
+
+Claude-driven tests (opt-in, need the `claude` CLI and the test-1 profile):
 ```bash
 node tests/integration/claude-mcp-tools.test.js --profile test-1
 node tests/integration/claude-user-experience.test.js --profile test-1
@@ -729,8 +735,9 @@ node tests/integration/claude-tool-discovery.test.js --profile test-1
 ### CI/CD
 
 GitHub Actions runs automatically:
-- **CI** (every push/PR): typecheck + unit tests
-- **Deploy** (push to main): tests + Cloudflare Workers deployment
+- **CI** (every push/PR): typecheck, unit tests, Worker startup smoke test
+- **Deploy** (push to main): tests, Worker smoke test, Cloudflare Workers deployment
+- **Publish to npm** (push to main with a version bump): gated e2e job, then `npm publish` (which runs `verify:release` again)
 
 ### Deployment
 

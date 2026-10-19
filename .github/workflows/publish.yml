@@ -8,7 +8,19 @@ permissions:
   contents: read
 
 jobs:
+  # Same gated e2e run as PR CI and npm-publish.yml; `publish` needs it.
+  e2e:
+    uses: ./.github/workflows/e2e.yml
+    secrets:
+      ABSMARTLY_API_KEY: ${{ secrets.ABSMARTLY_API_KEY }}
+      ABSMARTLY_API_ENDPOINT: ${{ secrets.ABSMARTLY_API_ENDPOINT }}
+
   publish:
+    needs: e2e
+    env:
+      REQUIRE_E2E: '1'
+      ABSMARTLY_API_KEY: ${{ secrets.ABSMARTLY_API_KEY }}
+      ABSMARTLY_API_ENDPOINT: ${{ secrets.ABSMARTLY_API_ENDPOINT }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

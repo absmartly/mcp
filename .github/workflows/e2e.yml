@@ -1,0 +1,86 @@
+name: E2E (reusable)
+
+# The one definition of the gated e2e run. PR CI (ci.yml) and both npm
+# publish workflows call this, so the merge gate and the release gate run
+# exactly the same steps and can't drift apart.
+#
+# Gated mode (REQUIRE_E2E=1) fails, never skips, on a Worker that won't
+# start, missing credentials, any skipped suite or scenario, or fewer
+# executed tests than the runner's minimum.
+
+on:
+  workflow_call:
+    inputs:
+      fork:
+        description: True when the caller is a pull request from a fork.
+        type: boolean
+        default: false
+    secrets:
+      # Optional here so a missing secret reaches the explicit check below
+      # and fails with a clear message instead of a workflow validation error.
+      ABSMARTLY_API_KEY:
+        required: false
+      ABSMARTLY_API_ENDPOINT:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    # Per caller workflow and ref (github.* is the caller's context here).
+    # Runs on different refs don't conflict on test-1: entities get unique
+    # names and each run cleans up its own. Never cancel a running job:
+    # cancellation kills it before the lifecycle cleanup can archive what it
+    # created. A newer push only replaces the pending run, which hasn't
+    # started yet.
+    concurrency:
+      group: e2e-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: false
+    env:
+      REQUIRE_E2E: '1'
+      WRANGLER_SEND_METRICS: 'false'
+      ABSMARTLY_API_KEY: ${{ secrets.ABSMARTLY_API_KEY }}
+      ABSMARTLY_API_ENDPOINT: ${{ secrets.ABSMARTLY_API_ENDPOINT }}
+      # OAuth provider for backend-oauth-constraints; independent of the
+      # API credentials above.
+      ABSMARTLY_TEST_BACKEND: https://test-1.absmartly.com
+
+    steps:
+      - name: Require test-1 credentials
+        env:
+          FORK: ${{ inputs.fork }}
+        run: |
+          if [ "$FORK" = "true" ]; then
+            echo "::error::Pull requests from forks get no repository secrets, so the gated e2e suite cannot run. A maintainer must push the branch to absmartly/mcp and open the PR from there."
+            exit 1
+          fi
+          if [ -z "$ABSMARTLY_API_KEY" ] || [ -z "$ABSMARTLY_API_ENDPOINT" ]; then
+            echo "::error::Repository secrets ABSMARTLY_API_KEY and ABSMARTLY_API_ENDPOINT (test-1) are required. Merging and publishing are blocked until they are set; see tests/README.md."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Sync src/version.ts to package.json version
+        run: node scripts/sync-version.js
+
+      - name: Ensure DXT bundle stub
+        run: ./scripts/ensure-dxt-bundle.sh
+
+      - name: Worker startup smoke test
+        run: npm run smoke:worker
+
+      # lifecycle-sdk stops and archives everything it creates in a finally
+      # block, so a failed run doesn't leave live entities on test-1.
+      - name: E2E suite (gated)
+        run: npm run test:e2e
