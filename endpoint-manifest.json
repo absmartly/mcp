@@ -1,7 +1,7 @@
 {
   "manifestVersion": 1,
   "generatedFrom": {
-    "@absmartly/cli": "1.16.2"
+    "@absmartly/cli": "1.17.0"
   },
   "endpoints": [
     {

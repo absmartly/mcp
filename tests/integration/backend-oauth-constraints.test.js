@@ -1,20 +1,26 @@
 /**
  * Live integration tests against the ABsmartly backend OAuth provider.
  *
- * These hit https://demo-2.absmartly.com directly — they document and
+ * These hit the test-1 backend directly — they document and
  * regress the constraints the worker has to satisfy when redirecting
  * users into ABsmartly's OAuth flow:
  *
- *   - PKCE is mandatory on the authorize endpoint
- *   - Only ONE scope per request (the backend rejects multi-scope
- *     even though discovery advertises multiple scopes)
+ *   - PKCE is mandatory on the authorize endpoint, checked before login
+ *   - Space-separated multi-scope is accepted; comma-separated is rejected
+ *     (the worker sends the single scope mcp:access either way)
  *   - Discovery advertises mcp:access and user:info
  *
- * Skipped automatically if the backend is unreachable so the test
- * runner stays green offline / behind firewalls.
+ * Outside a gated run it skips (and logs) when the backend is unreachable,
+ * so it can run offline. A gated run fails instead.
  */
 
-const BACKEND = process.env.ABSMARTLY_TEST_BACKEND || 'https://demo-2.absmartly.com';
+import { skipSuite } from './gate.js';
+
+// The OAuth provider under test. Configured on its own, never derived from
+// the API-client suites' ABSMARTLY_API_ENDPOINT credential, so those
+// credentials can't retarget or disable this suite. CI sets it explicitly in
+// .github/workflows/e2e.yml.
+const BACKEND = (process.env.ABSMARTLY_TEST_BACKEND || 'https://test-1.absmartly.com').replace(/\/+$/, '');
 const CLIENT_ID = process.env.ABSMARTLY_TEST_CLIENT_ID || 'mcp-absmartly-universal';
 const REDIRECT_URI = 'https://mcp.absmartly.com/oauth/callback';
 const FETCH_TIMEOUT_MS = 10000;
@@ -61,24 +67,14 @@ export default async function run() {
     }
   }
 
-  // Reachability gate — skip cleanly if the backend isn't accessible from this environment.
+  // Reachability check. Outside a gated run, skip (and log) when the backend is unreachable.
   try {
     const probe = await fetchWithTimeout(`${BACKEND}/auth/oauth/.well-known/oauth-authorization-server`);
     if (!probe.ok) {
-      return {
-        success: true,
-        message: `backend ${BACKEND} returned ${probe.status} on discovery — skipped`,
-        testCount: 0,
-        details: [],
-      };
+      return skipSuite(`backend ${BACKEND} returned ${probe.status} on discovery`);
     }
   } catch (e) {
-    return {
-      success: true,
-      message: `backend ${BACKEND} unreachable (${e.message}) — skipped`,
-      testCount: 0,
-      details: [],
-    };
+    return skipSuite(`backend ${BACKEND} unreachable (${e.message})`);
   }
 
   await test('discovery advertises mcp:access and user:info', async () => {
@@ -104,11 +100,9 @@ export default async function run() {
     }
   });
 
-  await test('authorize without PKCE on unauthenticated request → 302 to login (PKCE check is post-auth)', async () => {
-    // The backend redirects to login first; the PKCE rejection (400 invalid_request,
-    // "code_challenge parameter must be provided") only surfaces AFTER the user
-    // authenticates and the authorize handler re-runs. The redirect Location
-    // preserves the original authorize URL via the `oauth_continue` query param.
+  await test('authorize without PKCE on unauthenticated request → 400 invalid_request (PKCE checked before login)', async () => {
+    // The backend used to redirect to login first and only reject the
+    // missing code_challenge after authentication. It now rejects it up front.
     const r = await fetchWithTimeout(buildAuthorizeUrl({
       client_id: CLIENT_ID,
       redirect_uri: REDIRECT_URI,
@@ -116,10 +110,10 @@ export default async function run() {
       response_type: 'code',
       state: 'no-pkce-test',
     }));
-    if (r.status !== 302) throw new Error(`expected 302, got ${r.status}`);
-    const loc = r.headers.get('location') || '';
-    if (!loc.includes('oauth_continue')) {
-      throw new Error(`expected oauth_continue in Location, got ${loc}`);
+    if (r.status !== 400) throw new Error(`expected 400, got ${r.status}`);
+    const body = await r.json();
+    if (body.error !== 'invalid_request' || !/PKCE/i.test(body.error_description || '')) {
+      throw new Error(`expected invalid_request mentioning PKCE, got ${JSON.stringify(body)}`);
     }
   });
 
@@ -153,7 +147,9 @@ export default async function run() {
     if (r.status !== 302) throw new Error(`expected 302, got ${r.status}: ${await r.text()}`);
   });
 
-  await test('authorize with multi-scope (space-separated) → 400 invalid_scope (regression)', async () => {
+  await test('authorize with multi-scope (space-separated) → 302 (accepted)', async () => {
+    // The backend used to reject any multi-scope request with
+    // invalid_scope. It now accepts the standard space-separated form.
     const challenge = await s256Challenge(FIXED_VERIFIER);
     const r = await fetchWithTimeout(buildAuthorizeUrl({
       client_id: CLIENT_ID,
@@ -164,11 +160,7 @@ export default async function run() {
       code_challenge: challenge,
       code_challenge_method: 'S256',
     }));
-    if (r.status !== 400) throw new Error(`expected 400, got ${r.status}: ${await r.text()}`);
-    const body = await r.json();
-    if (body.error !== 'invalid_scope') {
-      throw new Error(`expected error=invalid_scope, got ${JSON.stringify(body)}`);
-    }
+    if (r.status !== 302) throw new Error(`expected 302, got ${r.status}: ${await r.text()}`);
   });
 
   await test('authorize with multi-scope (comma-separated) → 400 invalid_scope (regression)', async () => {

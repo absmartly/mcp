@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 /**
  * Integration Tests for Authentication Endpoints
- * Tests the deployed authentication functionality
+ * Tests the authentication endpoints of the local Worker
  */
 
-const BASE_URL = 'https://mcp.absmartly.com';
+import { workerUrl } from './gate.js';
+
+// The Worker under test: the runner's fresh `wrangler dev` (MCP_WORKER_URL),
+// not production, which only ever shows the previous release.
+const BASE_URL = workerUrl();
 
 async function fetchWithTimeout(url, options = {}, timeout = 10000) {
   const controller = new AbortController();
@@ -88,19 +92,13 @@ export default async function runAuthenticationTests() {
     const endpoints = ['/health', '/mcp', '/sse'];
     
     for (const endpoint of endpoints) {
-      try {
-        const response = await fetchWithTimeout(`${BASE_URL}${endpoint}`, {
-          method: 'OPTIONS'
-        });
-        
-        // Check if CORS headers are present or if endpoint responds appropriately
-        const corsHeader = response.headers.get('Access-Control-Allow-Origin');
-        if (endpoint === '/health') {
-          assertTrue(corsHeader === '*', `Health endpoint should have CORS: ${corsHeader}`);
-        }
-      } catch (error) {
-        // Some endpoints might not support OPTIONS, which is ok
-        console.log(`OPTIONS not supported for ${endpoint}, skipping CORS test`);
+      const response = await fetchWithTimeout(`${BASE_URL}${endpoint}`, {
+        method: 'OPTIONS'
+      });
+
+      const corsHeader = response.headers.get('Access-Control-Allow-Origin');
+      if (endpoint === '/health') {
+        assertTrue(corsHeader === '*', `Health endpoint should have CORS: ${corsHeader}`);
       }
     }
     

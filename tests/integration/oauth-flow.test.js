@@ -1,3 +1,4 @@
+import { skipScenario } from './gate.js';
 /**
  * OAuth Flow End-to-End Integration Tests
  * 
@@ -211,7 +212,7 @@ async function testMcpOAuthAuth(accessToken) {
   });
   
   if (response.status === 404) {
-    console.log('⚠ MCP server not running, skipping MCP OAuth test');
+    skipScenario('MCP OAuth endpoint returned 404');
     return;
   }
   

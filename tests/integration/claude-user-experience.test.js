@@ -19,6 +19,7 @@ import { execFileSync } from 'child_process';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { skipScenario, skipSuite, workerUrl } from './gate.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CLAUDE_TESTS_DIR = join(__dirname, 'claude-tests');
@@ -27,9 +28,8 @@ const MCP_CONFIG_PATH = join(CLAUDE_TESTS_DIR, 'mcp-config.json');
 const SHOW_RESPONSES = process.argv.includes('--show-responses');
 const LIVE_MODE = process.argv.includes('--live');
 
-const LOCAL_MCP_PORT = 8787;
 const LIVE_MCP_URL = 'https://mcp.absmartly.com/sse';
-const LOCAL_MCP_URL = `http://127.0.0.1:${LOCAL_MCP_PORT}/sse`;
+const LOCAL_MCP_URL = `${workerUrl()}/sse`;
 const MCP_URL = LIVE_MODE ? LIVE_MCP_URL : LOCAL_MCP_URL;
 const CLAUDE_TIMEOUT_MS = 120_000;
 const LIFECYCLE_TIMEOUT_MS = 300_000;
@@ -272,8 +272,7 @@ async function isLocalMcpReachable() {
 
 async function run() {
   if (!(await isLocalMcpReachable())) {
-    console.log(`\n  Skipped: local MCP not reachable at ${MCP_URL}. Start wrangler dev or pass --live.`);
-    return { success: true, message: 'Skipped: local MCP not reachable', testCount: 0, details: [] };
+    return skipSuite(`local MCP not reachable at ${MCP_URL}; start wrangler dev or pass --live`);
   }
 
   let passed = 0;
@@ -577,7 +576,7 @@ Tell me the experiment ID.`,
       output.trim() === ''
     );
     if (backendDegraded) {
-      console.log(`\n    (skip: feature-flag create returned empty/HTTP 500 — known intermittent on test-1)`);
+      skipScenario('feature-flag create returned empty/HTTP 500');
       process.stdout.write('    ');
       state.flagSkipped = true;
       return result;
@@ -598,7 +597,7 @@ Tell me the experiment ID.`,
 
   await test('user moves feature flag through lifecycle to running', () => {
     if (state.flagSkipped) {
-      console.log(`\n    (skip: feature flag create was skipped)`);
+      skipScenario('feature flag create was skipped');
       process.stdout.write('    ');
       return;
     }
@@ -616,7 +615,7 @@ Tell me the experiment ID.`,
 
   await test('user stops and archives the feature flag', () => {
     if (state.flagSkipped) {
-      console.log(`\n    (skip: feature flag create was skipped)`);
+      skipScenario('feature flag create was skipped');
       process.stdout.write('    ');
       return;
     }
@@ -686,7 +685,7 @@ When done, tell me the experiment ID and final state.`,
 
   await test('user cleans up the full-on experiment', () => {
     if (!state.advId) {
-      console.log('\n    (skipping — no experiment ID from previous test)');
+      skipScenario('no experiment ID from previous test');
       return { ok: true, output: 'skipped', toolResults: [], toolCalls: [] };
     }
     const result = runClaude(

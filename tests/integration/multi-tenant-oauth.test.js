@@ -1,3 +1,4 @@
+import { skipScenario } from './gate.js';
 /**
  * Multi-Tenant OAuth Integration Tests
  * 
@@ -92,7 +93,7 @@ async function testMcpInitialization(tenant) {
   });
   
   if (response.status === 404) {
-    console.log('⚠ MCP server not running, skipping test');
+    skipScenario('MCP initialization endpoint returned 404');
     return;
   }
   
