@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const TEST_OUT_DIR = '.test-dist/cjs';
 const WORKER_ONLY_PACKAGES = ['hono', '@cloudflare/workers-oauth-provider', 'agents', 'workers-mcp', 'dotenv'];
-const WORKER_ONLY_SOURCES = ['index.ts', 'absmartly-oauth-handler.ts', 'oauth-worker-guards.ts', 'session-provider.ts', 'resources.ts', 'dxt-bundle.ts', 'worker.ts'];
+const WORKER_ONLY_SOURCES = ['index.ts', 'absmartly-oauth-handler.ts', 'oauth-worker-guards.ts', 'session-provider.ts', 'api-key-auth.ts', 'resources.ts', 'dxt-bundle.ts', 'worker.ts'];
 const NODE_ENTRY_SOURCES = ['src/core.ts', 'src/oauth/index.ts'];
 const STDIO_BIN = 'bin/absmartly-mcp.mjs';
 const STDIO_BIN_ENTRY = 'dist/local-server.js';
