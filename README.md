@@ -561,6 +561,15 @@ Execute any ABsmartly command. Common commands are listed in the tool descriptio
 - `raw` (optional) — return full CommandResult with rows/detail/warnings/pagination
 - `limit` (optional) — max items for list operations (default: 20)
 
+**Parameter shape.** Each command documents its params with `get_command_docs`. IDs are named after the entity (`experimentId`, `goalId`, `keyId`, ...), and create/update fields go in a `data` object using the API's field names (e.g. `{ "data": { "first_name": "Ada" } }`). The server translates these to what each `@absmartly/cli` core function reads. Some notable shapes:
+
+- Access commands (`grant/revoke…AccessUser/Team` on experiments, goals and metrics) take a `role`: an asset role ID or name (e.g. `"Editor"`). Metrics use `assetRoleId`.
+- Datasource `testDatasource` / `introspectDatasource` / `validateDatasourceQuery` and `storageconfigs.testStorageConfig` take the saved config's ID. The backend uses the stored secrets, so they never pass through MCP. `testDatasource` also accepts unsaved edits in `config`.
+- Insights, `activity.listActivity` and `events.listEvents*` take their filters as top-level params. A `params` object holding the same fields is still accepted but deprecated.
+- `platformconfig.get/updatePlatformConfig` take `configKey`: the config's ID or name.
+
+Deprecated params (still accepted, not shown in docs) are kept for callers written against 2.0.x.
+
 **Destructive actions** (start, stop, archive, delete) require confirmation. The server returns a confirmation prompt; only after the user has explicitly confirmed should you call again with `confirmed: true` to proceed.
 
 **Experiment creation from templates** also requires confirmation. The first call to `createExperimentFromTemplate` returns a *preview* — the resolved API payload (with names mapped to IDs) plus any warnings — without creating the experiment. Show the preview to the user, and only after they have explicitly confirmed should you call again with `confirmed: true` to actually create.
@@ -656,7 +665,7 @@ The package has separate entry points, so a Node host does not install or load t
 | Import | What it is | Formats |
 |---|---|---|
 | `@absmartly/mcp` (alias `@absmartly/mcp/node-http`) | `createStreamableHttpHandler`, `FetchHttpClient`, `registerServer`/`setupTools`, the command catalog, `ApiClientLike`, manifest types | ESM + CommonJS |
-| `@absmartly/mcp/oauth` | OAuth policy primitives (redirect policy, PKCE, registration, CIMD, consent) | ESM + CommonJS |
+| `@absmartly/mcp/oauth` | OAuth policy primitives (redirect policy, PKCE, registration, CIMD, consent, endpoint parsing: `parseAbsmartlyEndpoint`, `tryParseAbsmartlyEndpoint`, `canonicalizeEndpoint`; `normalizeEndpoint` is deprecated and keeps its 2.0 behaviour) | ESM + CommonJS |
 | `@absmartly/mcp/endpoint-manifest.json` | Every backend endpoint each tool/command can call | JSON |
 | `@absmartly/mcp/worker` | The Cloudflare Worker (`default` fetch handler, `ABsmartlyMCP` Durable Object) | ESM |
 
@@ -720,7 +729,10 @@ npm run typecheck       # TypeScript type checking
 npm run smoke:worker    # Worker starts under wrangler dev and serves /health
 npm run test:e2e        # Gated e2e suite: fresh Worker + test-1 API, no skips allowed
 npm run verify:release  # Everything above; runs automatically on npm publish
+npx tsx scripts/audit-catalog-params.ts   # Compare every catalog command's params with its CLI core function
 ```
+
+`tests/unit/cli-catalog-core-params.test.ts` runs catalog commands through the real `@absmartly/cli` core over a fake HTTP client, and fails if the audit finds any catalog/core param mismatch.
 
 `test:e2e` needs `ABSMARTLY_API_KEY` and `ABSMARTLY_API_ENDPOINT` (test-1)
 and fails without them. See [tests/README.md](tests/README.md#release-gate).
@@ -771,6 +783,7 @@ src/
 - **Session isolation** — each connection has its own credentials
 - **OAuth protection** — API key sessions block OAuth discovery to prevent auth method confusion
 - **Destructive action confirmation** — start, stop, archive, and delete operations require explicit confirmation
+- **Requests stay under the API base** — `FetchHttpClient` only sends requests under the configured base's `/v1` (plus the root `/auth/current-user` paths), to the configured origin. It rejects dot segments (including `%2e`/`%2E` and multiply-encoded forms), backslashes, encoded separators (`%2f`, `%5c`) and control characters before the URL is built, so `fetch` never normalises a path like `/v1/../auth` out of the prefix. Redirects are not followed.
 - **API error surfacing** — validation errors from the API are returned with full detail for correction
 
 ## License

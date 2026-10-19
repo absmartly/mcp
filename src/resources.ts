@@ -10,6 +10,13 @@ import {
 } from '@absmartly/cli/api-client';
 import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { debug } from './config.js';
+import { isPositiveIntegerId, withPathIdGuard } from './path-id-guard.js';
+
+/** The {id} of a resource URI as a positive integer, or undefined ("-1", "0", "1.5", "1e400", " " are refused). */
+export function resourceId(raw: unknown): number | undefined {
+    const text = Array.isArray(raw) ? raw[0] : raw;
+    return typeof text === 'string' && isPositiveIntegerId(text) ? Number(text) : undefined;
+}
 import { DEFAULT_ABSMARTLY_ENDPOINT } from './shared.js';
 export class ABsmartlyResources {
     private resourcesRegistered: boolean = false;
@@ -340,8 +347,11 @@ export class ABsmartlyResources {
             );
         }
     }
+    // Resource reads reach the same APIClient path methods as commands, so
+    // they get the same guard.
     private getApiClient() {
-        return (this.mcpServer as any).apiClient;
+        const client = (this.mcpServer as any).apiClient;
+        return client ? withPathIdGuard(client) : client;
     }
 
     private getCachedEntities(key: string): any[] {
@@ -397,8 +407,8 @@ export class ABsmartlyResources {
             }),
             { description: "Fetch and summarize a specific experiment by ID" },
             async (uri, variables) => {
-                const id = Number(variables.id);
-                if (isNaN(id)) return this.errorResult(uri, "Invalid experiment ID");
+                const id = resourceId(variables.id);
+                if (id === undefined) return this.errorResult(uri, "Invalid experiment ID");
                 const client = this.getApiClient();
                 if (!client) return this.errorResult(uri, "API client not initialized");
                 try {
@@ -418,8 +428,8 @@ export class ABsmartlyResources {
             }),
             { description: "Fetch and summarize a specific metric by ID" },
             async (uri, variables) => {
-                const id = Number(variables.id);
-                if (isNaN(id)) return this.errorResult(uri, "Invalid metric ID");
+                const id = resourceId(variables.id);
+                if (id === undefined) return this.errorResult(uri, "Invalid metric ID");
                 const client = this.getApiClient();
                 if (!client) return this.errorResult(uri, "API client not initialized");
                 try {
@@ -439,8 +449,8 @@ export class ABsmartlyResources {
             }),
             { description: "Fetch and summarize a specific goal by ID" },
             async (uri, variables) => {
-                const id = Number(variables.id);
-                if (isNaN(id)) return this.errorResult(uri, "Invalid goal ID");
+                const id = resourceId(variables.id);
+                if (id === undefined) return this.errorResult(uri, "Invalid goal ID");
                 const client = this.getApiClient();
                 if (!client) return this.errorResult(uri, "API client not initialized");
                 try {
@@ -460,8 +470,8 @@ export class ABsmartlyResources {
             }),
             { description: "Fetch and summarize a specific team by ID" },
             async (uri, variables) => {
-                const id = Number(variables.id);
-                if (isNaN(id)) return this.errorResult(uri, "Invalid team ID");
+                const id = resourceId(variables.id);
+                if (id === undefined) return this.errorResult(uri, "Invalid team ID");
                 const client = this.getApiClient();
                 if (!client) return this.errorResult(uri, "API client not initialized");
                 try {
@@ -481,8 +491,8 @@ export class ABsmartlyResources {
             }),
             { description: "Fetch and summarize a specific user by ID" },
             async (uri, variables) => {
-                const id = Number(variables.id);
-                if (isNaN(id)) return this.errorResult(uri, "Invalid user ID");
+                const id = resourceId(variables.id);
+                if (id === undefined) return this.errorResult(uri, "Invalid user ID");
                 const client = this.getApiClient();
                 if (!client) return this.errorResult(uri, "API client not initialized");
                 try {
@@ -502,8 +512,8 @@ export class ABsmartlyResources {
             }),
             { description: "Fetch a specific segment by ID" },
             async (uri, variables) => {
-                const id = Number(variables.id);
-                if (isNaN(id)) return this.errorResult(uri, "Invalid segment ID");
+                const id = resourceId(variables.id);
+                if (id === undefined) return this.errorResult(uri, "Invalid segment ID");
                 const client = this.getApiClient();
                 if (!client) return this.errorResult(uri, "API client not initialized");
                 try {

@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { APIError } from '@absmartly/cli/api-client';
+import { APIClient, APIError } from '@absmartly/cli/api-client';
 import { FetchHttpClient, FetchNetworkError } from '../../src/fetch-adapter';
 
 const originalFetch = globalThis.fetch;
@@ -257,6 +257,285 @@ export default async function runTests() {
     try { await client.request({ method: 'GET', url: 'https://attacker.example/steal' }); }
     catch (e: any) { threw = e.message.includes('other origins'); }
     ok(threw && !fetched, 'URL: cross-origin absolute URL rejected, credential never sent');
+    restoreFetch();
+  });
+
+  // Raw-request path hardening: nothing may leave /v1 (or the root auth
+  // paths), however the escape is encoded, and the check runs before fetch.
+  const ESCAPING_PATHS = [
+    '/../auth/current-user',
+    '/experiments/../../auth/current-user',
+    '/%2e%2e/auth/current-user',
+    '/%2E%2E/auth/current-user',
+    '/.%2e/auth/current-user',
+    '/%2e./auth/current-user',
+    '/%252e%252e/auth/current-user',
+    '/%25252e%25252e/auth/current-user',
+    '/..\\auth/current-user',
+    '/\\..\\auth/current-user',
+    '/experiments%2f..%2f..%2fauth',
+    '/experiments%2F..',
+    '/experiments%5c..%5cauth',
+    '//evil.example/steal',
+    '/experiments//1',
+    'experiments',
+    '/experiments\u0000',
+    '/experiments#frag',
+    '/experiments#',
+    '/.. /auth/current-user',
+    '/experiments/.. /..%20/auth/current-user',
+    '/%2e%2e%ff/auth/current-user',
+    '/%ff%2e%2e/auth/current-user',
+    '/x%EF%BC%8F..%EF%BC%8F..%EF%BC%8Fauth',
+    '/x\uFF0F..\uFF0F..\uFF0Fauth',
+    '/x%EF%BC%BC..%EF%BC%BCauth',
+    '/..%3f/auth/current-user',
+    '/..%23/auth/current-user',
+    '/experiments;jsessionid=1',
+    '/goals/50%25off',
+    '/goals/50%off',
+    '/experiments/%41%42%3B',
+    '/experiments\t/../../auth',
+    '/experiments/..;/auth/current-user',
+    '/experiments/%2e%2e;x/admin',
+    '/\uFF0E\uFF0E/auth/current-user',
+    '/%EF%BC%8E%EF%BC%8E/auth/current-user',
+    '/\u2024\u2024/auth/current-user',
+  ];
+  for (const path of ESCAPING_PATHS) {
+    await asyncTest(`Path hardening: ${JSON.stringify(path)} rejected before fetch`, async () => {
+      const client = new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'jwt' });
+      let fetched = false;
+      mockFetch(async () => { fetched = true; return new Response('{}'); });
+      let error = '';
+      try { await client.request({ method: 'GET', url: path }); }
+      catch (e: any) { error = e.message; }
+      ok(error.startsWith('Invalid API path') || error.includes('not permitted'), `Path hardening: ${JSON.stringify(path)} rejected`, `got "${error}"`);
+      ok(!fetched, `Path hardening: ${JSON.stringify(path)} never reaches fetch`);
+      restoreFetch();
+    });
+  }
+
+  const ESCAPING_ABSOLUTE_URLS = [
+    'https://example.com/v1/%2e%2e/admin',
+    'https://example.com/admin',
+    'https://example.com/auth/other',
+    'https://example.com/auth/current-user/../../admin',
+    'https://example.com/v1\\..\\admin',
+    'https://example.com\\v1\\..%2f..%2fadmin/v1/x',
+    'https://example.com/v1/%2e%2e%2fadmin',
+    'https://example.com/v1/x?y=1#frag',
+    'https://user:pw@example.com/v1/x',
+    'https://example.com/v1/x#',
+    'https://example.com/auth/current-user/other',
+    'https://example.com/auth/current-user/api_keys/abc',
+    'https://example.com/v1/../../admin',
+    'https://example.com/v1/..;/admin',
+  ];
+  for (const url of ESCAPING_ABSOLUTE_URLS) {
+    await asyncTest(`Path hardening: same-origin ${JSON.stringify(url)} rejected`, async () => {
+      const client = new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'jwt' });
+      let fetched = false;
+      mockFetch(async () => { fetched = true; return new Response('{}'); });
+      let threw = false;
+      try { await client.request({ method: 'GET', url }); } catch { threw = true; }
+      ok(threw && !fetched, `Path hardening: same-origin ${JSON.stringify(url)} rejected before fetch`);
+      restoreFetch();
+    });
+  }
+
+  await asyncTest('Path hardening: ordinary paths, query params and root auth paths still work', async () => {
+    const client = new FetchHttpClient('https://example.com/base', { authToken: 'tok', authType: 'jwt' });
+    const urls: string[] = [];
+    mockFetch(async (url) => { urls.push(String(url)); return new Response('{}', { headers: { 'content-type': 'application/json' } }); });
+    await client.request({ method: 'GET', url: '/experiments/42', params: { q: '../x' } });
+    await client.request({ method: 'GET', url: '/experiments/' });
+    await client.request({ method: 'GET', url: '/experiments?state=running', params: { items: 5 } });
+    await client.request({ method: 'GET', url: 'https://example.com/base/auth/current-user/api_keys/7' });
+    assertEquals(urls, [
+      'https://example.com/base/v1/experiments/42?q=..%2Fx',
+      'https://example.com/base/v1/experiments/',
+      'https://example.com/base/v1/experiments?state=running&items=5',
+      'https://example.com/base/auth/current-user/api_keys/7',
+    ], 'Path hardening: allowed URLs are unchanged');
+    restoreFetch();
+  });
+
+  // Dot segments that would resolve INSIDE /v1 still reach a different
+  // resource than the one a typed command names, so they are rejected too.
+  for (const path of ['/./experiments', '/experiments/%2e', '/experiments/x/../1', '/segments/../users/5', '/goals/..%2Fusers', '/goals/%2E%2E/users/5']) {
+    await asyncTest(`Path hardening: in-prefix dot segment ${JSON.stringify(path)} rejected`, async () => {
+      const client = new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'jwt' });
+      let fetched = false;
+      mockFetch(async () => { fetched = true; return new Response('{}'); });
+      let threw = false;
+      try { await client.request({ method: 'DELETE', url: path }); } catch { threw = true; }
+      ok(threw && !fetched, `Path hardening: in-prefix dot segment ${JSON.stringify(path)} rejected before fetch`);
+      restoreFetch();
+    });
+  }
+
+  await asyncTest('Path hardening: a missing interpolated value (undefined/null/NaN segment) never reaches fetch', async () => {
+    const client = new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'jwt' });
+    let fetched = false;
+    mockFetch(async () => { fetched = true; return new Response('{}'); });
+    let threw = 0;
+    for (const path of ['/goals/undefined', '/configs/null', '/teams/NaN/members']) {
+      try { await client.request({ method: 'GET', url: path }); } catch { threw++; }
+    }
+    ok(threw === 3 && !fetched, 'Path hardening: undefined/null/NaN segments rejected before fetch', `threw ${threw}/3`);
+    restoreFetch();
+  });
+
+  await asyncTest('Path hardening: a decoded query (from rawRequest) is re-encoded, not rejected', async () => {
+    const client = new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'jwt' });
+    const urls: string[] = [];
+    mockFetch(async (url) => { urls.push(String(url)); return new Response('{}', { headers: { 'content-type': 'application/json' } }); });
+    await client.request({ method: 'GET', url: '/experiments?search=a b' });
+    await client.request({ method: 'GET', url: '/experiments?search=café&x=1' });
+    const api = new APIClient(client);
+    await api.rawRequest('/experiments?search=a%20b');
+    await api.rawRequest('/experiments?search=caf%C3%A9');
+    assertEquals(urls, [
+      'https://example.com/v1/experiments?search=a+b',
+      'https://example.com/v1/experiments?search=caf%C3%A9&x=1',
+      'https://example.com/v1/experiments?search=a+b',
+      'https://example.com/v1/experiments?search=caf%C3%A9',
+    ], 'Path hardening: queries with spaces and non-ASCII are re-encoded');
+    restoreFetch();
+  });
+
+  await asyncTest('Base path with "@": root auth calls still work (userinfo is checked on the parsed URL)', async () => {
+    const http = new FetchHttpClient('https://h.example/@team', { authToken: 'tok', authType: 'jwt' });
+    const urls: string[] = [];
+    mockFetch(async (url) => { urls.push(String(url)); return new Response(JSON.stringify({ user: { id: 1 }, user_api_key: { id: 1 }, user_api_keys: [] }), { headers: { 'content-type': 'application/json' } }); });
+    const api = new APIClient(http);
+    await api.getCurrentUser();
+    await api.getUserApiKey(7 as any);
+    await http.request({ method: 'GET', url: '/experiments' });
+    assertEquals(urls, [
+      'https://h.example/@team/auth/current-user',
+      'https://h.example/@team/auth/current-user/api_keys/7',
+      'https://h.example/@team/v1/experiments',
+    ], 'Base path with "@": root auth and /v1 requests keep the base path');
+    let threw = false;
+    try { await http.request({ method: 'GET', url: 'https://x@h.example/@team/auth/current-user' }); } catch { threw = true; }
+    ok(threw, 'Base path with "@": an absolute URL with real userinfo is still rejected');
+    restoreFetch();
+  });
+
+  await asyncTest('Query: a literal "#" in a decoded value is kept; "\\" and control characters are rejected', async () => {
+    const client = new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'jwt' });
+    const urls: string[] = [];
+    mockFetch(async (url) => { urls.push(String(url)); return new Response('{}', { headers: { 'content-type': 'application/json' } }); });
+    await client.request({ method: 'GET', url: '/experiments?search=#1' });
+    await new APIClient(client).rawRequest('/experiments?search=%231');
+    assertEquals(urls, [
+      'https://example.com/v1/experiments?search=%231',
+      'https://example.com/v1/experiments?search=%231',
+    ], 'Query: "#" round-trips as %23');
+    for (const bad of ['/experiments?x=a\\b', '/experiments?x=a\u0000b', '/experiments?x=a\nb']) {
+      let threw = false;
+      try { await client.request({ method: 'GET', url: bad }); } catch { threw = true; }
+      ok(threw, `Query: ${JSON.stringify(bad)} rejected`);
+    }
+    restoreFetch();
+  });
+
+  await asyncTest('Malformed absolute URLs give "Invalid API path", not a URL TypeError', async () => {
+    const client = new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'jwt' });
+    for (const bad of ['https://', 'https://:80/auth/current-user', 'https://[::1/auth/current-user']) {
+      let message = '';
+      try { await client.request({ method: 'GET', url: bad }); } catch (e: any) { message = e.message; }
+      ok(message.startsWith('Invalid API path'), `Malformed absolute ${JSON.stringify(bad)} gives Invalid API path`, message);
+    }
+  });
+
+  await asyncTest('Base path with characters URL encodes ({, ", `) still reaches the root auth paths', async () => {
+    const urls: string[] = [];
+    mockFetch(async (url) => { urls.push(String(url)); return new Response(JSON.stringify({ user: { id: 1 } }), { headers: { 'content-type': 'application/json' } }); });
+    for (const base of ['https://host/a{b}/v1', 'https://host/a"b', 'https://host/a`b', 'https://host/a|b']) {
+      await new APIClient(new FetchHttpClient(base, { authToken: 't', authType: 'jwt' })).getCurrentUser();
+    }
+    assertEquals(urls, [
+      'https://host/a%7Bb%7D/auth/current-user',
+      'https://host/a%22b/auth/current-user',
+      'https://host/a%60b/auth/current-user',
+      'https://host/a|b/auth/current-user',
+    ], 'Base path encoding: the parsed (encoded) base path is used throughout');
+    restoreFetch();
+  });
+
+  await asyncTest('Base URL: parsed first; /v1 stripped; scheme defaults to https', async () => {
+    for (const [input, expected] of [
+      ['https://example.com/v1', 'https://example.com/v1'],
+      ['https://example.com/V1/', 'https://example.com/v1'],
+      ['  https://example.com/tenant/v1/  ', 'https://example.com/tenant/v1'],
+      ['https://example.com/tenant', 'https://example.com/tenant/v1'],
+      ['sandbox.absmartly.com', 'https://sandbox.absmartly.com/v1'],
+      ['sandbox.absmartly.com/v1', 'https://sandbox.absmartly.com/v1'],
+      ['https://example.com//tenant//', 'https://example.com/tenant/v1'],
+      ['https://example.com/a;b/%7Eops', 'https://example.com/a;b/%7Eops/v1'],
+      ['https://corp.example/absmartly/v2', 'https://corp.example/absmartly/v2/v1'],
+      ['https://corp.example/absmartly/v2/v1', 'https://corp.example/absmartly/v2/v1'],
+    ]) {
+      assertEquals(new FetchHttpClient(input, { authToken: 't', authType: 'jwt' }).getBaseUrl(), expected, `Base URL: ${input}`);
+    }
+    for (const bad of ['https://example.com/?x=1', 'https://example.com/#f', 'https://u:p@example.com', 'ftp://example.com', 'https://',
+      'https://example.com/a%2f..%2fadmin', 'https://example.com/%2e%2e/admin', 'https://example.com/a%5cb', 'https://example.com/.%2E/x']) {
+      let error: any;
+      try { new FetchHttpClient(bad, { authToken: 't', authType: 'jwt' }); } catch (e) { error = e; }
+      ok(error?.name === 'InvalidEndpointError', `Base URL: ${bad} rejected with InvalidEndpointError`, String(error));
+    }
+  });
+
+  // Property test: strings over the dangerous alphabet must either be rejected
+  // before fetch, or be fetched at a same-origin URL under the allowed prefix.
+  await asyncTest('Path hardening: random dangerous strings never leave the allowed prefix', async () => {
+    const ALPHABET = ['.', '..', '/', '\\', '%', '%2e', '%2E', '%2f', '%2F', '%5c', '%25', '%3f', '%23', '%3b', '%00', '%ff', '%EF%BC%8E',
+      ';', '?', '#', ' ', '\t', '\n', '@', ':', 'a', 'v1', 'auth', 'current-user', 'api_keys', '1', '\uFF0E', '\uFF0F', '\uFF3C', '\u2024', '~', '-', '_'];
+    let seed = 0x5eed;
+    const rand = (n: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+    const bases = ['https://example.com', 'https://example.com/tenant'];
+    let leaks: string[] = [];
+    let fetchedCount = 0;
+    for (let i = 0; i < 6000; i++) {
+      const base = bases[i % 2];
+      const prefix = new URL(base).pathname.replace(/\/$/, '');
+      const body = Array.from({ length: 1 + rand(10) }, () => ALPHABET[rand(ALPHABET.length)]).join('');
+      const candidates = [`/${body}`, `${base}/${body}`, `${base}/v1/${body}`, `${base}/auth/current-user/${body}`, `/experiments/${body}`];
+      for (const requested of candidates) {
+        const client = new FetchHttpClient(base, { authToken: 't', authType: 'jwt' });
+        let fetched = '';
+        mockFetch(async (url) => { fetched = String(url); return new Response('{}', { headers: { 'content-type': 'application/json' } }); });
+        try { await client.request({ method: 'GET', url: requested }); } catch { /* rejected */ }
+        if (!fetched) continue;
+        fetchedCount++;
+        const u = new URL(fetched);
+        const auth = `${prefix}/auth/current-user`;
+        const ok = u.origin === 'https://example.com' && !u.username && !u.password && !u.hash
+          && (u.pathname.startsWith(`${prefix}/v1/`) || u.pathname === auth || /^\/api_keys(\/[0-9]+)?$/.test(u.pathname.slice(auth.length)) && u.pathname.startsWith(`${auth}/`))
+          && u.pathname.split('/').every((seg) => !/^(\.|\.\.|%2e|%2e%2e|\.%2e|%2e\.)$/i.test(seg) && /^[A-Za-z0-9._~%-]*$/.test(seg));
+        // A path with a dot segment, in any encoding, never reaches fetch, even one
+        // that would resolve inside the prefix.
+        const hasDotSegment = requested.split('?')[0].split('/').some((seg) => /^(?:\.|%2e){1,2}$/i.test(seg));
+        if (!ok || hasDotSegment) leaks.push(`${requested} -> ${fetched}`);
+      }
+    }
+    restoreFetch();
+    ok(leaks.length === 0, 'Path hardening: no random string leaves the allowed prefix', leaks.slice(0, 5).join(' | '));
+    ok(fetchedCount > 100, `Path hardening: the property test exercised accepted URLs too (${fetchedCount})`);
+  });
+
+  await asyncTest('Path hardening: APIClient.rawRequest cannot escape /v1 through the MCP client', async () => {
+    const client = new APIClient(new FetchHttpClient('https://example.com', { authToken: 'tok', authType: 'jwt' }));
+    let fetched = false;
+    mockFetch(async () => { fetched = true; return new Response('{}'); });
+    let threw = 0;
+    for (const path of ['/v1/../auth/current-user', '/%2e%2e/auth/current-user', '/..%5cauth', '/%252e%252e/auth']) {
+      try { await client.rawRequest(path); } catch { threw++; }
+    }
+    ok(threw === 4 && !fetched, 'Path hardening: rawRequest escapes rejected before fetch', `threw ${threw}/4, fetched=${fetched}`);
     restoreFetch();
   });
 

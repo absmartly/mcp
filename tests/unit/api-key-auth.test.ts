@@ -136,6 +136,44 @@ export default async function run() {
         assert.strictEqual(served[0].props.absmartly_api_key, API_KEY);
       });
     });
+
+    await asyncTest(`${transport}: a host-less endpoint is refused with 400 before any request`, async () => {
+      let fetched = 0;
+      const originalFetch = globalThis.fetch;
+      const originalError = console.error;
+      globalThis.fetch = (async () => { fetched++; return new Response('{}'); }) as typeof fetch;
+      console.error = () => {};
+      try {
+        const { route, served } = transportRoute(transport);
+        const request = new Request(`${ORIGIN}${transport}`, { headers: { Authorization: API_KEY } });
+        const response = await handleApiKeyTransportRequest(request, {}, {}, route, API_KEY, 'http:///x');
+        assert.strictEqual(response.status, 400);
+        assert.strictEqual(fetched, 0, 'nothing is fetched for an invalid endpoint');
+        assert.strictEqual(served.length, 0);
+      } finally {
+        globalThis.fetch = originalFetch;
+        console.error = originalError;
+      }
+    });
+
+    await asyncTest(`${transport}: a base path ending in /v1 (/tenant/v1/v1) keeps that segment and is stored as its apiUrl`, async () => {
+      const urls: string[] = [];
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async (input: RequestInfo | URL) => {
+        urls.push(String(input));
+        return new Response(JSON.stringify({ user: { id: 7, email: 'a@b.c' } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }) as typeof fetch;
+      try {
+        const { route, served } = transportRoute(transport);
+        const request = new Request(`${ORIGIN}${transport}`, { headers: { Authorization: API_KEY } });
+        const response = await handleApiKeyTransportRequest(request, {}, {}, route, API_KEY, `${BACKEND}/tenant/v1/v1`);
+        assert.strictEqual(response.status, 200);
+        assert.deepStrictEqual(urls, [`${BACKEND}/tenant/v1/auth/current-user`], 'verification keeps the /tenant/v1 base path');
+        assert.strictEqual(served[0].props.absmartly_endpoint, `${BACKEND}/tenant/v1/v1`, 'the stored endpoint is the apiUrl');
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
   }
 
   return {

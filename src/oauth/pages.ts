@@ -19,13 +19,17 @@ export type ConsentPageOptions = {
   // Extra warning for multi-tenant agent platforms: any organization can set up a
   // connector on the same host.
   sharedCallbackRedirect?: boolean;
+  // A notice shown above the request, e.g. that a supplied endpoint was ignored.
+  notice?: string;
 };
 
 function describeScope(scope: string): string {
   return SCOPE_DESCRIPTIONS[scope] || scope;
 }
 
-export function renderEndpointForm(formAction: string, transactionId: string): string {
+/** The endpoint form; `error` (e.g. an invalid URL that was entered) is shown above the field. */
+export function renderEndpointForm(formAction: string, transactionId: string, error?: string): string {
+  const errorHtml = error ? `<p class="warning" role="alert">${escapeHtml(error)}</p>` : "";
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -41,12 +45,14 @@ export function renderEndpointForm(formAction: string, transactionId: string): s
     button { width: 100%; padding: 12px; background: #4f46e5; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 16px; }
     button:hover { background: #4338ca; }
     .hint { font-size: 12px; color: #999; margin-top: 6px; }
+    .warning { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 12px; color: #78350f; word-break: break-word; }
   </style>
 </head>
 <body>
   <div class="card">
     <h1>Connect to ABsmartly</h1>
     <p>Enter your ABsmartly instance URL to continue the authorization flow.</p>
+    ${errorHtml}
     <form method="POST" action="${escapeHtml(formAction)}" id="endpoint-form">
       <input type="hidden" name="action" value="set_endpoint">
       <input type="hidden" name="transaction_id" value="${escapeHtml(transactionId)}">
@@ -85,6 +91,7 @@ export function renderConsentPage(options: ConsentPageOptions): string {
   const sharedCallbackWarning = options.sharedCallbackRedirect
     ? `<p class="warning">${escapeHtml(options.redirectTarget)} hosts agents and connectors for many organizations, so this address does not show whose connector will receive the access. Only continue if you or your team set up this connection and you started it just now.</p>`
     : "";
+  const noticeHtml = options.notice ? `<p class="warning" role="status">${escapeHtml(options.notice)}</p>` : "";
   const formAction = escapeHtml(options.formAction);
   const transactionId = escapeHtml(options.transactionId);
   return `<!DOCTYPE html>
@@ -113,6 +120,7 @@ export function renderConsentPage(options: ConsentPageOptions): string {
     <h1>Authorize Access</h1>
     <p><span class="client-name">${escapeHtml(options.clientName)}</span> is requesting access to your ABsmartly account.</p>
     <p class="warning">After you approve, access to ${account} will be sent to <strong>${escapeHtml(options.redirectTarget)}</strong>. Only continue if you started this connection yourself and you trust that site.</p>
+    ${noticeHtml}
     ${loopbackWarning}
     ${sharedCallbackWarning}
     <p>This application will be able to:</p>

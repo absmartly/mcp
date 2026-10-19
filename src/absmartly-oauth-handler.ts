@@ -17,6 +17,11 @@ import {
   type ConsentOptions,
   type ConsentOutcome,
   type OAuthStateStore,
+  HTTP_STATUS_BAD_REQUEST,
+  firstValidEndpoint,
+  MESSAGE_INVALID_ENDPOINT,
+  type AbsmartlyEndpoint,
+  tryParseAbsmartlyEndpoint,
 } from './oauth/index.js';
 
 type OAuthBindings = Env & { OAUTH_PROVIDER: OAuthHelpers };
@@ -28,7 +33,6 @@ const HOST_COOKIE_PREFIX = 'host';
 // One cookie per upstream login, named after its state token, so parallel logins in the
 // same browser don't overwrite each other's binding.
 const CALLBACK_COOKIE_NAME_PREFIX = 'absmartly-oauth-cb-';
-const HTTP_STATUS_BAD_REQUEST = 400;
 const ENDPOINT_QUERY_PARAM = 'absmartly-endpoint';
 const ENDPOINT_HEADER = 'x-absmartly-endpoint';
 // 0.10.x defaults completeAuthorization to revoking every other grant for the same
@@ -69,10 +73,11 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
       rememberApprovals: true,
       // Runs before the transaction is discarded, so a failed write leaves the
       // transaction (and its binding cookie) in place for the client to retry.
-      onApprove: async (authRequest, endpoint) => {
+      onApprove: async (authRequest, _endpoint, parsed) => {
+        // apiUrl, not the base URL: it is parsed again when read back.
         await c.env.OAUTH_KV.put(
           `oauth_endpoint:client:${authRequest.clientId}`,
-          endpoint as string,
+          (parsed as AbsmartlyEndpoint).apiUrl,
           { expirationTtl: OAUTH_STATE_TTL_SECONDS }
         );
       },
@@ -81,8 +86,7 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
 
   private async finishConsent(c: OAuthContext, outcome: ConsentOutcome<AbsmartlyAuthRequest>): Promise<Response> {
     if (outcome.type === 'respond') return toFetchResponse(outcome.response);
-    const endpoint = outcome.endpoint as string;
-    const response = await this.redirectToAbsmartlyOAuth(c, outcome.authRequest, endpoint);
+    const response = await this.redirectToAbsmartlyOAuth(c, outcome.authRequest, outcome.absmartlyEndpoint as AbsmartlyEndpoint);
     for (const cookie of outcome.setCookies) response.headers.append('Set-Cookie', cookie);
     return response;
   }
@@ -105,15 +109,29 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
         return c.text('Invalid authorization request', HTTP_STATUS_BAD_REQUEST);
       }
 
-      let absmartlyEndpoint = this.extractEndpointFromResource(authRequest.resource) ||
-                              url.searchParams.get(ENDPOINT_QUERY_PARAM) ||
-                              c.req.header(ENDPOINT_HEADER) || null;
-      if (!absmartlyEndpoint) {
-        absmartlyEndpoint = await safeKvGet(c.env.OAUTH_KV, `oauth_endpoint:client:${authRequest.clientId}`);
-      }
+      // The first request source that parses wins; an invalid one is reported
+      // (as rejected) without hiding a valid lower-priority source.
+      const requested = firstValidEndpoint([
+        this.extractEndpointFromResource(authRequest.resource),
+        url.searchParams.get(ENDPOINT_QUERY_PARAM),
+        c.req.header(ENDPOINT_HEADER),
+      ]);
+      // Whenever a higher-priority request source was rejected, it is passed
+      // as the explicit endpoint, with the substitute (a valid lower-priority
+      // source, or else the stored mapping) as the fallback: consent then
+      // shows the "was ignored" notice and does not auto-approve.
+      // apiUrl: beginAuthorization parses it again, and a base URL ending in
+      // "/v1" would lose that segment (https://h/tenant/v1 -> https://h/tenant).
+      const valid = requested.endpoint?.apiUrl ?? null;
+      const substitute = valid ?? await safeKvGet(c.env.OAUTH_KV, `oauth_endpoint:client:${authRequest.clientId}`);
 
       const outcome = await beginAuthorization(
-        { authRequest, endpoint: absmartlyEndpoint, cookieHeader: c.req.header('Cookie') },
+        {
+          authRequest,
+          endpoint: requested.rejected ?? valid,
+          fallbackEndpoint: requested.rejected || !valid ? substitute : null,
+          cookieHeader: c.req.header('Cookie'),
+        },
         this.consentOptions(c),
       );
       return this.finishConsent(c, outcome);
@@ -197,7 +215,9 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
         debug('No absmartlyEndpoint in stored state');
         return c.text('Missing ABsmartly endpoint in OAuth state', 400);
       }
-      const cleanEndpoint = absmartlyEndpoint.replace(/\/+$/, '');
+      const parsedEndpoint = tryParseAbsmartlyEndpoint(absmartlyEndpoint);
+      if (!parsedEndpoint) return c.text(MESSAGE_INVALID_ENDPOINT, HTTP_STATUS_BAD_REQUEST);
+      const cleanEndpoint = parsedEndpoint.baseUrl;
       const tokenUrl = `${cleanEndpoint}/auth/oauth/token`;
       const tokenBody = new URLSearchParams({
         grant_type: 'authorization_code',
@@ -271,7 +291,7 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
 
       debug('Extracted user details:', { email: finalEmail, name: finalName, userId: finalUserId });
 
-      const apiEndpoint = cleanEndpoint.endsWith('/v1') ? cleanEndpoint : `${cleanEndpoint}/v1`;
+      const apiEndpoint = parsedEndpoint.apiUrl;
 
       let result;
       try {
@@ -299,19 +319,20 @@ export class ABsmartlyOAuthHandler extends Hono<{ Bindings: OAuthBindings }> {
     });
   }
 
-  private async redirectToAbsmartlyOAuth(c: OAuthContext, authRequest: AbsmartlyAuthRequest, absmartlyEndpoint: string) {
+  private async redirectToAbsmartlyOAuth(c: OAuthContext, authRequest: AbsmartlyAuthRequest, endpoint: AbsmartlyEndpoint) {
     const url = new URL(c.req.url);
     const env = c.env;
 
-    debug(`ABsmartly endpoint for OAuth redirect: ${absmartlyEndpoint}`);
+    debug(`ABsmartly endpoint for OAuth redirect: ${endpoint.baseUrl}`);
 
-    const cleanEndpoint = absmartlyEndpoint.replace(/\/+$/, '');
+    const cleanEndpoint = endpoint.baseUrl;
     const { codeVerifier, codeChallenge } = await generatePkcePair();
     const stateToken = crypto.randomUUID();
     const browserBinding = crypto.randomUUID();
     const stateData = {
       authRequest,
-      absmartlyEndpoint: cleanEndpoint,
+      // apiUrl: the callback parses it again (see beginAuthorization).
+      absmartlyEndpoint: endpoint.apiUrl,
       codeVerifier,
       browserBinding,
     };

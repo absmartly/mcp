@@ -6,7 +6,7 @@ import { z } from "zod";
 import { ABsmartlyResources } from "./resources.js";
 import { ABsmartlyOAuthHandler } from "./absmartly-oauth-handler.js";
 import { SCOPE_MCP_ACCESS, SUPPORTED_SCOPES, validateClientRegistration } from "./oauth/index.js";
-import { checkBackendSessionOnRefresh, normalizeResourceParameter, oauthBearerChallenge, rejectUntrustedCimdClient } from "./oauth-worker-guards.js";
+import { checkBackendSessionOnRefresh, normalizeResourceParameter, oauthBearerChallenge, rejectUntrustedCimdClient, withValidStoredEndpoint } from "./oauth-worker-guards.js";
 import { Env } from "./types.js";
 import { debug } from "./config.js";
 import { MCP_VERSION } from "./version.js";
@@ -14,6 +14,7 @@ import { DXT_BUNDLE_BASE64, DXT_BUNDLE_SHA } from "./dxt-bundle.js";
 import { APIClient } from "@absmartly/cli/api-client";
 import type { CustomSectionField } from "@absmartly/cli/api-client";
 import { FetchHttpClient } from "./fetch-adapter.js";
+import { withPathIdGuard } from "./path-id-guard.js";
 import { handleApiKeyTransportRequest, type ApiKeyTransportRoute } from "./api-key-auth.js";
 import { setupTools } from "./tools.js";
 import type { ToolContext } from "./tools.js";
@@ -29,7 +30,6 @@ import {
     OAUTH_STATE_TTL_SECONDS,
     SSE_PATH,
     MCP_PATH,
-    normalizeBaseUrl,
     extractEndpointFromPath,
     handleOAuthDiscovery,
     API_KEY_SESSION_KV_PREFIX,
@@ -37,6 +37,7 @@ import {
     safeKvPut,
     safeKvGet,
 } from "./shared.js";
+import { firstValidEndpoint, tryParseAbsmartlyEndpoint } from "./oauth/index.js";
 
 const ENTITY_LIST_PAGE_SIZE = 100;
 const ENTITY_LIST_FIRST_PAGE = 1;
@@ -148,11 +149,14 @@ export class ABsmartlyMCP extends McpAgent<Env, Record<string, never>, ABsmartly
             throw new Error("No valid authentication token available");
         }
 
+        // OAuth grants with an endpoint that no longer parses are turned away
+        // before reaching here (withValidStoredEndpoint), so the client
+        // re-authorizes; anything else still fails with InvalidEndpointError.
         const fetchHttpClient = new FetchHttpClient(
             this.props.absmartly_endpoint,
             { authToken, authType }
         );
-        this.apiClient = new APIClient(fetchHttpClient);
+        this.apiClient = withPathIdGuard(new APIClient(fetchHttpClient));
 
         debug("API client initialized successfully");
     }
@@ -554,8 +558,8 @@ const oauthHandler = new ABsmartlyOAuthHandler();
 
 const oauthProvider = new OAuthProvider({
     apiHandlers: {
-        [SSE_PATH]: sseMcpHandler,
-        [MCP_PATH]: streamableMcpHandler
+        [SSE_PATH]: withValidStoredEndpoint(sseMcpHandler as any, SSE_PATH),
+        [MCP_PATH]: withValidStoredEndpoint(streamableMcpHandler as any, MCP_PATH),
     },
     authorizeEndpoint: "/authorize",
     tokenEndpoint: "/token",
@@ -616,13 +620,20 @@ async function handleMcpTransportRequest(
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
         debug(`No valid Authorization header on ${route.pathPrefix}, returning 401 to trigger OAuth flow`);
 
-        const requestedEndpoint = url.searchParams.get('absmartly-endpoint') ||
-            extractEndpointFromResourceParam(url.searchParams.get('resource')) ||
-            request.headers.get('x-absmartly-endpoint') ||
-            extractEndpointFromPath(url.pathname, route.pathPrefix) ||
-            endpoint;
-        if (requestedEndpoint) {
-            await safeKvPut(env.OAUTH_KV, `oauth_endpoint_pending:${clientFingerprint}`, requestedEndpoint, {
+        // Only a valid endpoint is remembered for the coming /register: the
+        // first source that parses, so an invalid one never hides a valid one.
+        const requested = firstValidEndpoint([
+            url.searchParams.get('absmartly-endpoint'),
+            extractEndpointFromResourceParam(url.searchParams.get('resource')),
+            request.headers.get('x-absmartly-endpoint'),
+            extractEndpointFromPath(url.pathname, route.pathPrefix),
+            endpoint,
+        ]);
+        // apiUrl: /register parses it again, and a base URL ending in "/v1"
+        // would lose that segment.
+        const pendingEndpoint = requested.endpoint?.apiUrl;
+        if (pendingEndpoint) {
+            await safeKvPut(env.OAUTH_KV, `oauth_endpoint_pending:${clientFingerprint}`, pendingEndpoint, {
                 expirationTtl: OAUTH_STATE_TTL_SECONDS,
             });
         }
@@ -721,7 +732,10 @@ export default {
         }
 
         if (url.pathname === '/register' && request.method === 'POST') {
-            const pendingEndpoint = await safeKvGet(env.OAUTH_KV, `oauth_endpoint_pending:${clientFingerprint}`);
+            // Stored as apiUrl (parsed again when /authorize reads it).
+            const pendingEndpoint = tryParseAbsmartlyEndpoint(
+                await safeKvGet(env.OAUTH_KV, `oauth_endpoint_pending:${clientFingerprint}`),
+            )?.apiUrl;
             const response = await oauthProvider.fetch(request, env, ctx);
 
             if (response.ok && pendingEndpoint) {

@@ -1,7 +1,7 @@
 {
   "manifestVersion": 1,
   "generatedFrom": {
-    "@absmartly/cli": "1.17.0"
+    "@absmartly/cli": "1.17.1"
   },
   "endpoints": [
     {
@@ -2869,9 +2869,14 @@
     },
     "experiments.revokeExperimentAccessUser": {
       "apiMethods": [
+        "listAssetRoles",
         "revokeExperimentAccessUser"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/asset_roles"
+        },
         {
           "method": "DELETE",
           "path": "/v1/experiments/{id}/asset_role_users/{userId}/{assetRoleId}"
@@ -2907,9 +2912,14 @@
     },
     "experiments.revokeExperimentAccessTeam": {
       "apiMethods": [
+        "listAssetRoles",
         "revokeExperimentAccessTeam"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/asset_roles"
+        },
         {
           "method": "DELETE",
           "path": "/v1/experiments/{id}/asset_role_teams/{teamId}/{assetRoleId}"
@@ -3067,22 +3077,6 @@
         {
           "method": "PUT",
           "path": "/v1/experiment_custom_section_fields/{id}/archive"
-        }
-      ]
-    },
-    "experiments.refreshFields": {
-      "apiMethods": [
-        "listCustomSectionFields",
-        "listExperimentActionDialogFields"
-      ],
-      "endpoints": [
-        {
-          "method": "GET",
-          "path": "/v1/experiment_action_dialog_fields"
-        },
-        {
-          "method": "GET",
-          "path": "/v1/experiment_custom_section_fields"
         }
       ]
     },
@@ -3395,9 +3389,14 @@
     },
     "goals.grantGoalAccessUser": {
       "apiMethods": [
-        "grantGoalAccessUser"
+        "grantGoalAccessUser",
+        "listAssetRoles"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/asset_roles"
+        },
         {
           "method": "POST",
           "path": "/v1/goals/{id}/asset_role_users"
@@ -3406,9 +3405,14 @@
     },
     "goals.revokeGoalAccessUser": {
       "apiMethods": [
+        "listAssetRoles",
         "revokeGoalAccessUser"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/asset_roles"
+        },
         {
           "method": "DELETE",
           "path": "/v1/goals/{id}/asset_role_users/{userId}/{assetRoleId}"
@@ -3428,9 +3432,14 @@
     },
     "goals.grantGoalAccessTeam": {
       "apiMethods": [
-        "grantGoalAccessTeam"
+        "grantGoalAccessTeam",
+        "listAssetRoles"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/asset_roles"
+        },
         {
           "method": "POST",
           "path": "/v1/goals/{id}/asset_role_teams"
@@ -3439,9 +3448,14 @@
     },
     "goals.revokeGoalAccessTeam": {
       "apiMethods": [
+        "listAssetRoles",
         "revokeGoalAccessTeam"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/asset_roles"
+        },
         {
           "method": "DELETE",
           "path": "/v1/goals/{id}/asset_role_teams/{teamId}/{assetRoleId}"
@@ -3626,9 +3640,14 @@
     },
     "users.createUser": {
       "apiMethods": [
-        "createUser"
+        "createUser",
+        "listRoles"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/roles"
+        },
         {
           "method": "POST",
           "path": "/v1/users"
@@ -3637,9 +3656,14 @@
     },
     "users.updateUser": {
       "apiMethods": [
+        "listRoles",
         "updateUser"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/roles"
+        },
         {
           "method": "PUT",
           "path": "/v1/users/{id}"
@@ -5099,9 +5123,14 @@
     },
     "storageconfigs.testStorageConfig": {
       "apiMethods": [
+        "getStorageConfig",
         "testStorageConfig"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/storage_configs/{id}"
+        },
         {
           "method": "POST",
           "path": "/v1/storage_configs/test"

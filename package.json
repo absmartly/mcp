@@ -1,7 +1,7 @@
 {
   "name": "@absmartly/mcp",
-  "version": "2.0.1",
-  "description": "MCP server for ABsmartly — experimentation platform API access for AI assistants",
+  "version": "2.1.0",
+  "description": "MCP server for ABsmartly \u2014 experimentation platform API access for AI assistants",
   "main": "./dist/cjs/core.js",
   "module": "./dist/core.js",
   "types": "./dist/core.d.ts",
@@ -110,7 +110,8 @@
     "install:dxt": "npm install -g @anthropic-ai/dxt",
     "manifest": "tsx scripts/endpoint-manifest.ts",
     "manifest:check": "tsx scripts/endpoint-manifest.ts --check",
-    "check:cjs-consumer": "node scripts/check-cjs-consumer.mjs"
+    "check:cjs-consumer": "node scripts/check-cjs-consumer.mjs",
+    "parity:main": "tsx scripts/parity-main.ts"
   },
   "keywords": [
     "mcp",
@@ -147,7 +148,7 @@
     }
   },
   "devDependencies": {
-    "@absmartly/cli": "^1.17.0",
+    "@absmartly/cli": "1.17.1",
     "@cloudflare/workers-oauth-provider": "^0.10.3",
     "@cloudflare/workers-types": "^4.20241106.0",
     "@types/node": "^20.11.0",

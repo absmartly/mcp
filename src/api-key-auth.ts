@@ -2,6 +2,8 @@ import { APIClient, APIError } from "@absmartly/cli/api-client";
 import { debug } from "./config.js";
 import { FetchHttpClient, FetchNetworkError } from "./fetch-adapter.js";
 import { oauthBearerChallenge } from "./oauth-worker-guards.js";
+import { HTTP_STATUS_BAD_REQUEST, MESSAGE_INVALID_ENDPOINT, tryParseAbsmartlyEndpoint } from "./oauth/index.js";
+import { withPathIdGuard } from "./path-id-guard.js";
 import {
     ABsmartlyProps,
     CORS_HEADERS,
@@ -9,7 +11,6 @@ import {
     DEFAULT_API_KEY_USER_EMAIL,
     DEFAULT_API_KEY_USER_NAME,
     SESSION_TTL_SECONDS,
-    normalizeBaseUrl,
     safeKvPut,
 } from "./shared.js";
 
@@ -51,10 +52,11 @@ function backendErrorMessage(body: unknown): string {
     return FORBIDDEN_FALLBACK_MESSAGE;
 }
 
+/** `endpoint` is a parsed endpoint's apiUrl (see handleApiKeyTransportRequest). */
 export async function verifyApiKey(apiKey: string, endpoint: string): Promise<ApiKeyVerification> {
     try {
-        const httpClient = new FetchHttpClient(normalizeBaseUrl(endpoint), { authToken: apiKey, authType: 'api-key' });
-        const client = new APIClient(httpClient);
+        const httpClient = new FetchHttpClient(endpoint, { authToken: apiKey, authType: 'api-key' });
+        const client = withPathIdGuard(new APIClient(httpClient));
         const user = await client.getCurrentUser();
         return { ok: true, user };
     } catch (error) {
@@ -102,7 +104,15 @@ export async function handleApiKeyTransportRequest(
     debug(`API key detected on ${route.pathPrefix}, bypassing OAuth flow`);
 
     try {
-        const verifyResult = await verifyApiKey(apiKey, endpoint || DEFAULT_ABSMARTLY_ENDPOINT);
+        // Parse the endpoint where it enters, and store the canonical form.
+        const parsed = tryParseAbsmartlyEndpoint(endpoint || DEFAULT_ABSMARTLY_ENDPOINT);
+        if (!parsed) {
+            console.error(`Rejected API key request: ${MESSAGE_INVALID_ENDPOINT}: ${endpoint}`);
+            return new Response(MESSAGE_INVALID_ENDPOINT, { status: HTTP_STATUS_BAD_REQUEST, headers: CORS_HEADERS });
+        }
+        const apiUrl = parsed.apiUrl;
+
+        const verifyResult = await verifyApiKey(apiKey, apiUrl);
 
         if (!verifyResult.ok) {
             console.error(`Failed to verify API key: ${verifyResult.error}`);
@@ -119,7 +129,7 @@ export async function handleApiKeyTransportRequest(
         const props: ABsmartlyProps = {
             email: userData.email || DEFAULT_API_KEY_USER_EMAIL,
             name: `${userData.first_name || ''} ${userData.last_name || ''}`.trim() || userData.email || DEFAULT_API_KEY_USER_NAME,
-            absmartly_endpoint: endpoint || DEFAULT_ABSMARTLY_ENDPOINT,
+            absmartly_endpoint: apiUrl,
             absmartly_api_key: apiKey,
             user_id: userId
         };

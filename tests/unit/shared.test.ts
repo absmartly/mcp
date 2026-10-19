@@ -1,6 +1,5 @@
 import assert from 'node:assert';
 import {
-  normalizeBaseUrl,
   pickDefined,
   buildQueryString,
   buildAuthHeader,
@@ -32,18 +31,7 @@ export default async function run() {
     catch (e: any) { failed++; details.push({ name, status: 'FAIL', error: e.message }); }
   }
 
-  test('normalizeBaseUrl strips trailing slash', () => {
-    assert.strictEqual(normalizeBaseUrl('https://example.com/'), 'https://example.com');
-  });
-  test('normalizeBaseUrl strips /v1 suffix', () => {
-    assert.strictEqual(normalizeBaseUrl('https://example.com/v1'), 'https://example.com');
-  });
-  test('normalizeBaseUrl strips trailing slash then /v1', () => {
-    assert.strictEqual(normalizeBaseUrl('https://example.com/v1/'), 'https://example.com');
-  });
-  test('normalizeBaseUrl leaves clean URL alone', () => {
-    assert.strictEqual(normalizeBaseUrl('https://example.com'), 'https://example.com');
-  });
+  // Base URL normalisation lives in parseAbsmartlyEndpoint (tests/unit/endpoint-parser.test.ts).
 
   test('pickDefined picks only defined keys', () => {
     const source = { a: 1, b: undefined, c: 'hello', d: null, e: 0 };

@@ -2,6 +2,7 @@ import { HOST_COOKIE_PREFIX } from "./constants.js";
 
 const CONTENT_TYPE_HTML = "text/html; charset=UTF-8";
 const CONTENT_TYPE_TEXT = "text/plain; charset=UTF-8";
+const HTTP_STATUS_OK = 200;
 const HTTP_STATUS_FOUND = 302;
 const COOKIE_PATH = "/";
 const COOKIE_SAME_SITE = "Lax";
@@ -68,8 +69,8 @@ export function readHostCookie(cookieHeader: string | null | undefined, name: st
   return parseCookies(cookieHeader)[hostCookieName(name, options)];
 }
 
-export function htmlResult(body: string, setCookies: string[] = []): OAuthHttpResult {
-  return { status: 200, headers: { "Content-Type": CONTENT_TYPE_HTML, ...FRAME_PROTECTION_HEADERS }, setCookies, body };
+export function htmlResult(body: string, setCookies: string[] = [], status: number = HTTP_STATUS_OK): OAuthHttpResult {
+  return { status, headers: { "Content-Type": CONTENT_TYPE_HTML, ...FRAME_PROTECTION_HEADERS }, setCookies, body };
 }
 
 export function textResult(status: number, body: string, setCookies: string[] = []): OAuthHttpResult {

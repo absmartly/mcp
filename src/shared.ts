@@ -13,9 +13,8 @@ export {
   escapeHtml,
   HTML_ESCAPE_MAP,
 } from "./oauth/index.js";
-import { OAUTH_ERROR_INVALID_REDIRECT_URI, REQUIRED_CODE_CHALLENGE_METHOD, readRegistrationBody, validateClientRegistration } from "./oauth/index.js";
+import { HTTP_STATUS_PAYLOAD_TOO_LARGE, OAUTH_ERROR_INVALID_REDIRECT_URI, REQUIRED_CODE_CHALLENGE_METHOD, readRegistrationBody, validateClientRegistration } from "./oauth/index.js";
 
-const HTTP_STATUS_PAYLOAD_TOO_LARGE = 413;
 
 export const API_KEY_SESSION_TTL_SECONDS = 300;
 export const SESSION_TTL_SECONDS = 86400;
@@ -45,9 +44,6 @@ export type ABsmartlyProps = {
   user_id: string;
 };
 
-export function normalizeBaseUrl(endpoint: string): string {
-  return endpoint.replace(/\/$/, '').replace(/\/v1$/, '');
-}
 
 export function buildAuthHeader(authToken: string, isApiKey: boolean): Record<string, string> {
   const authType = isApiKey ? 'Api-Key' : 'JWT';

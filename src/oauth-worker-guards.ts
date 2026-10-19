@@ -1,16 +1,16 @@
 import type { OAuthError, TokenExchangeCallbackOptions } from "@cloudflare/workers-oauth-provider";
 import { debug } from "./config.js";
 import { CORS_HEADERS, type ABsmartlyProps } from "./shared.js";
-import { isTrustedCimdClientId, SCOPE_MCP_ACCESS } from "./oauth/index.js";
+import { HTTP_STATUS_SERVICE_UNAVAILABLE, HTTP_STATUS_UNAUTHORIZED, isTrustedCimdClientId, MESSAGE_INVALID_ENDPOINT, SCOPE_MCP_ACCESS, tryParseAbsmartlyEndpoint } from "./oauth/index.js";
 
 const REFRESH_GRANT_TYPE = 'refresh_token';
+const OAUTH_ERROR_INVALID_TOKEN = 'invalid_token';
+const CONTENT_TYPE_JSON = 'application/json';
+const MESSAGE_SIGN_IN_AGAIN = 'Please sign in again.';
 const OAUTH_ERROR_INVALID_GRANT = 'invalid_grant';
 const OAUTH_ERROR_TEMPORARILY_UNAVAILABLE = 'temporarily_unavailable';
 const OAUTH_ERROR_INVALID_CLIENT = 'invalid_client';
-const HTTP_STATUS_UNAUTHORIZED = 401;
-const HTTP_STATUS_SERVICE_UNAVAILABLE = 503;
 const USERINFO_PATH = '/auth/oauth/userinfo';
-const API_PATH_SUFFIX = /\/v1\/?$/;
 const TOKEN_PATH = '/token';
 const AUTHORIZE_PATH = '/authorize';
 const PROTECTED_RESOURCE_METADATA_PATH = '/.well-known/oauth-protected-resource';
@@ -30,8 +30,15 @@ type OAuthErrorClass = new (code: string, options: { description: string; status
 export async function checkBackendSessionOnRefresh(options: TokenExchangeCallbackOptions, OAuthErrorImpl: OAuthErrorClass): Promise<void> {
     if (options.grantType !== REFRESH_GRANT_TYPE) return;
     const props = options.props as ABsmartlyProps;
-    if (!props?.oauth_jwt || !props.absmartly_endpoint) return;
-    const baseUrl = props.absmartly_endpoint.replace(API_PATH_SUFFIX, '');
+    // Checked before the JWT early return: a grant with a bad stored endpoint
+    // must end here, or refreshing would keep it alive while every MCP call
+    // is turned away (withValidStoredEndpoint).
+    const parsedEndpoint = props?.absmartly_endpoint !== undefined ? tryParseAbsmartlyEndpoint(props.absmartly_endpoint) : null;
+    if (props?.absmartly_endpoint !== undefined && !parsedEndpoint) {
+        throw new OAuthErrorImpl(OAUTH_ERROR_INVALID_GRANT, { description: `${MESSAGE_INVALID_ENDPOINT}: ${props.absmartly_endpoint}. ${MESSAGE_SIGN_IN_AGAIN}` });
+    }
+    if (!props?.oauth_jwt || !parsedEndpoint) return;
+    const baseUrl = parsedEndpoint.baseUrl;
     let response: Response;
     try {
         response = await fetch(`${baseUrl}${USERINFO_PATH}`, {
@@ -125,7 +132,7 @@ export async function rejectUntrustedCimdClient(request: Request, url: URL): Pro
     return new Response(JSON.stringify({
         error: OAUTH_ERROR_INVALID_CLIENT,
         error_description: 'This MCP client is not supported by this server',
-    }), { status: HTTP_STATUS_UNAUTHORIZED, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } });
+    }), { status: HTTP_STATUS_UNAUTHORIZED, headers: { 'Content-Type': CONTENT_TYPE_JSON, ...CORS_HEADERS } });
 }
 
 export function protectedResourceMetadataUrl(url: URL, pathPrefix: string): string {
@@ -185,4 +192,35 @@ export async function normalizeResourceParameter(request: Request, url: URL): Pr
         return new Request(request.url, { method: request.method, headers, body: form.toString() });
     }
     return request;
+}
+
+type ApiHandler = { fetch: (request: Request, env: any, ctx: any) => Promise<Response> };
+
+/**
+ * Wraps an MCP transport handler behind the OAuth provider. The provider puts
+ * the grant's props on ctx before calling it; a grant whose stored endpoint no
+ * longer parses (stored before endpoints were validated) gets a 401
+ * invalid_token, which makes the MCP client re-authorize, where consent asks
+ * for the endpoint again. Without this the session would fail on every call
+ * until the token expired.
+ */
+export function withValidStoredEndpoint(handler: ApiHandler, pathPrefix: string): ApiHandler {
+    return {
+        fetch: async (request, env, ctx) => {
+            const endpoint = (ctx?.props as ABsmartlyProps | undefined)?.absmartly_endpoint;
+            if (endpoint !== undefined && !tryParseAbsmartlyEndpoint(endpoint)) {
+                console.error(`${MESSAGE_INVALID_ENDPOINT} in stored grant props: ${endpoint}`);
+                const url = new URL(request.url);
+                return new Response(JSON.stringify({ error: OAUTH_ERROR_INVALID_TOKEN, error_description: `${MESSAGE_INVALID_ENDPOINT}. ${MESSAGE_SIGN_IN_AGAIN}` }), {
+                    status: HTTP_STATUS_UNAUTHORIZED,
+                    headers: {
+                        'Content-Type': CONTENT_TYPE_JSON,
+                        ...CORS_HEADERS,
+                        'WWW-Authenticate': `Bearer error="${OAUTH_ERROR_INVALID_TOKEN}", error_description="${MESSAGE_INVALID_ENDPOINT}", resource_metadata="${protectedResourceMetadataUrl(url, pathPrefix)}"`,
+                    },
+                });
+            }
+            return handler.fetch(request, env, ctx);
+        },
+    };
 }

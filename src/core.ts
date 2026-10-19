@@ -12,7 +12,7 @@
 export { createStreamableHttpHandler } from "./node-http-server.js";
 export type { NodeMcpHandler, NodeMcpRequestContext } from "./node-http-server.js";
 
-export { FetchHttpClient } from "./fetch-adapter.js";
+export { FetchHttpClient, InvalidEndpointError } from "./fetch-adapter.js";
 export type { FetchHttpClientOptions } from "./fetch-adapter.js";
 
 export type { ApiClientLike } from "./api-client-like.js";
@@ -31,6 +31,8 @@ export {
   getGroupCommands,
   getGroupSummary,
   getTotalCommandCount,
+  IdParamError,
+  normalizeIdParams,
   searchCommands,
   validateCommandParams,
 } from "./cli-catalog.js";
