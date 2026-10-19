@@ -15,7 +15,7 @@
  *
  * The server reads its profile from $HOME/.config/absmartly, so each run gets a
  * temporary HOME holding a profile for the resolved credentials (removed after).
- * Needs `npm run build` first. Credentials: ABSMARTLY_API_KEY +
+ * Builds dist/ first (the bin runs it). Credentials: ABSMARTLY_API_KEY +
  * ABSMARTLY_API_ENDPOINT, or `--profile <name>` (see test-credentials.js);
  * without them it skips locally and fails a gated run. The mismatch case packs this package and npm-installs it, in a
  * temporary directory, with another @absmartly/cli (MCP_E2E_MISMATCH_CLI picks
@@ -135,8 +135,11 @@ function makeInstallWithCli(version: string): { root: string; packageRoot: strin
 async function run() {
     const creds = await resolveTestCredentials();
     if (!creds) return skipSuite(SKIP_MESSAGE);
+    // The bin runs dist/, so build it from this checkout: a missing or stale
+    // build would test something other than the source under review.
+    execFileSync('npm', ['run', 'build', '--silent'], { cwd: PROJECT_ROOT, stdio: 'ignore' });
     if (!existsSync(join(PROJECT_ROOT, 'dist', 'local-server.js'))) {
-        throw new Error('dist/local-server.js is missing: run `npm run build` first');
+        throw new Error('npm run build did not produce dist/local-server.js');
     }
 
     const home = makeHome(creds.apiKey, creds.endpoint);
