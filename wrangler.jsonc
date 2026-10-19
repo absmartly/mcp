@@ -4,6 +4,12 @@
 	"main": "src/index.ts",
 	"compatibility_date": "2025-03-10",
 	"account_id": "8ec66ff1f67c2bf53e7970533604ebe9",
+	// The CLI's terminal formatter is bundled through @absmartly/cli/api-client;
+	// its supports-hyperlinks dependency crashes the Worker at startup with the
+	// browser build of supports-color. See src/shims/supports-color.cjs.
+	"alias": {
+		"supports-color": "./src/shims/supports-color.cjs"
+	},
 	"compatibility_flags": [
 		"nodejs_compat",
 		// Required by @cloudflare/workers-oauth-provider CIMD support: outbound fetches
