@@ -284,11 +284,20 @@ async function run() {
             try {
                 const before = await readFields(id);
                 if (before.archived === true) continue;
-                const live = before.state === 'running' || before.state === 'development'
-                    || (type === 'feature' && before.feature_state === 'on');
+                // A stopped feature flag keeps state "running" with
+                // feature_state "off", so for flags only feature_state "on"
+                // (or development) means it still needs stopping.
+                const live = type === 'feature'
+                    ? before.feature_state === 'on' || before.state === 'development'
+                    : before.state === 'running' || before.state === 'development';
                 if (live) {
                     const reason = type === 'feature' ? 'implementation_issue' : 'hypothesis_iteration';
-                    await transition('stopExperiment', id, { reason, note: 'lifecycle test cleanup' });
+                    // A failed stop is reported but doesn't skip the archive.
+                    try {
+                        await transition('stopExperiment', id, { reason, note: 'lifecycle test cleanup' });
+                    } catch (err: any) {
+                        errors.push(`${type} ${id}: stop failed: ${err?.message || err}`);
+                    }
                 }
                 await archiveAndConfirm(id);
             } catch (err: any) {
