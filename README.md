@@ -725,11 +725,10 @@ npm run verify:release  # Everything above; runs automatically on npm publish
 `test:e2e` needs `ABSMARTLY_API_KEY` and `ABSMARTLY_API_ENDPOINT` (test-1)
 and fails without them. See [tests/README.md](tests/README.md#release-gate).
 
-Claude-driven tests (opt-in, need the `claude` CLI and the test-1 profile):
+The e2e suites call the Worker through the official MCP SDK client, with no
+model in the loop. To run one against a Worker you started yourself:
 ```bash
-node tests/integration/claude-mcp-tools.test.js --profile test-1
-node tests/integration/claude-user-experience.test.js --profile test-1
-node tests/integration/claude-tool-discovery.test.js --profile test-1
+MCP_WORKER_URL=http://127.0.0.1:8787 npx tsx tests/integration/sdk-tools.test.ts --profile test-1
 ```
 
 ### CI/CD

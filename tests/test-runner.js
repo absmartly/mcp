@@ -13,28 +13,11 @@ import { isGated } from './integration/gate.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// The `claude -p` suites drive a real model through the MCP. They need the
-// claude CLI to be installed and logged in, they cost tokens, and they're
-// non-deterministic, so they aren't part of the release gate. Run them
-// directly (npm run test:claude) or pass --include-claude.
-const OPT_IN_SUITE = /^claude-/;
-
-// Legacy suites that cannot run against the gated run's fresh Worker: two
-// target fixed ports (localhost:8787 / :3000) with fake credentials, and one
-// returns a zero-test "superseded" result unconditionally. In a gated run they
-// can only skip or test the wrong server, so they are left out of the gated
-// set. They still run in local (non-gated) runs. Their replacements are the
-// SDK-driven suites in #70, which deletes these files.
-const NOT_GATED_LEGACY_SUITES = new Set([
-  'multi-tenant-oauth.test.js',
-  'oauth-flow.test.js',
-  'resources-prompts-flow.test.js',
-]);
-
 // A gated run must execute at least this many integration tests. It stops a
 // gated run from passing when a whole suite quietly stops running. The
-// release suites currently total about 120. Raise this when you add suites.
-const GATED_MIN_INTEGRATION_TESTS = 100;
+// deterministic release suites currently total about 225; keep this floor
+// just below that total so a missing suite cannot pass silently.
+const GATED_MIN_INTEGRATION_TESTS = 210;
 
 class TestRunner {
   constructor() {
@@ -140,17 +123,7 @@ class TestRunner {
       const integrationTestDir = join(__dirname, 'integration');
       const integrationTests = await readdir(integrationTestDir);
       const testFiles = integrationTests
-        .filter(file => file.endsWith('.test.js') || file.endsWith('.test.ts'))
-        .filter(file => {
-          if (options.includeClaude || !OPT_IN_SUITE.test(file)) return true;
-          this.log(`Not running ${file}: opt-in suite (npm run test:claude or --include-claude)`, 'info');
-          return false;
-        })
-        .filter(file => {
-          if (!options.gated || !NOT_GATED_LEGACY_SUITES.has(file)) return true;
-          this.log(`Not running ${file} in a gated run: legacy suite that cannot target the fresh Worker`, 'info');
-          return false;
-        });
+        .filter(file => file.endsWith('.test.js') || file.endsWith('.test.ts'));
 
       // Start wrangler dev so the Worker-backed suites test this checkout.
       // In a gated run always start a fresh one on a free port. Never reuse
@@ -255,7 +228,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const options = {
     unitOnly: args.includes('--unit-only'),
     integrationOnly: args.includes('--integration-only'),
-    includeClaude: args.includes('--include-claude'),
     gated: isGated()
   };
   

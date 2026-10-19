@@ -59,19 +59,19 @@ export default async function runTests() {
       assert.equal(instance.passedTests, 0);
       assert.equal(instance.integrationTests, 0);
       assert.equal(instance.skippedSuites.length, 1);
-      instance.integrationTests = 100;
+      instance.integrationTests = 210;
       instance.enforceGate();
       assert.equal(instance.failedTests, 1);
     });
     await test('too few executed integration tests fails the gate', () => {
       const instance = runner();
-      instance.integrationTests = 99;
+      instance.integrationTests = 209;
       instance.enforceGate();
       assert.equal(instance.failedTests, 1);
     });
-    await test('100 executed tests and no skips passes the gate', () => {
+    await test('210 executed tests and no skips passes the gate', () => {
       const instance = runner();
-      instance.integrationTests = 100;
+      instance.integrationTests = 210;
       instance.enforceGate();
       assert.equal(instance.failedTests, 0);
     });
