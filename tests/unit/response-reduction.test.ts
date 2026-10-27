@@ -54,6 +54,29 @@ export default async function runTests() {
     assert(report.reduced && report.itemsOmitted > 0, 'report counts omitted items');
   }
 
+  // A default page retains every row (no marker string among the rows) by trimming row details before dropping rows.
+  {
+    const value = Array.from({ length: 20 }, (_, id) => ({
+      id,
+      name: `experiment_${id}`,
+      state: 'running',
+      details: {
+        sections: {
+          configs: {
+            first: 'x'.repeat(2_000),
+            second: 'y'.repeat(2_000),
+            third: 'z'.repeat(2_000),
+          },
+        },
+      },
+    }));
+    const { text } = reduceToBudget(value, { budgetChars: TEST_BUDGET, ladder: SUMMARY_LADDER });
+    const parsed = JSON.parse(text);
+    assert(parsed.length === 20 && parsed[19].id === 19, 'default page keeps all rows after deep details are summarized');
+    assert(parsed.every((row: unknown) => typeof row === 'object' && row !== null && 'id' in row && 'name' in row), 'every element is a row with id and name');
+    assert(text.length <= TEST_BUDGET, 'default page fits the budget', `got ${text.length}`);
+  }
+
   // Huge NESTED array (the case top-level pagination can't reach): outer ids survive.
   {
     const value = { id: 7, name: 'exp', data: { series: Array.from({ length: 10000 }, (_, i) => ({ t: i, v: i * 2 })) } };

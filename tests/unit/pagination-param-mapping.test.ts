@@ -1,4 +1,4 @@
-import { setupTools, applyDefaultPagination, type ToolContext } from '../../src/tools';
+import { setupTools, type ToolContext } from '../../src/tools';
 import { getCommandEntry } from '../../src/cli-catalog';
 
 class CapturedHandlers {
@@ -49,35 +49,6 @@ export default async function runTests() {
     await handler({ group: 'goals', command: 'listGoals', params: {} });
     assert(capturedCall.items === 20, 'listGoals still gets default items=20 injected', JSON.stringify(capturedCall));
     assert(capturedCall.page === 1, 'listGoals still gets default page=1 injected', JSON.stringify(capturedCall));
-  }
-
-  // A command with params: [] (no declared items/page, e.g. listPermissions) does NOT get
-  // items/page injected. Verified directly against the injection guard (applyDefaultPagination)
-  // rather than via the mocked client call, since listPermissions' core function calls
-  // client.listPermissions() with no arguments at all regardless of what commandParams holds —
-  // asserting on the mocked call would pass even if the guard were removed entirely.
-  {
-    const entry = getCommandEntry('permissions', 'listPermissions')!;
-    const commandParams: Record<string, unknown> = {};
-    applyDefaultPagination(entry, commandParams, undefined);
-    assert(commandParams.items === undefined,
-      'listPermissions does not get an unsupported items key injected', JSON.stringify(commandParams));
-    assert(commandParams.page === undefined,
-      'listPermissions does not get an unsupported page key injected', JSON.stringify(commandParams));
-  }
-
-  // A command with a single catch-all `params` object (listEvents) does NOT get top-level
-  // items/page injected. Verified directly against the injection guard, since listEvents' core
-  // function builds its own filters/body from named fields and never forwards items/page to the
-  // client call — asserting on the mocked call would pass even if the guard were removed entirely.
-  {
-    const entry = getCommandEntry('events', 'listEvents')!;
-    const commandParams: Record<string, unknown> = {};
-    applyDefaultPagination(entry, commandParams, undefined);
-    assert(commandParams.items === undefined,
-      'listEvents does not get a top-level items key injected onto its catch-all params', JSON.stringify(commandParams));
-    assert(commandParams.page === undefined,
-      'listEvents does not get a top-level page key injected onto its catch-all params', JSON.stringify(commandParams));
   }
 
   // apps.listApps reads params.items/params.page in the CLI core, so its catalog entry must declare

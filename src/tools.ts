@@ -32,7 +32,6 @@ import {
 import type { ReductionProfile, ReductionReport } from "./response-reduction.js";
 
 const DEFAULT_LIST_ITEMS = 20;
-const DEFAULT_LIST_PAGE = 1;
 const USER_FIELD_TYPE = 'user';
 // The only command whose documentation and auto-population use entity data
 // (custom fields, current user). Every other command's docs and validation
@@ -104,26 +103,6 @@ function formatCommandList(entries: CommandEntry[]): string {
   const remaining = entries.length - MAX_COMMANDS_PER_LISTING;
   const names = entries.slice(MAX_COMMANDS_PER_LISTING).map(e => `${e.group}.${e.command}`).join(', ');
   return rendered + `\n\n---\n\n(${remaining} more matching commands not shown: ${names}. Narrow your \`group\`/\`search\`, or use get_command_docs for a specific command's full details.)`;
-}
-
-// Applies default items/page pagination to commandParams, but only when the
-// command's catalog entry actually declares an `items`/`page` param. Commands
-// with no declared pagination params (empty params: []) or a single catch-all
-// `params` object (e.g. listEvents, listActivity) would otherwise get an
-// unsupported/inert key silently attached to commandParams.
-export function applyDefaultPagination(
-  entry: CommandEntry,
-  commandParams: Record<string, unknown>,
-  limit: number | undefined,
-): void {
-  const itemsLimit = limit ?? DEFAULT_LIST_ITEMS;
-  const declaredParamNames = new Set(entry.params.map((p) => p.name));
-  if (declaredParamNames.has('items') && commandParams.items === undefined) {
-    commandParams.items = itemsLimit;
-  }
-  if (declaredParamNames.has('page') && commandParams.page === undefined) {
-    commandParams.page = DEFAULT_LIST_PAGE;
-  }
 }
 
 export function autoPopulateCustomFields(

@@ -20,8 +20,15 @@ export interface ReductionProfile {
   maxDepth: number;
 }
 
+// Profiles that keep every list row (up to ROW_PRESERVING_MAX_ITEMS) and trim each
+// row's details come before the ones that drop rows, so a list never gets an
+// omission marker mixed in among its rows unless it has to.
+const ROW_PRESERVING_MAX_ITEMS = 100;
+
 export const SUMMARY_LADDER: readonly ReductionProfile[] = [
-  { maxArrayItems: 100, maxStringChars: 2_000, maxObjectKeys: 200, maxDepth: 12 },
+  { maxArrayItems: ROW_PRESERVING_MAX_ITEMS, maxStringChars: 2_000, maxObjectKeys: 200, maxDepth: 12 },
+  { maxArrayItems: ROW_PRESERVING_MAX_ITEMS, maxStringChars: 500, maxObjectKeys: 50, maxDepth: 6 },
+  { maxArrayItems: ROW_PRESERVING_MAX_ITEMS, maxStringChars: 100, maxObjectKeys: 6, maxDepth: 3 },
   { maxArrayItems: 50, maxStringChars: 1_000, maxObjectKeys: 100, maxDepth: 10 },
   { maxArrayItems: 20, maxStringChars: 500, maxObjectKeys: 50, maxDepth: 8 },
   { maxArrayItems: 10, maxStringChars: 200, maxObjectKeys: 30, maxDepth: 6 },
@@ -29,7 +36,9 @@ export const SUMMARY_LADDER: readonly ReductionProfile[] = [
 ];
 
 export const RAW_LADDER: readonly ReductionProfile[] = [
-  { maxArrayItems: 100, maxStringChars: 1_000, maxObjectKeys: 200, maxDepth: 12 },
+  { maxArrayItems: ROW_PRESERVING_MAX_ITEMS, maxStringChars: 1_000, maxObjectKeys: 200, maxDepth: 12 },
+  { maxArrayItems: ROW_PRESERVING_MAX_ITEMS, maxStringChars: 150, maxObjectKeys: 50, maxDepth: 5 },
+  { maxArrayItems: ROW_PRESERVING_MAX_ITEMS, maxStringChars: 60, maxObjectKeys: 20, maxDepth: 3 },
   { maxArrayItems: 50, maxStringChars: 300, maxObjectKeys: 100, maxDepth: 8 },
   { maxArrayItems: 25, maxStringChars: 150, maxObjectKeys: 50, maxDepth: 6 },
   { maxArrayItems: 10, maxStringChars: 80, maxObjectKeys: 30, maxDepth: 4 },
