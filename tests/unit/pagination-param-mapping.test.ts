@@ -1,5 +1,4 @@
 import { setupTools, type ToolContext } from '../../src/tools';
-import { getCommandEntry } from '../../src/cli-catalog';
 
 class CapturedHandlers {
   tools = new Map<string, { handler: Function }>();
