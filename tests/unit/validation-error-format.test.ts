@@ -1,5 +1,13 @@
 import { setupTools, type ToolContext } from '../../src/tools';
 
+const TEST_ENDPOINT = 'https://demo.absmartly.com';
+const EXECUTE_COMMAND_TOOL = 'execute_command';
+const FULL_DOC_HEADING = '## Usage with execute_command';
+const ZERO_PARAM_PHRASE = 'takes no parameters';
+const MAX_COMPACT_ERROR_CHARS = 1000;
+const ERROR_PREVIEW_CHARS = 300;
+const LONG_ERROR_PREVIEW_CHARS = 500;
+
 class CapturedHandlers {
   tools = new Map<string, { handler: Function }>();
 }
@@ -14,14 +22,14 @@ function getExecuteHandler(client: any): Function {
   const captured = new CapturedHandlers();
   const ctx: ToolContext = {
     apiClient: client,
-    endpoint: 'https://demo.absmartly.com',
+    endpoint: TEST_ENDPOINT,
     authType: 'api-key',
     entityWarnings: [],
     customFields: [],
     currentUserId: null,
   };
   setupTools(makeMockServer(captured), ctx);
-  return captured.tools.get('execute_command')!.handler;
+  return captured.tools.get(EXECUTE_COMMAND_TOOL)!.handler;
 }
 
 export default async function runTests() {
@@ -45,9 +53,9 @@ export default async function runTests() {
     const handler = getExecuteHandler(client);
     const res = await handler({ group: 'goals', command: 'listGoals', params: { itemz: 5 } });
     const text = res.content[0].text as string;
-    assert(text.includes('itemz'), 'error mentions the offending param name', text.slice(0, 300));
-    assert(!text.includes('## Usage with execute_command'), 'error no longer embeds the full command doc markdown', text.slice(0, 500));
-    assert(text.length < 1000, 'validation error response is compact', `got length ${text.length}`);
+    assert(text.includes('itemz'), 'error mentions the offending param name', text.slice(0, ERROR_PREVIEW_CHARS));
+    assert(!text.includes(FULL_DOC_HEADING), 'error no longer embeds the full command doc markdown', text.slice(0, LONG_ERROR_PREVIEW_CHARS));
+    assert(text.length < MAX_COMPACT_ERROR_CHARS, 'validation error response is compact', `got length ${text.length}`);
   }
 
   // Missing required param on getGoal: still names the required param and its type.
@@ -56,8 +64,8 @@ export default async function runTests() {
     const handler = getExecuteHandler(client);
     const res = await handler({ group: 'goals', command: 'getGoal', params: {} });
     const text = res.content[0].text as string;
-    assert(text.includes('"goalId"'), 'error mentions the specific missing required param name (goalId)', text.slice(0, 300));
-    assert(!text.includes('## Usage with execute_command'), 'missing-required-param error also skips the full doc');
+    assert(text.includes('"goalId"'), 'error mentions the specific missing required param name (goalId)', text.slice(0, ERROR_PREVIEW_CHARS));
+    assert(!text.includes(FULL_DOC_HEADING), 'missing-required-param error also skips the full doc');
   }
 
   // A command with zero declared params still produces a sensible message (not blank/confusing) when given an unknown param.
@@ -66,8 +74,8 @@ export default async function runTests() {
     const handler = getExecuteHandler(client);
     const res = await handler({ group: 'permissions', command: 'listPermissions', params: { bogus: true } });
     const text = res.content[0].text as string;
-    assert(text.includes('bogus'), 'error for a zero-param command still names the bad param', text.slice(0, 300));
-    assert(text.includes('takes no parameters'), 'error for a zero-param command uses formatParamSummary\'s exact phrase', text.slice(0, 500));
+    assert(text.includes('bogus'), 'error for a zero-param command still names the bad param', text.slice(0, ERROR_PREVIEW_CHARS));
+    assert(text.includes(ZERO_PARAM_PHRASE), 'error for a zero-param command uses formatParamSummary\'s exact phrase', text.slice(0, LONG_ERROR_PREVIEW_CHARS));
   }
 
   return {
