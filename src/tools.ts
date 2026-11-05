@@ -282,7 +282,6 @@ function renderCommandResult(
   group: string,
   command: string,
 ): string {
-  // Prefer summarized rows/detail over raw data
   const output = raw ? cmdResult : (cmdResult.rows ?? cmdResult.detail ?? cmdResult.data ?? cmdResult);
   const fullMeta = formatResultMeta(cmdResult, false);
   const full = JSON.stringify(output, null, DEFAULT_JSON_INDENT);
