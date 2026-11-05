@@ -193,7 +193,6 @@ export function reduceToBudget(value: unknown, options: ReductionOptions): Reduc
   if (fallbackText.length <= options.budgetChars) {
     return { text: fallbackText, report: { ...stats, reduced: true, skeleton: true, originalChars, finalChars: fallbackText.length } };
   }
-  // For arbitrarily small budgets, use a minimal valid JSON fallback that always fits for budgetChars >= 2.
   const minimalText = Array.isArray(value) ? MINIMAL_ARRAY_FALLBACK : MINIMAL_FALLBACK;
   return { text: minimalText, report: { ...stats, reduced: true, skeleton: true, originalChars, finalChars: minimalText.length } };
 }

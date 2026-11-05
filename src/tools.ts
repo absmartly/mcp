@@ -29,7 +29,7 @@ import {
   DEFAULT_JSON_INDENT,
   OMITTED_FIELD_KEY,
 } from "./response-reduction.js";
-import type { ReductionProfile, ReductionReport } from "./response-reduction.js";
+import type { ReductionReport } from "./response-reduction.js";
 
 const DEFAULT_LIST_ITEMS = 20;
 const USER_FIELD_TYPE = 'user';
@@ -229,16 +229,6 @@ export function formatResultMeta(cmdResult: Record<string, unknown>, cap: boolea
   return meta;
 }
 
-function describeReduction(report: ReductionReport): string {
-  if (report.skeleton) return 'only the top-level shape could be shown';
-  const parts: string[] = [];
-  if (report.arraysCapped > 0) parts.push(`${report.arraysCapped} array(s) capped (${report.itemsOmitted} items omitted)`);
-  if (report.stringsClipped > 0) parts.push(`${report.stringsClipped} long string(s) clipped`);
-  if (report.subtreesStubbed > 0) parts.push(`${report.subtreesStubbed} nested value(s) summarized`);
-  if (report.keysOmitted > 0) parts.push(`${report.keysOmitted} field(s) omitted`);
-  return parts.join(', ');
-}
-
 interface ReductionCauses {
   derivedViewsDropped?: boolean;
   metaCapped?: boolean;
@@ -246,15 +236,21 @@ interface ReductionCauses {
 
 const DERIVED_VIEWS_DROPPED_DESCRIPTION = 'the summarized `rows`/`detail` view was omitted since it duplicates `data`';
 const META_CAPPED_DESCRIPTION = 'warnings were capped/truncated';
+const SKELETON_REDUCTION_DESCRIPTION = 'only the top-level shape could be shown';
 const FALLBACK_REDUCTION_DESCRIPTION = 'the response was restructured to fit within the limit';
 
-function describeCauses(report: ReductionReport, causes: ReductionCauses): string {
+function describeReduction(report: ReductionReport, causes: ReductionCauses = {}): string {
   const parts: string[] = [];
   if (causes.derivedViewsDropped) parts.push(DERIVED_VIEWS_DROPPED_DESCRIPTION);
   if (causes.metaCapped) parts.push(META_CAPPED_DESCRIPTION);
-  const reductionDesc = describeReduction(report);
-  if (reductionDesc) parts.push(reductionDesc);
-  if (parts.length === 0) parts.push(FALLBACK_REDUCTION_DESCRIPTION);
+  if (report.skeleton) {
+    parts.push(SKELETON_REDUCTION_DESCRIPTION);
+  } else {
+    if (report.arraysCapped > 0) parts.push(`${report.arraysCapped} array(s) capped (${report.itemsOmitted} items omitted)`);
+    if (report.stringsClipped > 0) parts.push(`${report.stringsClipped} long string(s) clipped`);
+    if (report.subtreesStubbed > 0) parts.push(`${report.subtreesStubbed} nested value(s) summarized`);
+    if (report.keysOmitted > 0) parts.push(`${report.keysOmitted} field(s) omitted`);
+  }
   return parts.join(', ');
 }
 
@@ -266,17 +262,13 @@ export function formatReductionNotice(
 ): string {
   const hint = COMMAND_REDUCTION_HINTS[`${group}.${command}`] ?? GENERIC_REDUCTION_HINT;
   return `${REDUCTION_NOTICE_PREFIX} — ${report.originalChars} characters exceeds the ${MAX_RESPONSE_CHARS}-character limit for ${group}.${command}. ` +
-    `The JSON above is valid but structurally reduced: ${describeCauses(report, causes)}. ` +
+    `The JSON above is valid but structurally reduced: ${describeReduction(report, causes) || FALLBACK_REDUCTION_DESCRIPTION}. ` +
     `Omissions are marked in place (\`${OMITTED_FIELD_KEY}\` fields and "omitted"/"clipped" markers); ids and names are kept. ${hint}]`;
 }
 
-function hasDerivedViews(cmdResult: Record<string, unknown>): boolean {
-  if (cmdResult.data === undefined) return false;
-  return DERIVED_VIEW_KEYS.some((key) => cmdResult[key] !== undefined);
-}
-
-function withoutDerivedViews(cmdResult: Record<string, unknown>): Record<string, unknown> {
-  if (cmdResult.data === undefined) return cmdResult;
+function omitDerivedViews(cmdResult: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (cmdResult.data === undefined) return undefined;
+  if (!DERIVED_VIEW_KEYS.some((key) => cmdResult[key] !== undefined)) return undefined;
   const copy: Record<string, unknown> = { ...cmdResult };
   for (const key of DERIVED_VIEW_KEYS) {
     if (copy[key] !== undefined) copy[key] = DERIVED_VIEW_PLACEHOLDER;
@@ -285,25 +277,31 @@ function withoutDerivedViews(cmdResult: Record<string, unknown>): Record<string,
 }
 
 function renderCommandResult(
-  output: unknown,
-  reducible: unknown,
   cmdResult: Record<string, unknown>,
-  ladder: readonly ReductionProfile[],
+  raw: boolean,
   group: string,
   command: string,
-  derivedViewsDropped: boolean = false,
 ): string {
+  // Prefer summarized rows/detail over raw data
+  const output = raw ? cmdResult : (cmdResult.rows ?? cmdResult.detail ?? cmdResult.data ?? cmdResult);
   const fullMeta = formatResultMeta(cmdResult, false);
   const full = JSON.stringify(output, null, DEFAULT_JSON_INDENT);
   if (full.length + fullMeta.length <= MAX_RESPONSE_CHARS) {
     return full + fullMeta;
   }
+  const withoutDerivedViews = raw ? omitDerivedViews(cmdResult) : undefined;
   const meta = formatResultMeta(cmdResult, true);
   const metaCapped = meta.length !== fullMeta.length;
   const budgetChars = MAX_RESPONSE_CHARS - meta.length - REDUCTION_NOTICE_RESERVE_CHARS;
-  const { text, report } = reduceToBudget(reducible, { budgetChars, ladder });
+  const { text, report } = reduceToBudget(withoutDerivedViews ?? output, {
+    budgetChars,
+    ladder: raw ? RAW_LADDER : SUMMARY_LADDER,
+  });
   const originalChars = full.length + fullMeta.length;
-  const notice = formatReductionNotice({ ...report, originalChars }, group, command, { derivedViewsDropped, metaCapped });
+  const notice = formatReductionNotice({ ...report, originalChars }, group, command, {
+    derivedViewsDropped: withoutDerivedViews !== undefined,
+    metaCapped,
+  });
   return enforceHardCap(text + notice + meta, MAX_RESPONSE_CHARS);
 }
 
@@ -529,7 +527,6 @@ To create experiments, use group "experiments", command "createExperimentFromTem
               (commandParams.defaultType as string) || 'test',
             );
 
-            // Return the full preview unchanged when it fits; only oversized previews are reduced.
             const uncappedWarningLines = warnings && warnings.length > 0
               ? ['', '**Warnings:**', ...warnings.map((w) => `- ${String(w)}`)]
               : [];
@@ -600,24 +597,11 @@ To create experiments, use group "experiments", command "createExperimentFromTem
         }
 
         // Core functions return CommandResult<T> with { data, rows, detail, warnings, pagination }
-        const cmdResult = result as Record<string, unknown>;
-
-        let output: unknown;
-        if (params.raw) {
-          output = cmdResult;
-        } else {
-          // Prefer summarized rows/detail over raw data
-          output = cmdResult.rows ?? cmdResult.detail ?? cmdResult.data ?? cmdResult;
-        }
-
-        const text = params.raw
-          ? renderCommandResult(output, withoutDerivedViews(cmdResult), cmdResult, RAW_LADDER, params.group, params.command, hasDerivedViews(cmdResult))
-          : renderCommandResult(output, output, cmdResult, SUMMARY_LADDER, params.group, params.command);
+        const text = renderCommandResult(result as Record<string, unknown>, !!params.raw, params.group, params.command);
         return { content: [{ type: "text" as const, text }] };
       } catch (error: any) {
         const errorMsg = error instanceof Error ? error.message : String(error);
 
-        // Return the full error unchanged when it fits; only oversized errors are clipped and reduced.
         const uncappedParts: string[] = [`Error executing ${params.group}.${params.command}: ${errorMsg}`];
         if (error.statusCode) {
           uncappedParts.push(`\nHTTP Status: ${error.statusCode}`);
