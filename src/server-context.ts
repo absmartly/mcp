@@ -115,15 +115,18 @@ export async function buildServerContext(
 /**
  * Deferred ServerContext: identity fields are available immediately, while
  * the entity lists (current user + eight list calls) are fetched only the
- * first time `load()` is called, then memoized. Lets per-request transports
- * (node-http-server.ts) skip the prefetch for messages that never touch
- * entity data (initialize, tools/list, resources/list, most tool calls).
+ * first time `load()` is called, then memoized until `invalidate()`. Lets
+ * per-request transports (node-http-server.ts) skip the prefetch for messages
+ * that never touch entity data (initialize, tools/list, resources/list, most
+ * tool calls), and lets long-lived sessions refetch per request.
  */
 export interface ServerContextLoader {
   apiClient: ApiClientLike;
   endpoint: string;
   authType: string;
   load(): Promise<ServerContext>;
+  /** Drop the memoized entities so the next `load()` refetches them. */
+  invalidate(): void;
 }
 
 export function createServerContextLoader(
@@ -136,6 +139,7 @@ export function createServerContextLoader(
     endpoint: opts.endpoint,
     authType: opts.authType,
     load: () => (pending ??= buildServerContext(apiClient, opts)),
+    invalidate: () => { pending = undefined; },
   };
 }
 
