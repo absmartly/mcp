@@ -187,7 +187,7 @@ async function run() {
                 assert(rows.length > 0, `no rows: ${snippet(text)}`);
                 if (params.items) assert(rows.length <= (params.items as number), `asked for ${params.items}, got ${rows.length}`);
                 const missing = fields.filter((field) => rows.some((row) => row?.[field] === undefined));
-                assert(missing.length === 0, `rows missing ${missing.join(', ')}`);
+                assert(missing.length === 0, `rows missing ${missing.join(', ')}: ${snippet(text)}`);
             });
         }
 
@@ -230,10 +230,11 @@ async function run() {
             const { text } = await callTool(client, 'execute_command', { group: UNKNOWN_GROUP, command: UNKNOWN_COMMAND, params: {} });
             assert(text.includes(`Unknown command "${UNKNOWN_GROUP}.${UNKNOWN_COMMAND}"`), snippet(text));
         });
-        await check('execute_command reports a missing required param with the command docs', async () => {
+        await check('execute_command reports a missing required param with a compact parameter summary', async () => {
             const { text } = await callTool(client, 'execute_command', { group: 'experiments', command: 'getExperiment', params: {} });
             assert(text.includes('Missing required param "experimentId"'), snippet(text));
-            assert(text.includes('# experiments.getExperiment'), 'docs not appended');
+            assert(text.includes('experiments.getExperiment params: experimentId (number, required)'), 'parameter summary missing');
+            assert(!text.includes('## Usage with execute_command'), 'validation error included the full command docs');
         });
         await check('a destructive command without confirmed:true is not executed', async () => {
             // No experiment with this id exists, so even a wrongly executed
