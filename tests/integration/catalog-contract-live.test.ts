@@ -24,6 +24,7 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { pathToFileURL } from "url";
 import { resolveTestCredentials, SKIP_MESSAGE } from "./test-credentials.js";
 import { skipScenario, skipSuite, workerUrl } from "./gate.js";
+import { leadingJsonOf } from "./mcp-sdk-client.js";
 
 const WORKER_URL = workerUrl();
 const SSE_URL = `${WORKER_URL}/sse`;
@@ -79,21 +80,7 @@ async function execute(
         arguments: { group, command, params, ...(confirmed ? { confirmed: true } : {}) },
     }) as ToolCallResult;
     const text = textOf(result);
-    return { text, data: leadingJson(text) };
-}
-
-/** The JSON value a result starts with; list results may be followed by pagination or warning notes. */
-function leadingJson(text: string): any {
-    try {
-        return JSON.parse(text);
-    } catch {}
-    const notes = text.search(/\n\n(\(Page |Warnings:)/);
-    if (notes > 0) {
-        try {
-            return JSON.parse(text.slice(0, notes));
-        } catch {}
-    }
-    return undefined;
+    return { text, data: leadingJsonOf(text) };
 }
 
 /** A successful command returns JSON; failures are "Error executing ..." / "Param validation failed ..." text. */
