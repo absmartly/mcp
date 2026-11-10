@@ -570,6 +570,16 @@ Execute any ABsmartly command. Common commands are listed in the tool descriptio
 
 Deprecated params (still accepted, not shown in docs) are kept for callers written against 2.0.x.
 
+**CLI option parity.** Every option of every `abs` CLI command that changes what is sent or returned has an `execute_command` param, e.g. `abs experiments metrics results 99 --cached` is `experiments.getMetricResults { experimentId: 99, cached: true }`. `tests/fixtures/cli-command-options.json` maps each CLI command and option to its command and param (or to the reason it does not apply: terminal rendering, local files, interactive prompts, local CLI config); `npm run parity:cli -- --check` fails when an installed CLI adds an unmapped option. Variant screenshot sources (`screenshot`) must be http(s) URLs or `data:` URIs: the server never reads local file paths.
+
+**Raw API requests** (`abs api`): `api.rawRequest` sends a request with the session's credentials, through the same `APIClient.rawRequest` the CLI uses (path checks included).
+
+```json
+{ "group": "api", "command": "rawRequest", "params": { "path": "/experiments/99/metrics/main", "query": { "use_cache": 1 } } }
+```
+
+`method` defaults to `GET`; `POST`, `PUT` and `DELETE` are destructive and need confirmation, like other destructive commands. `body` is the JSON body and `headers` extra headers (credentials cannot be overridden). Paths stay under the API base (`/v1`).
+
 **Destructive actions** (start, stop, archive, delete) require confirmation. The server returns a confirmation prompt; only after the user has explicitly confirmed should you call again with `confirmed: true` to proceed.
 
 **Experiment creation from templates** also requires confirmation. The first call to `createExperimentFromTemplate` returns a *preview* — the resolved API payload (with names mapped to IDs) plus any warnings — without creating the experiment. Show the preview to the user, and only after they have explicitly confirmed should you call again with `confirmed: true` to actually create.
@@ -621,7 +631,9 @@ Read the `absmartly://docs/templates` resource for complete examples including:
 | `datasources` | Data source config | list, test, introspect |
 | `exportconfigs` | Export configuration | list, create, pause |
 
-Plus: `goaltags`, `metrictags`, `metriccategories`, `apikeys`, `permissions`, `assetroles`, `notifications`, `favorites`, `cors`, `updateschedules`, `customsections`, `platformconfig`, `activity`, `statistics`, `events`, `storageconfigs`, `actiondialogfields`.
+| `api` | Raw API requests (`abs api`) | rawRequest |
+
+Plus: `goaltags`, `metrictags`, `metriccategories`, `apikeys`, `permissions`, `assetroles`, `notifications`, `favorites`, `cors`, `updateschedules`, `customsections`, `customfields`, `platformconfig`, `activity`, `statistics`, `events`, `storageconfigs`, `actiondialogfields`.
 
 ---
 

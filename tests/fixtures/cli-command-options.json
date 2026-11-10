@@ -1,0 +1,2312 @@
+{
+  "generatedFrom": {
+    "@absmartly/cli": "1.17.1"
+  },
+  "globalOptions": "--show, --exclude, --show-only and --raw are the show/exclude/showOnly/raw params of the commands that summarize; the other global options are terminal output or credential settings",
+  "commands": {
+    "action-dialog-fields create": {
+      "mcp": "actiondialogfields.createActionDialogField",
+      "options": {
+        "jsonConfig": "data"
+      }
+    },
+    "action-dialog-fields get": {
+      "mcp": "actiondialogfields.getActionDialogField",
+      "options": {
+        "id": "fieldId"
+      }
+    },
+    "action-dialog-fields list": {
+      "mcp": "actiondialogfields.listActionDialogFields",
+      "options": {
+        "items": "items",
+        "page": "page"
+      }
+    },
+    "action-dialog-fields update": {
+      "mcp": "actiondialogfields.updateActionDialogField",
+      "options": {
+        "id": "fieldId",
+        "jsonConfig": "data"
+      }
+    },
+    "activity-feed list": {
+      "mcp": "activity.listActivity",
+      "options": {
+        "experiments": "experiments",
+        "items": "experiments",
+        "limit": "limit",
+        "since": "since",
+        "state": "state",
+        "search": "search",
+        "sort": "sort",
+        "notes": "includeNotes"
+      }
+    },
+    "activity-feed watch": {
+      "mcp": null,
+      "reason": "polling loop; call the command again",
+      "options": {}
+    },
+    "api": {
+      "mcp": "api.rawRequest",
+      "options": {
+        "path": "path",
+        "method": "method",
+        "data": "body",
+        "header": "headers"
+      }
+    },
+    "api-keys create": {
+      "mcp": "apikeys.createApiKey",
+      "options": {
+        "name": "data",
+        "description": "data",
+        "permissions": "data"
+      }
+    },
+    "api-keys delete": {
+      "mcp": "apikeys.deleteApiKey",
+      "options": {
+        "id": "keyId"
+      }
+    },
+    "api-keys get": {
+      "mcp": "apikeys.getApiKey",
+      "options": {
+        "id": "keyId"
+      }
+    },
+    "api-keys list": {
+      "mcp": "apikeys.listApiKeys",
+      "options": {
+        "items": "items",
+        "page": "page",
+        "search": "search",
+        "sort": "sort",
+        "asc": "asc",
+        "desc": "desc",
+        "archived": "archived",
+        "ids": "ids"
+      }
+    },
+    "api-keys update": {
+      "mcp": "apikeys.updateApiKey",
+      "options": {
+        "id": "keyId",
+        "name": "data",
+        "description": "data"
+      }
+    },
+    "apps archive": {
+      "mcp": "apps.archiveApp",
+      "options": {
+        "id": "appId",
+        "unarchive": "unarchive"
+      }
+    },
+    "apps create": {
+      "mcp": "apps.createApp",
+      "options": {
+        "name": "data"
+      }
+    },
+    "apps get": {
+      "mcp": "apps.getApp",
+      "options": {
+        "id": "appId"
+      }
+    },
+    "apps list": {
+      "mcp": "apps.listApps",
+      "options": {
+        "items": "items",
+        "page": "page",
+        "search": "search",
+        "sort": "sort",
+        "asc": "asc",
+        "desc": "desc",
+        "archived": "archived",
+        "ids": "ids"
+      }
+    },
+    "apps update": {
+      "mcp": "apps.updateApp",
+      "options": {
+        "id": "appId",
+        "name": "data"
+      }
+    },
+    "asset-roles create": {
+      "mcp": "assetroles.createAssetRole",
+      "options": {
+        "name": "data"
+      }
+    },
+    "asset-roles delete": {
+      "mcp": "assetroles.deleteAssetRole",
+      "options": {
+        "id": "roleId"
+      }
+    },
+    "asset-roles get": {
+      "mcp": "assetroles.getAssetRole",
+      "options": {
+        "id": "roleId"
+      }
+    },
+    "asset-roles list": {
+      "mcp": "assetroles.listAssetRoles",
+      "options": {
+        "items": "items",
+        "page": "page"
+      }
+    },
+    "asset-roles update": {
+      "mcp": "assetroles.updateAssetRole",
+      "options": {
+        "id": "roleId",
+        "name": "data"
+      }
+    },
+    "auth create-api-key": {
+      "mcp": "auth.createAuthApiKey",
+      "options": {
+        "name": "data",
+        "description": "data"
+      }
+    },
+    "auth delete-api-key": {
+      "mcp": "auth.deleteAuthApiKey",
+      "options": {
+        "id": "keyId"
+      }
+    },
+    "auth edit-profile": {
+      "mcp": "auth.editProfile",
+      "options": {
+        "firstName": "firstName",
+        "lastName": "lastName",
+        "department": "department",
+        "jobTitle": "jobTitle"
+      }
+    },
+    "auth get-api-key": {
+      "mcp": "auth.getAuthApiKey",
+      "options": {
+        "id": "keyId"
+      }
+    },
+    "auth list-api-keys": {
+      "mcp": "auth.listAuthApiKeys",
+      "options": {}
+    },
+    "auth login": {
+      "mcp": null,
+      "reason": "local CLI configuration or credentials",
+      "options": {}
+    },
+    "auth logout": {
+      "mcp": null,
+      "reason": "local CLI configuration or credentials",
+      "options": {}
+    },
+    "auth reset-my-password": {
+      "mcp": "auth.resetMyPassword",
+      "options": {}
+    },
+    "auth status": {
+      "mcp": null,
+      "reason": "local CLI configuration or credentials",
+      "options": {}
+    },
+    "auth update-api-key": {
+      "mcp": "auth.updateAuthApiKey",
+      "options": {
+        "id": "keyId",
+        "name": "data",
+        "description": "data"
+      }
+    },
+    "auth whoami": {
+      "mcp": "auth.whoami",
+      "options": {
+        "avatar": null
+      }
+    },
+    "config get": {
+      "mcp": null,
+      "reason": "local CLI configuration or credentials",
+      "options": {}
+    },
+    "config list": {
+      "mcp": null,
+      "reason": "local CLI configuration or credentials",
+      "options": {}
+    },
+    "config profiles delete": {
+      "mcp": null,
+      "reason": "local CLI configuration or credentials",
+      "options": {}
+    },
+    "config profiles list": {
+      "mcp": null,
+      "reason": "local CLI configuration or credentials",
+      "options": {}
+    },
+    "config profiles use": {
+      "mcp": null,
+      "reason": "local CLI configuration or credentials",
+      "options": {}
+    },
+    "config set": {
+      "mcp": null,
+      "reason": "local CLI configuration or credentials",
+      "options": {}
+    },
+    "config unset": {
+      "mcp": null,
+      "reason": "local CLI configuration or credentials",
+      "options": {}
+    },
+    "cors create": {
+      "mcp": "cors.createCorsOrigin",
+      "options": {
+        "origin": "data"
+      }
+    },
+    "cors delete": {
+      "mcp": "cors.deleteCorsOrigin",
+      "options": {
+        "id": "originId"
+      }
+    },
+    "cors get": {
+      "mcp": "cors.getCorsOrigin",
+      "options": {
+        "id": "originId"
+      }
+    },
+    "cors list": {
+      "mcp": "cors.listCorsOrigins",
+      "options": {
+        "items": "items",
+        "page": "page"
+      }
+    },
+    "cors update": {
+      "mcp": "cors.updateCorsOrigin",
+      "options": {
+        "id": "originId",
+        "origin": "data"
+      }
+    },
+    "custom-fields archive": {
+      "mcp": "customfields.archiveCustomField",
+      "options": {
+        "id": "fieldId",
+        "unarchive": "unarchive"
+      }
+    },
+    "custom-fields create": {
+      "mcp": "customfields.createCustomField",
+      "options": {
+        "name": "data",
+        "type": "data",
+        "defaultValue": "data"
+      }
+    },
+    "custom-fields get": {
+      "mcp": "customfields.getCustomField",
+      "options": {
+        "id": "fieldId"
+      }
+    },
+    "custom-fields list": {
+      "mcp": "customfields.listCustomFields",
+      "options": {
+        "items": "items",
+        "page": "page",
+        "search": "search",
+        "sort": "sort",
+        "asc": "asc",
+        "desc": "desc",
+        "archived": "archived",
+        "ids": "ids"
+      }
+    },
+    "custom-fields update": {
+      "mcp": "customfields.updateCustomField",
+      "options": {
+        "id": "fieldId",
+        "name": "data",
+        "type": "data",
+        "defaultValue": "data"
+      }
+    },
+    "custom-sections archive": {
+      "mcp": "customsections.archiveCustomSection",
+      "options": {
+        "id": "sectionId",
+        "unarchive": "unarchive"
+      }
+    },
+    "custom-sections create": {
+      "mcp": "customsections.createCustomSection",
+      "options": {
+        "name": "data",
+        "type": "data"
+      }
+    },
+    "custom-sections list": {
+      "mcp": "customsections.listCustomSections",
+      "options": {
+        "items": "items",
+        "page": "page"
+      }
+    },
+    "custom-sections reorder": {
+      "mcp": "customsections.reorderCustomSections",
+      "options": {
+        "sections": "ids"
+      }
+    },
+    "custom-sections update": {
+      "mcp": "customsections.updateCustomSection",
+      "options": {
+        "id": "sectionId",
+        "name": "data"
+      }
+    },
+    "datasources archive": {
+      "mcp": "datasources.archiveDatasource",
+      "options": {
+        "id": "datasourceId",
+        "unarchive": "unarchive"
+      }
+    },
+    "datasources create": {
+      "mcp": "datasources.createDatasource",
+      "options": {
+        "jsonConfig": "data"
+      }
+    },
+    "datasources delete": {
+      "mcp": "datasources.deleteDatasource",
+      "options": {
+        "id": "datasourceId"
+      }
+    },
+    "datasources get": {
+      "mcp": "datasources.getDatasource",
+      "options": {
+        "id": "datasourceId"
+      }
+    },
+    "datasources introspect": {
+      "mcp": "datasources.introspectDatasource",
+      "options": {
+        "jsonConfig": "config"
+      }
+    },
+    "datasources json-layouts create": {
+      "mcp": "datasources.createDatasourceJsonLayouts",
+      "options": {
+        "id": "datasourceId"
+      }
+    },
+    "datasources json-layouts preview": {
+      "mcp": "datasources.previewDatasourceJsonLayouts",
+      "options": {
+        "id": "datasourceId"
+      }
+    },
+    "datasources json-layouts recreate": {
+      "mcp": "datasources.recreateDatasourceJsonLayouts",
+      "options": {
+        "id": "datasourceId",
+        "yes": null
+      }
+    },
+    "datasources list": {
+      "mcp": "datasources.listDatasources",
+      "options": {
+        "items": "items",
+        "page": "page"
+      }
+    },
+    "datasources preview-query": {
+      "mcp": "datasources.previewDatasourceQuery",
+      "options": {
+        "jsonConfig": "config"
+      }
+    },
+    "datasources query": {
+      "mcp": "datasources.previewDatasourceQuery",
+      "options": {
+        "id": "datasourceId",
+        "sql": "query",
+        "limit": "limit",
+        "jsonConfig": "config"
+      }
+    },
+    "datasources schema": {
+      "mcp": "datasources.getDatasourceSchema",
+      "options": {
+        "id": "datasourceId"
+      }
+    },
+    "datasources set-default": {
+      "mcp": "datasources.setDefaultDatasource",
+      "options": {
+        "id": "datasourceId"
+      }
+    },
+    "datasources test": {
+      "mcp": "datasources.testDatasource",
+      "options": {
+        "jsonConfig": "config"
+      }
+    },
+    "datasources update": {
+      "mcp": "datasources.updateDatasource",
+      "options": {
+        "id": "datasourceId",
+        "jsonConfig": "data"
+      }
+    },
+    "datasources validate-query": {
+      "mcp": "datasources.validateDatasourceQuery",
+      "options": {
+        "jsonConfig": "config"
+      }
+    },
+    "doctor": {
+      "mcp": null,
+      "reason": "local CLI configuration or credentials",
+      "options": {}
+    },
+    "envs archive": {
+      "mcp": "envs.archiveEnv",
+      "options": {
+        "id": "envId",
+        "unarchive": "unarchive"
+      }
+    },
+    "envs create": {
+      "mcp": "envs.createEnv",
+      "options": {
+        "name": "data"
+      }
+    },
+    "envs get": {
+      "mcp": "envs.getEnv",
+      "options": {
+        "id": "envId"
+      }
+    },
+    "envs list": {
+      "mcp": "envs.listEnvs",
+      "options": {
+        "items": "items",
+        "page": "page",
+        "search": "search",
+        "sort": "sort",
+        "asc": "asc",
+        "desc": "desc",
+        "archived": "archived",
+        "ids": "ids"
+      }
+    },
+    "envs update": {
+      "mcp": "envs.updateEnv",
+      "options": {
+        "id": "envId",
+        "name": "data"
+      }
+    },
+    "events delete-unit-data": {
+      "mcp": "events.deleteEventUnitData",
+      "options": {
+        "units": "units"
+      }
+    },
+    "events history": {
+      "mcp": "events.listEventsHistory",
+      "options": {
+        "from": "from",
+        "to": "to",
+        "app": "applications",
+        "unitType": "unitTypes",
+        "eventType": "eventTypes",
+        "eventName": "eventNames",
+        "unitUid": "unitUids",
+        "envType": "environmentTypes",
+        "period": "period",
+        "tzOffset": "tzOffset"
+      }
+    },
+    "events json-layouts": {
+      "mcp": "events.getEventJsonLayouts",
+      "options": {
+        "source": "source",
+        "phase": "phase",
+        "prefix": "prefix",
+        "sourceId": "sourceId",
+        "from": "from",
+        "to": "to",
+        "match": "match",
+        "topLevel": "topLevel",
+        "maxDepth": "maxDepth"
+      }
+    },
+    "events json-values": {
+      "mcp": "events.getEventJsonValues",
+      "options": {
+        "eventType": "eventType",
+        "path": "path",
+        "experimentId": "experimentId",
+        "goalId": "goalId",
+        "from": "from",
+        "to": "to",
+        "match": "match"
+      }
+    },
+    "events list": {
+      "mcp": "events.listEvents",
+      "options": {
+        "from": "from",
+        "to": "to",
+        "app": "applications",
+        "unitType": "unitTypes",
+        "eventType": "eventTypes",
+        "eventName": "eventNames",
+        "unitUid": "unitUids",
+        "envType": "environmentTypes",
+        "validExposures": "validExposures",
+        "invalidExposures": "validExposures",
+        "items": "take",
+        "skip": "skip"
+      }
+    },
+    "events summary": {
+      "mcp": "events.getEventsSummary",
+      "options": {
+        "from": "from",
+        "to": "to",
+        "eventType": "eventType",
+        "groupBy": "groupBy",
+        "period": "period",
+        "cumulative": "cumulative",
+        "transpose": "transpose",
+        "visualization": null
+      }
+    },
+    "events unit-data": {
+      "mcp": "events.getEventUnitData",
+      "options": {
+        "units": "units"
+      }
+    },
+    "experiments access grant-team": {
+      "mcp": "experiments.grantExperimentAccessTeam",
+      "options": {
+        "id": "experimentId",
+        "team": "teamId",
+        "role": "role"
+      }
+    },
+    "experiments access grant-user": {
+      "mcp": "experiments.grantExperimentAccessUser",
+      "options": {
+        "id": "experimentId",
+        "user": "userId",
+        "role": "role"
+      }
+    },
+    "experiments access list-teams": {
+      "mcp": "experiments.listExperimentAccessTeams",
+      "options": {
+        "id": "experimentId"
+      }
+    },
+    "experiments access list-users": {
+      "mcp": "experiments.listExperimentAccessUsers",
+      "options": {
+        "id": "experimentId"
+      }
+    },
+    "experiments access revoke-team": {
+      "mcp": "experiments.revokeExperimentAccessTeam",
+      "options": {
+        "id": "experimentId",
+        "team": "teamId",
+        "role": "role"
+      }
+    },
+    "experiments access revoke-user": {
+      "mcp": "experiments.revokeExperimentAccessUser",
+      "options": {
+        "id": "experimentId",
+        "user": "userId",
+        "role": "role"
+      }
+    },
+    "experiments activity create": {
+      "mcp": "experiments.createExperimentNote",
+      "options": {
+        "id": "experimentId",
+        "note": "text"
+      }
+    },
+    "experiments activity edit": {
+      "mcp": "experiments.editExperimentNote",
+      "options": {
+        "experimentId": "experimentId",
+        "noteId": "noteId",
+        "note": "text"
+      }
+    },
+    "experiments activity list": {
+      "mcp": "experiments.listExperimentActivity",
+      "options": {
+        "id": "experimentId",
+        "notes": null,
+        "showImages": null
+      }
+    },
+    "experiments activity reply": {
+      "mcp": "experiments.replyToExperimentNote",
+      "options": {
+        "experimentId": "experimentId",
+        "noteId": "noteId",
+        "note": "text"
+      }
+    },
+    "experiments alerts dismiss": {
+      "mcp": "experiments.dismissAlert",
+      "options": {
+        "alertId": "alertId"
+      }
+    },
+    "experiments alerts list": {
+      "mcp": "experiments.listExperimentAlerts",
+      "options": {
+        "experimentId": "experimentId"
+      }
+    },
+    "experiments analyze": {
+      "mcp": "experiments.analyzeExperiment",
+      "options": {
+        "id": "experimentId"
+      }
+    },
+    "experiments annotations archive": {
+      "mcp": "experiments.archiveAnnotation",
+      "options": {
+        "annotationId": "annotationId",
+        "unarchive": "unarchive"
+      }
+    },
+    "experiments annotations create": {
+      "mcp": "experiments.createAnnotation",
+      "options": {
+        "experimentId": "experimentId",
+        "type": "data"
+      }
+    },
+    "experiments annotations list": {
+      "mcp": "experiments.listAnnotations",
+      "options": {
+        "experimentId": "experimentId"
+      }
+    },
+    "experiments annotations update": {
+      "mcp": "experiments.updateAnnotation",
+      "options": {
+        "annotationId": "annotationId",
+        "type": "data"
+      }
+    },
+    "experiments archive": {
+      "mcp": "experiments.archiveExperiment",
+      "options": {
+        "id": "experimentId",
+        "unarchive": "unarchive",
+        "note": "note",
+        "interactive": null,
+        "passThrough": null
+      }
+    },
+    "experiments bulk archive": {
+      "mcp": "experiments.bulkArchive",
+      "options": {
+        "ids": "ids",
+        "note": "note",
+        "stdin": null,
+        "dryRun": "dryRun",
+        "state": "state",
+        "app": "app",
+        "yes": null
+      }
+    },
+    "experiments bulk development": {
+      "mcp": "experiments.bulkDevelopment",
+      "options": {
+        "ids": "ids",
+        "note": "note",
+        "stdin": null,
+        "dryRun": "dryRun",
+        "state": "state",
+        "app": "app",
+        "yes": null
+      }
+    },
+    "experiments bulk full-on": {
+      "mcp": "experiments.bulkFullOn",
+      "options": {
+        "ids": "ids",
+        "variant": "variant",
+        "note": "note",
+        "stdin": null,
+        "dryRun": "dryRun",
+        "state": "state",
+        "app": "app",
+        "yes": null
+      }
+    },
+    "experiments bulk start": {
+      "mcp": "experiments.bulkStart",
+      "options": {
+        "ids": "ids",
+        "note": "note",
+        "stdin": null,
+        "dryRun": "dryRun",
+        "state": "state",
+        "app": "app",
+        "yes": null
+      }
+    },
+    "experiments bulk stop": {
+      "mcp": "experiments.bulkStop",
+      "options": {
+        "ids": "ids",
+        "reason": "reason",
+        "note": "note",
+        "stdin": null,
+        "dryRun": "dryRun",
+        "state": "state",
+        "app": "app",
+        "yes": null
+      }
+    },
+    "experiments clone": {
+      "mcp": "experiments.cloneExperiment",
+      "options": {
+        "id": "experimentId",
+        "name": "name",
+        "displayName": "displayName",
+        "state": "state",
+        "fromFile": "templateContent",
+        "interactive": null,
+        "dryRun": "dryRun"
+      }
+    },
+    "experiments create": {
+      "mcp": "experiments.createExperimentFromOptions",
+      "options": {
+        "fromFile": null,
+        "name": "name",
+        "displayName": "displayName",
+        "state": "state",
+        "variants": "variants",
+        "variantConfig": "variantConfig",
+        "applicationId": "applicationId",
+        "unitType": "unitType",
+        "primaryMetric": "primaryMetric",
+        "percentages": "percentages",
+        "percentageOfTraffic": "percentageOfTraffic",
+        "env": null,
+        "owner": "owner",
+        "screenshot": "screenshot",
+        "secondaryMetrics": "secondaryMetrics",
+        "guardrailMetrics": "guardrailMetrics",
+        "exploratoryMetrics": "exploratoryMetrics",
+        "teams": "teams",
+        "tags": "tags",
+        "audience": "audience",
+        "analysisType": "analysisType",
+        "requiredAlpha": "requiredAlpha",
+        "requiredPower": "requiredPower",
+        "baselineParticipants": "baselineParticipants",
+        "mde": "mde",
+        "baselineMean": "baselineMean",
+        "baselineStdev": "baselineStdev",
+        "gsFutilityType": "gsFutilityType",
+        "gsAnalysisCount": "gsAnalysisCount",
+        "gsMinAnalysisInterval": "gsMinAnalysisInterval",
+        "gsFirstAnalysisInterval": "gsFirstAnalysisInterval",
+        "gsMaxDurationInterval": "gsMaxDurationInterval",
+        "field": "customFields",
+        "interactive": null,
+        "dryRun": "dryRun",
+        "asCurl": null
+      }
+    },
+    "experiments custom-fields archive": {
+      "mcp": "experiments.archiveCustomField",
+      "options": {
+        "id": "fieldId",
+        "unarchive": "unarchive"
+      }
+    },
+    "experiments custom-fields create": {
+      "mcp": "experiments.createCustomField",
+      "options": {
+        "name": "data",
+        "type": "data",
+        "defaultValue": "data"
+      }
+    },
+    "experiments custom-fields get": {
+      "mcp": "experiments.getCustomField",
+      "options": {
+        "id": "fieldId"
+      }
+    },
+    "experiments custom-fields list": {
+      "mcp": "experiments.listCustomFields",
+      "options": {
+        "items": "items",
+        "page": "page"
+      }
+    },
+    "experiments custom-fields update": {
+      "mcp": "experiments.updateCustomField",
+      "options": {
+        "id": "fieldId",
+        "name": "data",
+        "type": "data",
+        "defaultValue": "data"
+      }
+    },
+    "experiments development": {
+      "mcp": "experiments.developmentExperiment",
+      "options": {
+        "id": "experimentId",
+        "note": "note",
+        "interactive": null,
+        "passThrough": null
+      }
+    },
+    "experiments diff": {
+      "mcp": "experiments.diffExperimentsCore",
+      "options": {
+        "id1": "experimentId1",
+        "id2": "experimentId2",
+        "iteration": "iteration"
+      }
+    },
+    "experiments estimate-participants": {
+      "mcp": "experiments.estimateParticipants",
+      "options": {
+        "unitType": "unitType",
+        "application": "application",
+        "from": "from",
+        "audience": "audience"
+      }
+    },
+    "experiments export": {
+      "mcp": "experiments.exportExperiment",
+      "options": {
+        "id": "experimentId",
+        "wait": null,
+        "download": null,
+        "resume": null,
+        "new": null,
+        "interval": null
+      }
+    },
+    "experiments follow": {
+      "mcp": "experiments.followExperiment",
+      "options": {
+        "id": "experimentId"
+      }
+    },
+    "experiments full-on": {
+      "mcp": "experiments.fullOnExperiment",
+      "options": {
+        "id": "experimentId",
+        "variant": "variant",
+        "note": "note",
+        "interactive": null,
+        "passThrough": null
+      }
+    },
+    "experiments generate-template": {
+      "mcp": "experiments.generateTemplate",
+      "options": {
+        "name": "name",
+        "type": "type",
+        "output": null
+      }
+    },
+    "experiments get": {
+      "mcp": "experiments.getExperiment",
+      "options": {
+        "id": "experimentId",
+        "activity": "activity",
+        "embedScreenshots": null,
+        "screenshotsDir": null,
+        "showImages": null
+      }
+    },
+    "experiments list": {
+      "mcp": "experiments.listExperiments",
+      "options": {
+        "state": "state",
+        "type": "type",
+        "app": "app",
+        "applications": "applications",
+        "search": "search",
+        "unitTypes": "unitTypes",
+        "owners": "owners",
+        "teams": "teams",
+        "tags": "tags",
+        "ids": "ids",
+        "impact": "impact",
+        "confidence": "confidence",
+        "significance": "significance",
+        "iterations": "iterations",
+        "iterationsOf": "iterationsOf",
+        "metric": "metric",
+        "metricRole": "metricRole",
+        "createdAfter": "createdAfter",
+        "createdBefore": "createdBefore",
+        "startedAfter": "startedAfter",
+        "startedBefore": "startedBefore",
+        "stoppedAfter": "stoppedAfter",
+        "stoppedBefore": "stoppedBefore",
+        "analysisType": "analysisType",
+        "runningType": "runningType",
+        "alertSrm": "alertSrm",
+        "alertCleanupNeeded": "alertCleanupNeeded",
+        "alertAudienceMismatch": "alertAudienceMismatch",
+        "alertSampleSizeReached": "alertSampleSizeReached",
+        "alertExperimentsInteract": "alertExperimentsInteract",
+        "alertGroupSequentialUpdated": "alertGroupSequentialUpdated",
+        "alertAssignmentConflict": "alertAssignmentConflict",
+        "alertMetricThresholdReached": "alertMetricThresholdReached",
+        "items": "items",
+        "page": "page",
+        "sort": "sort",
+        "asc": "asc",
+        "desc": "desc"
+      }
+    },
+    "experiments metrics add": {
+      "mcp": "experiments.addExperimentMetrics",
+      "options": {
+        "id": "experimentId",
+        "metrics": "metrics"
+      }
+    },
+    "experiments metrics confirm-impact": {
+      "mcp": "experiments.confirmMetricImpact",
+      "options": {
+        "experimentId": "experimentId",
+        "metricId": "metricId"
+      }
+    },
+    "experiments metrics deps": {
+      "mcp": "experiments.getMetricDeps",
+      "options": {
+        "metricId": "metricId"
+      }
+    },
+    "experiments metrics exclude": {
+      "mcp": "experiments.excludeExperimentMetric",
+      "options": {
+        "experimentId": "experimentId",
+        "metricId": "metricId"
+      }
+    },
+    "experiments metrics include": {
+      "mcp": "experiments.includeExperimentMetric",
+      "options": {
+        "experimentId": "experimentId",
+        "metricId": "metricId"
+      }
+    },
+    "experiments metrics list": {
+      "mcp": "experiments.listExperimentMetrics",
+      "options": {
+        "id": "experimentId"
+      }
+    },
+    "experiments metrics remove-impact": {
+      "mcp": "experiments.removeMetricImpact",
+      "options": {
+        "experimentId": "experimentId",
+        "metricId": "metricId"
+      }
+    },
+    "experiments metrics results": {
+      "mcp": "experiments.getMetricResults",
+      "options": {
+        "id": "experimentId",
+        "metric": "metricId",
+        "segment": "segment",
+        "filter": "filter",
+        "from": "from",
+        "to": "to",
+        "cached": "cached",
+        "ciBar": "ciBar",
+        "variantIndex": "variantIndex"
+      }
+    },
+    "experiments parent": {
+      "mcp": "experiments.getParentExperiment",
+      "options": {
+        "id": "experimentId"
+      }
+    },
+    "experiments recommendations dismiss": {
+      "mcp": "experiments.dismissRecommendedAction",
+      "options": {
+        "actionId": "actionId"
+      }
+    },
+    "experiments recommendations list": {
+      "mcp": "experiments.listRecommendedActions",
+      "options": {
+        "experimentId": "experimentId"
+      }
+    },
+    "experiments refresh-fields": {
+      "mcp": null,
+      "reason": "writes the CLI's local custom field cache",
+      "options": {}
+    },
+    "experiments request-update": {
+      "mcp": "experiments.requestUpdate",
+      "options": {
+        "id": "experimentId",
+        "tasks": "tasks",
+        "replaceGsa": "replaceGsa"
+      }
+    },
+    "experiments restart": {
+      "mcp": "experiments.restartExperiment",
+      "options": {
+        "id": "experimentId",
+        "fromFile": "templateContent",
+        "note": "note",
+        "reason": "reason",
+        "reshuffle": "reshuffle",
+        "state": "state",
+        "asType": "type",
+        "field": "customFields",
+        "interactive": null,
+        "dryRun": "dryRun"
+      }
+    },
+    "experiments schedule create": {
+      "mcp": "experiments.createScheduledAction",
+      "options": {
+        "id": "experimentId",
+        "action": "action",
+        "at": "scheduledAt",
+        "note": "note",
+        "reason": "reason"
+      }
+    },
+    "experiments schedule delete": {
+      "mcp": "experiments.deleteScheduledAction",
+      "options": {
+        "experimentId": "experimentId",
+        "actionId": "actionId"
+      }
+    },
+    "experiments search": {
+      "mcp": "experiments.searchExperiments",
+      "options": {
+        "query": "search",
+        "limit": "items"
+      }
+    },
+    "experiments start": {
+      "mcp": "experiments.startExperiment",
+      "options": {
+        "id": "experimentId",
+        "note": "note",
+        "interactive": null,
+        "passThrough": null
+      }
+    },
+    "experiments stop": {
+      "mcp": "experiments.stopExperiment",
+      "options": {
+        "id": "experimentId",
+        "reason": "reason",
+        "note": "note",
+        "interactive": null,
+        "passThrough": null
+      }
+    },
+    "experiments unfollow": {
+      "mcp": "experiments.unfollowExperiment",
+      "options": {
+        "id": "experimentId"
+      }
+    },
+    "experiments update": {
+      "mcp": "experiments.updateExperiment",
+      "options": {
+        "id": "experimentId",
+        "fromFile": "templateContent",
+        "name": "name",
+        "displayName": "displayName",
+        "state": "state",
+        "variants": "variants",
+        "variantConfig": "variantConfig",
+        "applicationId": "applicationId",
+        "unitType": "unitType",
+        "primaryMetric": "primaryMetric",
+        "secondaryMetrics": "secondaryMetrics",
+        "guardrailMetrics": "guardrailMetrics",
+        "exploratoryMetrics": "exploratoryMetrics",
+        "percentages": "percentages",
+        "percentageOfTraffic": "percentageOfTraffic",
+        "owner": "owner",
+        "screenshot": "screenshot",
+        "screenshotId": "screenshotId",
+        "teams": "teams",
+        "tags": "tags",
+        "audience": "audience",
+        "analysisType": "analysisType",
+        "requiredAlpha": "requiredAlpha",
+        "requiredPower": "requiredPower",
+        "baselineParticipants": "baselineParticipants",
+        "field": "customFields",
+        "note": "note",
+        "interactive": null,
+        "dryRun": "dryRun"
+      }
+    },
+    "experiments watch": {
+      "mcp": "experiments.watchExperimentTick",
+      "options": {
+        "id": "experimentId",
+        "interval": null,
+        "variantIndex": "variantIndex"
+      }
+    },
+    "export-configs archive": {
+      "mcp": "exportconfigs.archiveExportConfig",
+      "options": {
+        "id": "configId",
+        "unarchive": "unarchive"
+      }
+    },
+    "export-configs cancel-history": {
+      "mcp": "exportconfigs.cancelExportHistory",
+      "options": {
+        "export-config-id": "configId",
+        "history-id": "historyId",
+        "reason": "reason"
+      }
+    },
+    "export-configs create": {
+      "mcp": "exportconfigs.createExportConfig",
+      "options": {
+        "jsonConfig": "data"
+      }
+    },
+    "export-configs get": {
+      "mcp": "exportconfigs.getExportConfig",
+      "options": {
+        "id": "configId"
+      }
+    },
+    "export-configs histories": {
+      "mcp": "exportconfigs.listExportHistories",
+      "options": {
+        "id": "configId"
+      }
+    },
+    "export-configs list": {
+      "mcp": "exportconfigs.listExportConfigs",
+      "options": {
+        "items": "items",
+        "page": "page"
+      }
+    },
+    "export-configs pause": {
+      "mcp": "exportconfigs.pauseExportConfig",
+      "options": {
+        "id": "configId"
+      }
+    },
+    "export-configs update": {
+      "mcp": "exportconfigs.updateExportConfig",
+      "options": {
+        "id": "configId",
+        "jsonConfig": "data"
+      }
+    },
+    "favorites add": {
+      "mcp": "favorites.addFavorite",
+      "options": {
+        "type": "entityType",
+        "id": "entityId"
+      }
+    },
+    "favorites remove": {
+      "mcp": "favorites.removeFavorite",
+      "options": {
+        "type": "entityType",
+        "id": "entityId"
+      }
+    },
+    "goal-tags create": {
+      "mcp": "goaltags.createGoalTag",
+      "options": {
+        "tag": "data"
+      }
+    },
+    "goal-tags delete": {
+      "mcp": "goaltags.deleteGoalTag",
+      "options": {
+        "id": "tagId"
+      }
+    },
+    "goal-tags get": {
+      "mcp": "goaltags.getGoalTag",
+      "options": {
+        "id": "tagId"
+      }
+    },
+    "goal-tags list": {
+      "mcp": "goaltags.listGoalTags",
+      "options": {
+        "items": "items",
+        "page": "page",
+        "search": "search",
+        "sort": "sort",
+        "asc": "asc",
+        "desc": "desc",
+        "archived": "archived",
+        "ids": "ids"
+      }
+    },
+    "goal-tags update": {
+      "mcp": "goaltags.updateGoalTag",
+      "options": {
+        "id": "tagId",
+        "tag": "data"
+      }
+    },
+    "goals access grant-team": {
+      "mcp": "goals.grantGoalAccessTeam",
+      "options": {
+        "id": "goalId",
+        "team": "teamId",
+        "role": "role"
+      }
+    },
+    "goals access grant-user": {
+      "mcp": "goals.grantGoalAccessUser",
+      "options": {
+        "id": "goalId",
+        "user": "userId",
+        "role": "role"
+      }
+    },
+    "goals access list-teams": {
+      "mcp": "goals.listGoalAccessTeams",
+      "options": {
+        "id": "goalId"
+      }
+    },
+    "goals access list-users": {
+      "mcp": "goals.listGoalAccessUsers",
+      "options": {
+        "id": "goalId"
+      }
+    },
+    "goals access revoke-team": {
+      "mcp": "goals.revokeGoalAccessTeam",
+      "options": {
+        "id": "goalId",
+        "team": "teamId",
+        "role": "role"
+      }
+    },
+    "goals access revoke-user": {
+      "mcp": "goals.revokeGoalAccessUser",
+      "options": {
+        "id": "goalId",
+        "user": "userId",
+        "role": "role"
+      }
+    },
+    "goals create": {
+      "mcp": "goals.createGoal",
+      "options": {
+        "name": "data",
+        "description": "data"
+      }
+    },
+    "goals follow": {
+      "mcp": "goals.followGoal",
+      "options": {
+        "id": "goalId"
+      }
+    },
+    "goals get": {
+      "mcp": "goals.getGoal",
+      "options": {
+        "id": "goalId"
+      }
+    },
+    "goals list": {
+      "mcp": "goals.listGoals",
+      "options": {
+        "items": "items",
+        "page": "page",
+        "search": "search",
+        "sort": "sort",
+        "asc": "asc",
+        "desc": "desc",
+        "archived": "archived",
+        "ids": "ids"
+      }
+    },
+    "goals unfollow": {
+      "mcp": "goals.unfollowGoal",
+      "options": {
+        "id": "goalId"
+      }
+    },
+    "goals update": {
+      "mcp": "goals.updateGoal",
+      "options": {
+        "id": "goalId",
+        "description": "data"
+      }
+    },
+    "insights decisions": {
+      "mcp": "insights.getDecisionInsights",
+      "options": {
+        "from": "from",
+        "to": "to",
+        "aggregation": "aggregation",
+        "unitTypes": "unitTypes",
+        "teams": "teams",
+        "owners": "owners"
+      }
+    },
+    "insights decisions-history": {
+      "mcp": "insights.getDecisionInsightsHistory",
+      "options": {
+        "from": "from",
+        "to": "to",
+        "aggregation": "aggregation",
+        "teams": "teams",
+        "applications": "applications"
+      }
+    },
+    "insights velocity": {
+      "mcp": "insights.getVelocityInsights",
+      "options": {
+        "from": "from",
+        "to": "to",
+        "aggregation": "aggregation",
+        "unitTypes": "unitTypes",
+        "teams": "teams",
+        "owners": "owners"
+      }
+    },
+    "insights velocity-detail": {
+      "mcp": "insights.getVelocityInsightsDetail",
+      "options": {
+        "from": "from",
+        "to": "to",
+        "aggregation": "aggregation",
+        "teams": "teams",
+        "applications": "applications"
+      }
+    },
+    "metric-categories archive": {
+      "mcp": "metriccategories.archiveMetricCategory",
+      "options": {
+        "id": "categoryId",
+        "unarchive": "unarchive"
+      }
+    },
+    "metric-categories create": {
+      "mcp": "metriccategories.createMetricCategory",
+      "options": {
+        "name": "data",
+        "description": "data",
+        "color": "data"
+      }
+    },
+    "metric-categories get": {
+      "mcp": "metriccategories.getMetricCategory",
+      "options": {
+        "id": "categoryId"
+      }
+    },
+    "metric-categories list": {
+      "mcp": "metriccategories.listMetricCategories",
+      "options": {
+        "items": "items",
+        "page": "page",
+        "search": "search",
+        "sort": "sort",
+        "asc": "asc",
+        "desc": "desc",
+        "archived": "archived",
+        "ids": "ids"
+      }
+    },
+    "metric-categories update": {
+      "mcp": "metriccategories.updateMetricCategory",
+      "options": {
+        "id": "categoryId",
+        "name": "data",
+        "description": "data",
+        "color": "data"
+      }
+    },
+    "metric-tags create": {
+      "mcp": "metrictags.createMetricTag",
+      "options": {
+        "tag": "data"
+      }
+    },
+    "metric-tags delete": {
+      "mcp": "metrictags.deleteMetricTag",
+      "options": {
+        "id": "tagId"
+      }
+    },
+    "metric-tags get": {
+      "mcp": "metrictags.getMetricTag",
+      "options": {
+        "id": "tagId"
+      }
+    },
+    "metric-tags list": {
+      "mcp": "metrictags.listMetricTags",
+      "options": {
+        "items": "items",
+        "page": "page",
+        "search": "search",
+        "sort": "sort",
+        "asc": "asc",
+        "desc": "desc",
+        "archived": "archived",
+        "ids": "ids"
+      }
+    },
+    "metric-tags update": {
+      "mcp": "metrictags.updateMetricTag",
+      "options": {
+        "id": "tagId",
+        "tag": "data"
+      }
+    },
+    "metrics access grant-team": {
+      "mcp": "metrics.grantMetricAccessTeam",
+      "options": {
+        "id": "metricId",
+        "team": "teamId",
+        "role": "assetRoleId"
+      }
+    },
+    "metrics access grant-user": {
+      "mcp": "metrics.grantMetricAccessUser",
+      "options": {
+        "id": "metricId",
+        "user": "userId",
+        "role": "assetRoleId"
+      }
+    },
+    "metrics access list-teams": {
+      "mcp": "metrics.listMetricAccessTeams",
+      "options": {
+        "id": "metricId"
+      }
+    },
+    "metrics access list-users": {
+      "mcp": "metrics.listMetricAccessUsers",
+      "options": {
+        "id": "metricId"
+      }
+    },
+    "metrics access revoke-team": {
+      "mcp": "metrics.revokeMetricAccessTeam",
+      "options": {
+        "id": "metricId",
+        "team": "teamId",
+        "role": "assetRoleId"
+      }
+    },
+    "metrics access revoke-user": {
+      "mcp": "metrics.revokeMetricAccessUser",
+      "options": {
+        "id": "metricId",
+        "user": "userId",
+        "role": "assetRoleId"
+      }
+    },
+    "metrics activate": {
+      "mcp": "metrics.activateMetric",
+      "options": {
+        "id": "metricId",
+        "reason": "reason"
+      }
+    },
+    "metrics archive": {
+      "mcp": "metrics.archiveMetric",
+      "options": {
+        "id": "metricId",
+        "unarchive": "unarchive"
+      }
+    },
+    "metrics create": {
+      "mcp": "metrics.createMetric",
+      "options": {
+        "name": "data",
+        "type": "data",
+        "description": "data",
+        "effect": "data",
+        "goal": "data",
+        "goalId": "data",
+        "owner": "data",
+        "formatStr": "data",
+        "scale": "data",
+        "precision": "data",
+        "meanFormatStr": "data",
+        "meanScale": "data",
+        "meanPrecision": "data",
+        "outlierLimitMethod": "data",
+        "valueSourceProperty": "data",
+        "propertyFilter": "data",
+        "retentionTime": "data",
+        "retentionTimeReference": "data",
+        "activityInterval": "data",
+        "customSql": "data",
+        "customStatisticsType": "data",
+        "datasourceId": "data",
+        "vrLookbackInterval": "data",
+        "relationKind": "data",
+        "relationRefundOperation": "data",
+        "relationForeignDuplicateOperation": "data",
+        "numeratorType": "data",
+        "denominatorType": "data",
+        "denominatorOutlierLimitMethod": "data",
+        "denominatorGoal": "data",
+        "denominatorValueSourceProperty": "data",
+        "denominatorPropertyFilter": "data",
+        "denominatorRetentionTime": "data",
+        "denominatorRetentionTimeReference": "data",
+        "denominatorActivityInterval": "data",
+        "denominatorCustomSql": "data",
+        "denominatorCustomStatisticsType": "data",
+        "denominatorVrLookbackInterval": "data",
+        "denominatorRelationKind": "data",
+        "denominatorRelationRefundOperation": "data",
+        "denominatorRelationForeignDuplicateOperation": "data",
+        "ratioCondition": "data",
+        "activate": "activate",
+        "newVersion": "newVersion",
+        "reason": "reason"
+      }
+    },
+    "metrics follow": {
+      "mcp": "metrics.followMetric",
+      "options": {
+        "id": "metricId"
+      }
+    },
+    "metrics get": {
+      "mcp": "metrics.getMetric",
+      "options": {
+        "id": "metricId"
+      }
+    },
+    "metrics list": {
+      "mcp": "metrics.listMetrics",
+      "options": {
+        "includeDrafts": "include_drafts",
+        "owners": "owners",
+        "teams": "teams",
+        "reviewStatus": "reviewStatus",
+        "metricType": "metricType",
+        "goal": "goal",
+        "outlierLimiting": "outlierLimiting",
+        "outlierMethod": "outlierMethod",
+        "hasPropertyFilter": "hasPropertyFilter",
+        "propertyFilter": "hasPropertyFilter",
+        "propertyFilterPath": "propertyFilterPath",
+        "propertyFilterContains": "propertyFilterContains",
+        "impactDirection": "impactDirection",
+        "cuped": "cuped",
+        "items": "items",
+        "page": "page",
+        "search": "search",
+        "sort": "sort",
+        "asc": "asc",
+        "desc": "desc",
+        "archived": "archived",
+        "ids": "ids"
+      }
+    },
+    "metrics review approve": {
+      "mcp": "metrics.approveMetricReview",
+      "options": {
+        "id": "metricId"
+      }
+    },
+    "metrics review comment": {
+      "mcp": "metrics.addMetricReviewComment",
+      "options": {
+        "id": "metricId",
+        "message": "text"
+      }
+    },
+    "metrics review comments": {
+      "mcp": "metrics.listMetricReviewComments",
+      "options": {
+        "id": "metricId"
+      }
+    },
+    "metrics review reply": {
+      "mcp": "metrics.replyToMetricReviewComment",
+      "options": {
+        "id": "metricId",
+        "commentId": "commentId",
+        "message": "text"
+      }
+    },
+    "metrics review request": {
+      "mcp": "metrics.requestMetricReview",
+      "options": {
+        "id": "metricId"
+      }
+    },
+    "metrics review status": {
+      "mcp": "metrics.getMetricReview",
+      "options": {
+        "id": "metricId"
+      }
+    },
+    "metrics unfollow": {
+      "mcp": "metrics.unfollowMetric",
+      "options": {
+        "id": "metricId"
+      }
+    },
+    "metrics update": {
+      "mcp": "metrics.updateMetric",
+      "options": {
+        "id": "metricId",
+        "name": "data",
+        "description": "data",
+        "owner": "data"
+      }
+    },
+    "metrics version": {
+      "mcp": "metrics.createMetricVersion",
+      "options": {
+        "id": "metricId",
+        "reason": "reason",
+        "name": "data",
+        "type": "data",
+        "description": "data",
+        "effect": "data",
+        "goal": "data",
+        "goalId": "data",
+        "owner": "data",
+        "formatStr": "data",
+        "scale": "data",
+        "precision": "data",
+        "meanFormatStr": "data",
+        "meanScale": "data",
+        "meanPrecision": "data",
+        "outlierLimitMethod": "data",
+        "valueSourceProperty": "data",
+        "propertyFilter": "data",
+        "retentionTime": "data",
+        "retentionTimeReference": "data",
+        "activityInterval": "data",
+        "customSql": "data",
+        "customStatisticsType": "data",
+        "datasourceId": "data",
+        "vrLookbackInterval": "data",
+        "relationKind": "data",
+        "relationRefundOperation": "data",
+        "relationForeignDuplicateOperation": "data",
+        "numeratorType": "data",
+        "denominatorType": "data",
+        "denominatorOutlierLimitMethod": "data",
+        "denominatorGoal": "data",
+        "denominatorValueSourceProperty": "data",
+        "denominatorPropertyFilter": "data",
+        "denominatorRetentionTime": "data",
+        "denominatorRetentionTimeReference": "data",
+        "denominatorActivityInterval": "data",
+        "denominatorCustomSql": "data",
+        "denominatorCustomStatisticsType": "data",
+        "denominatorVrLookbackInterval": "data",
+        "denominatorRelationKind": "data",
+        "denominatorRelationRefundOperation": "data",
+        "denominatorRelationForeignDuplicateOperation": "data",
+        "ratioCondition": "data",
+        "activate": "activate"
+      }
+    },
+    "notifications check": {
+      "mcp": "notifications.checkNotifications",
+      "options": {
+        "lastId": "lastId"
+      }
+    },
+    "notifications list": {
+      "mcp": "notifications.listNotifications",
+      "options": {
+        "cursor": "cursor",
+        "limit": "limit"
+      }
+    },
+    "notifications mark-read": {
+      "mcp": "notifications.markNotificationsRead",
+      "options": {
+        "ids": "ids"
+      }
+    },
+    "notifications mark-seen": {
+      "mcp": "notifications.markNotificationsSeen",
+      "options": {}
+    },
+    "open": {
+      "mcp": null,
+      "reason": "opens a browser",
+      "options": {}
+    },
+    "permissions categories": {
+      "mcp": "permissions.listPermissionCategories",
+      "options": {
+        "items": "items",
+        "page": "page"
+      }
+    },
+    "permissions list": {
+      "mcp": "permissions.listPermissions",
+      "options": {
+        "items": "items",
+        "page": "page"
+      }
+    },
+    "permissions policies": {
+      "mcp": "permissions.listAccessControlPolicies",
+      "options": {
+        "items": "items",
+        "page": "page"
+      }
+    },
+    "platform-config get": {
+      "mcp": "platformconfig.getPlatformConfig",
+      "options": {
+        "id": "configKey"
+      }
+    },
+    "platform-config list": {
+      "mcp": "platformconfig.listPlatformConfigs",
+      "options": {}
+    },
+    "platform-config update": {
+      "mcp": "platformconfig.updatePlatformConfig",
+      "options": {
+        "id": "configKey",
+        "value": "data"
+      }
+    },
+    "roles create": {
+      "mcp": "roles.createRole",
+      "options": {
+        "name": "data",
+        "description": "data"
+      }
+    },
+    "roles delete": {
+      "mcp": "roles.deleteRole",
+      "options": {
+        "id": "roleId"
+      }
+    },
+    "roles get": {
+      "mcp": "roles.getRole",
+      "options": {
+        "id": "roleId"
+      }
+    },
+    "roles list": {
+      "mcp": "roles.listRoles",
+      "options": {
+        "items": "items",
+        "page": "page",
+        "search": "search",
+        "sort": "sort",
+        "asc": "asc",
+        "desc": "desc",
+        "archived": "archived",
+        "ids": "ids"
+      }
+    },
+    "roles update": {
+      "mcp": "roles.updateRole",
+      "options": {
+        "id": "roleId",
+        "name": "data",
+        "description": "data"
+      }
+    },
+    "segments create": {
+      "mcp": "segments.createSegment",
+      "options": {
+        "name": "data",
+        "attribute": "data",
+        "description": "data"
+      }
+    },
+    "segments delete": {
+      "mcp": "segments.deleteSegment",
+      "options": {
+        "id": "segmentId"
+      }
+    },
+    "segments get": {
+      "mcp": "segments.getSegment",
+      "options": {
+        "id": "segmentId"
+      }
+    },
+    "segments list": {
+      "mcp": "segments.listSegments",
+      "options": {
+        "items": "items",
+        "page": "page",
+        "search": "search",
+        "sort": "sort",
+        "asc": "asc",
+        "desc": "desc",
+        "archived": "archived",
+        "ids": "ids"
+      }
+    },
+    "segments update": {
+      "mcp": "segments.updateSegment",
+      "options": {
+        "id": "segmentId",
+        "displayName": "data",
+        "description": "data"
+      }
+    },
+    "setup": {
+      "mcp": null,
+      "reason": "local CLI configuration or credentials",
+      "options": {}
+    },
+    "statistics power-matrix": {
+      "mcp": "statistics.getPowerMatrix",
+      "options": {
+        "jsonConfig": "params",
+        "analysisType": "analysisType",
+        "metricType": "metricType",
+        "metricMean": "metricMean",
+        "metricVariance": "metricVariance",
+        "metricCustomStatisticsType": "metricCustomStatisticsType",
+        "alpha": "alpha",
+        "powers": "powers",
+        "split": "split",
+        "sampleSizes": "sampleSizes",
+        "minimumDetectableEffects": "minimumDetectableEffects",
+        "twoSided": "twoSided",
+        "participants": "participants",
+        "futilityType": "futilityType",
+        "firstAnalysis": "firstAnalysis",
+        "minAnalysisInterval": "minAnalysisInterval"
+      }
+    },
+    "storage-configs create": {
+      "mcp": "storageconfigs.createStorageConfig",
+      "options": {
+        "jsonConfig": "data"
+      }
+    },
+    "storage-configs get": {
+      "mcp": "storageconfigs.getStorageConfig",
+      "options": {
+        "id": "configId"
+      }
+    },
+    "storage-configs list": {
+      "mcp": "storageconfigs.listStorageConfigs",
+      "options": {
+        "items": "items",
+        "page": "page"
+      }
+    },
+    "storage-configs test": {
+      "mcp": "storageconfigs.testStorageConfig",
+      "options": {
+        "jsonConfig": null
+      }
+    },
+    "storage-configs update": {
+      "mcp": "storageconfigs.updateStorageConfig",
+      "options": {
+        "id": "configId",
+        "jsonConfig": "data"
+      }
+    },
+    "tags create": {
+      "mcp": "tags.createTag",
+      "options": {
+        "tag": "data"
+      }
+    },
+    "tags delete": {
+      "mcp": "tags.deleteTag",
+      "options": {
+        "id": "tagId"
+      }
+    },
+    "tags get": {
+      "mcp": "tags.getTag",
+      "options": {
+        "id": "tagId"
+      }
+    },
+    "tags list": {
+      "mcp": "tags.listTags",
+      "options": {
+        "items": "items",
+        "page": "page",
+        "search": "search",
+        "sort": "sort",
+        "asc": "asc",
+        "desc": "desc",
+        "archived": "archived",
+        "ids": "ids"
+      }
+    },
+    "tags update": {
+      "mcp": "tags.updateTag",
+      "options": {
+        "id": "tagId",
+        "tag": "data"
+      }
+    },
+    "teams archive": {
+      "mcp": "teams.archiveTeam",
+      "options": {
+        "id": "teamId",
+        "unarchive": "unarchive"
+      }
+    },
+    "teams create": {
+      "mcp": "teams.createTeam",
+      "options": {
+        "name": "data",
+        "description": "data"
+      }
+    },
+    "teams get": {
+      "mcp": "teams.getTeam",
+      "options": {
+        "id": "teamId"
+      }
+    },
+    "teams list": {
+      "mcp": "teams.listTeams",
+      "options": {
+        "includeArchived": "includeArchived",
+        "items": "items",
+        "page": "page",
+        "search": "search",
+        "sort": "sort",
+        "asc": "asc",
+        "desc": "desc",
+        "archived": "archived",
+        "ids": "ids"
+      }
+    },
+    "teams members add": {
+      "mcp": "teams.addTeamMembers",
+      "options": {
+        "id": "teamId",
+        "users": "userIds",
+        "roles": "roleIds"
+      }
+    },
+    "teams members edit-roles": {
+      "mcp": "teams.editTeamMemberRoles",
+      "options": {
+        "id": "teamId",
+        "users": "userId",
+        "roles": "roles"
+      }
+    },
+    "teams members list": {
+      "mcp": "teams.listTeamMembers",
+      "options": {
+        "id": "teamId"
+      }
+    },
+    "teams members remove": {
+      "mcp": "teams.removeTeamMembers",
+      "options": {
+        "id": "teamId",
+        "users": "userIds"
+      }
+    },
+    "teams update": {
+      "mcp": "teams.updateTeam",
+      "options": {
+        "id": "teamId",
+        "description": "data"
+      }
+    },
+    "units archive": {
+      "mcp": "units.archiveUnit",
+      "options": {
+        "id": "unitId",
+        "unarchive": "unarchive"
+      }
+    },
+    "units create": {
+      "mcp": "units.createUnit",
+      "options": {
+        "name": "data",
+        "description": "data"
+      }
+    },
+    "units get": {
+      "mcp": "units.getUnit",
+      "options": {
+        "id": "unitId"
+      }
+    },
+    "units list": {
+      "mcp": "units.listUnits",
+      "options": {
+        "items": "items",
+        "page": "page",
+        "search": "search",
+        "sort": "sort",
+        "asc": "asc",
+        "desc": "desc",
+        "archived": "archived",
+        "ids": "ids"
+      }
+    },
+    "units update": {
+      "mcp": "units.updateUnit",
+      "options": {
+        "id": "unitId",
+        "name": "data",
+        "description": "data"
+      }
+    },
+    "update-schedules create": {
+      "mcp": "updateschedules.createUpdateSchedule",
+      "options": {
+        "jsonConfig": "data"
+      }
+    },
+    "update-schedules delete": {
+      "mcp": "updateschedules.deleteUpdateSchedule",
+      "options": {
+        "id": "scheduleId"
+      }
+    },
+    "update-schedules get": {
+      "mcp": "updateschedules.getUpdateSchedule",
+      "options": {
+        "id": "scheduleId"
+      }
+    },
+    "update-schedules list": {
+      "mcp": "updateschedules.listUpdateSchedules",
+      "options": {
+        "items": "items",
+        "page": "page"
+      }
+    },
+    "update-schedules update": {
+      "mcp": "updateschedules.updateUpdateSchedule",
+      "options": {
+        "id": "scheduleId",
+        "jsonConfig": "data"
+      }
+    },
+    "users api-keys create": {
+      "mcp": "users.createUserApiKey",
+      "options": {
+        "user": "userId",
+        "name": "data",
+        "description": "data"
+      }
+    },
+    "users api-keys delete": {
+      "mcp": "users.deleteUserApiKey",
+      "options": {
+        "id": "keyId",
+        "user": "userId"
+      }
+    },
+    "users api-keys get": {
+      "mcp": "users.getUserApiKey",
+      "options": {
+        "id": "keyId",
+        "user": "userId"
+      }
+    },
+    "users api-keys list": {
+      "mcp": "users.listUserApiKeys",
+      "options": {
+        "user": "userId",
+        "items": "items",
+        "page": "page"
+      }
+    },
+    "users api-keys update": {
+      "mcp": "users.updateUserApiKey",
+      "options": {
+        "id": "keyId",
+        "user": "userId",
+        "name": "data",
+        "description": "data"
+      }
+    },
+    "users archive": {
+      "mcp": "users.archiveUser",
+      "options": {
+        "id": "userId",
+        "unarchive": "unarchive"
+      }
+    },
+    "users create": {
+      "mcp": "users.createUser",
+      "options": {
+        "email": "data",
+        "name": "data",
+        "role": "role"
+      }
+    },
+    "users get": {
+      "mcp": "users.getUser",
+      "options": {
+        "id": "userId",
+        "showAvatars": null
+      }
+    },
+    "users list": {
+      "mcp": "users.listUsers",
+      "options": {
+        "includeArchived": "includeArchived",
+        "search": "search",
+        "sort": "sort",
+        "asc": "asc",
+        "desc": "desc",
+        "ids": "ids",
+        "department": "department",
+        "role": "role",
+        "jobTitle": "jobTitle",
+        "email": "email",
+        "name": "name",
+        "contains": "contains",
+        "showAvatars": null,
+        "items": "items",
+        "page": "page"
+      }
+    },
+    "users reset-password": {
+      "mcp": "users.resetUserPassword",
+      "options": {
+        "id": "userId"
+      }
+    },
+    "users update": {
+      "mcp": "users.updateUser",
+      "options": {
+        "id": "userId",
+        "name": "data",
+        "role": "role"
+      }
+    },
+    "version": {
+      "mcp": null,
+      "reason": "local CLI configuration or credentials",
+      "options": {}
+    },
+    "webhooks create": {
+      "mcp": "webhooks.createWebhook",
+      "options": {
+        "name": "data",
+        "url": "data",
+        "description": "data",
+        "enabled": "data",
+        "ordered": "data",
+        "maxRetries": "data"
+      }
+    },
+    "webhooks delete": {
+      "mcp": "webhooks.deleteWebhook",
+      "options": {
+        "id": "webhookId"
+      }
+    },
+    "webhooks events": {
+      "mcp": "webhooks.listWebhookEvents",
+      "options": {}
+    },
+    "webhooks get": {
+      "mcp": "webhooks.getWebhook",
+      "options": {
+        "id": "webhookId"
+      }
+    },
+    "webhooks list": {
+      "mcp": "webhooks.listWebhooks",
+      "options": {
+        "items": "items",
+        "page": "page",
+        "search": "search",
+        "sort": "sort",
+        "asc": "asc",
+        "desc": "desc",
+        "archived": "archived",
+        "ids": "ids"
+      }
+    },
+    "webhooks update": {
+      "mcp": "webhooks.updateWebhook",
+      "options": {
+        "id": "webhookId",
+        "name": "data",
+        "url": "data",
+        "description": "data",
+        "enabled": "data",
+        "ordered": "data",
+        "maxRetries": "data"
+      }
+    }
+  }
+}

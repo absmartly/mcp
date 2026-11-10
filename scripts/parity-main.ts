@@ -111,6 +111,10 @@ export const EXPECTED_DIFFERENCES: Record<string, { reason: string; branch: Outc
     reason: "ID values are normalised to integers in bodies too (user_ids [2], was [\"2\"])",
     branch: {"requests": [{"method": "PUT", "url": "/teams/1/members/add", "data": {"user_ids": [2]}}], "result": {"data": {"teamId": 1, "addedUsers": 1}}},
   },
+  "experiments.updateExperiment {\"experimentId\":5,\"changes\":{\"name\":\"n\"},\"screenshotId\":[\"0:12\"]}": {
+    reason: "2.2.0: screenshotId (CLI --screenshot-id) is applied, merged under the explicit changes (2.0.1 ignored it)",
+    branch: {"requests":[{"method":"GET","url":"/experiments/5"},{"method":"PUT","url":"/experiments/5","data":{"id":5,"data":{"name":"n","type":"test","state":"running","percentages":"50/50","owners":[],"teams":[],"experiment_tags":[],"applications":[],"primary_metric":{"metric_id":0},"secondary_metrics":[],"variants":[{"variant":0,"name":"a","config":"{}"},{"variant":1,"name":"b","config":"{}"}],"variant_screenshots":[{"variant":0,"screenshot_file_upload_id":12}],"custom_section_field_values":{}}}}],"result":{"data":{"id":5}}},
+  },
   "experiments.createAnnotation {\"experimentId\":\"5\",\"data\":{\"type\":\"x\"}}": {
     reason: "ID values are normalised to integers in bodies too (experiment_id 5, was \"5\")",
     branch: {"requests": [{"method": "POST", "url": "/experiment_annotations", "data": {"type": "x", "experiment_id": 5}}], "result": {"data": [{"id": 1, "name": "entity"}]}},
@@ -172,6 +176,13 @@ export const PARITY_CALLS: Call[] = [
   { group: "storageconfigs", command: "testStorageConfig", params: { configId: 3 } },
   { group: "teams", command: "addTeamMembers", params: { teamId: 1, userIds: ["2"] } },
   { group: "experiments", command: "createAnnotation", params: { experimentId: "5", data: { type: "x" } } },
+  // 2.2.0 additions: 2.0 call shapes that must be unchanged by the new runners.
+  { group: "goals", command: "listGoals", params: { items: 5, page: 1 } },
+  { group: "users", command: "listUsers", params: { items: 5, page: 1, includeArchived: true } },
+  { group: "metrics", command: "listMetrics", params: { items: 5, page: 1, search: "x" } },
+  { group: "users", command: "createUser", params: { data: { email: "a@b.c", first_name: "A" } } },
+  { group: "statistics", command: "getPowerMatrix", params: { params: { alpha: 0.05 } } },
+  { group: "experiments", command: "restartExperiment", params: { experimentId: 5, reason: "testing" } },
 ];
 
 const EXPERIMENT = {

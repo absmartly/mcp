@@ -37,6 +37,11 @@ jobs:
       - name: Endpoint manifest is current
         run: npm run manifest:check
 
+      # Every option of the installed CLI maps to an execute_command param (or
+      # a stated reason it does not apply); a CLI upgrade with a new option fails here.
+      - name: CLI option parity fixture is current
+        run: npm run parity:cli -- --check
+
       # executeCommand must dispatch as 2.0.1 did, apart from the listed
       # intentional differences (#66). The baseline is pinned to the 2.0.1
       # commit (scripts/parity-main.ts PARITY_BASELINE, printed by
