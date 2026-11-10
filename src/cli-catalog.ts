@@ -2714,7 +2714,6 @@ const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
     listUsers: async (client, raw) => {
       const params = sortDirection(raw);
       if (!hasUserFilters(params)) return CORE_MODULES.users.listUsers(client, params);
-      // The APIClient.listUsers options the scan honours on every page.
       const nativeOptions = {
         ...(params.includeArchived !== undefined && { includeArchived: params.includeArchived }),
         ...(params.search !== undefined && { search: params.search }),
