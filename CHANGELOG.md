@@ -16,6 +16,7 @@
 
 - Variant screenshot sources must be http(s) URLs or `data:` URIs; the server does not read local file paths (the CLI does, from the caller's own disk).
 - `updateExperiment` applies `screenshotId` and the other CLI-style fields (2.0.1 ignored every key but `changes`); an explicit `changes` field wins over a CLI-style field.
+- `updateExperiment` with neither `changes` nor a field is an error (2.0.1 sent a PUT that changed nothing). A documented `dryRun: true` is never asked for confirmation.
 - `getMetricResults` `metricId` is a documented ID: an invalid one is rejected before any request.
 - `discover_commands` listings are also bounded by size, so a long entry (like `listExperiments`) cannot push a listing over the response limit.
 
