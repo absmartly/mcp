@@ -107,6 +107,15 @@ export function filterColumnarRows(data: unknown, column: string, opts: Columnar
   return { ...data, rows };
 }
 
+/** A columnar result ({ columnNames, rows }) as row objects (core/events/events.js columnarToRows; not in the CLI 1.7 datasources index). */
+export function columnarToRows(data: unknown): unknown[] {
+  if (isColumnar(data)) {
+    return data.rows.map((row) => Object.fromEntries(data.columnNames.map((name, i) => [name, row[i]])));
+  }
+  if (Array.isArray(data)) return data;
+  return data !== null && data !== undefined && typeof data === "object" ? [data] : [];
+}
+
 // ─── core/users/filter.js ────────────────────────────────────────────────────
 
 export const USER_FILTER_SCAN_PAGE_SIZE = 200;

@@ -9,6 +9,11 @@ import { CLI_GROUPS, checkScreenshotSources, executeCommand, getCommandEntry, ge
 import { setupTools, type ToolContext } from '../../src/tools';
 import { buildFixture, serializeFixture, FIXTURE_PATH } from '../../scripts/cli-option-parity';
 import { FetchHttpClient } from '../../src/fetch-adapter';
+import { missingFrom } from '../../scripts/peer-cli-check';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+
+const require = createRequire(import.meta.url);
 import { withPathIdGuard } from '../../src/path-id-guard';
 
 interface Recorded { method: string; url: string; params?: unknown; data?: unknown; headers?: unknown }
@@ -251,6 +256,9 @@ const CASES: Case[] = [
     respond: () => ({ notifications: [] }),
     select: (rs) => rs.map(({ method, url, params }) => ({ method, url, params })),
     expected: [{ method: 'GET', url: '/notifications/summary', params: { cursor: 5 } }] },
+  { name: 'listNotifications applies limit to the returned notifications', group: 'notifications', command: 'listNotifications', params: { limit: 2 },
+    respond: () => ({ notifications: [{ id: 1 }, { id: 2 }, { id: 3 }] }),
+    result: (r) => r.data.map((n: any) => n.id), expectedResult: [1, 2] },
   { name: 'markNotificationsRead ids', group: 'notifications', command: 'markNotificationsRead', params: { ids: [4, 5] },
     expected: [{ method: 'PUT', url: '/notifications/read', data: { ids: [4, 5] } }] },
   { name: 'editProfile', group: 'auth', command: 'editProfile', params: { firstName: 'A', jobTitle: 'J' },
@@ -386,6 +394,8 @@ export default async function runTests() {
     try { checkScreenshotSources({ screenshot: [`0:${source}`] }); } catch { accepted = false; }
     check(accepted === source.startsWith('data:'), `screenshot guard agrees with the resolver for ${JSON.stringify(source)}`);
   }
+  // The pinned CLI has every core function and APIClient method the catalog calls (CI checks the peer minimum the same way).
+  eq(await missingFrom(join(dirname(require.resolve('@absmartly/cli/api-client')), '..', '..')), [], 'the installed CLI provides every core function and APIClient method the catalog calls');
   const stop = getCommandEntry('experiments', 'bulkStop')!;
   eq([isDangerousCall(stop, { ids: [1] }), isDangerousCall(stop, { state: 'running', dryRun: true }), isDangerousCall(getCommandEntry('experiments', 'stopExperiment')!, { dryRun: true })],
     [true, false, true], 'dryRun skips confirmation only on commands that document it');

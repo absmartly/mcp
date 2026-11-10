@@ -246,7 +246,7 @@ export function formatResultMeta(cmdResult: Record<string, unknown>, cap: boolea
       meta += `\n\n(Page ${pg.page}, ${pg.items} items per page. More results available — increase page number.)`;
     }
     if (pg.scanIncomplete) {
-      meta += `\n\n(The scan stopped at its page cap: a later page cannot find more matches. Narrow the filters instead.)`;
+      meta += `\n\n(The scan stopped at its page cap: paging only walks the matches found so far; metrics past the cap were not checked. Narrow the filters to cover them.)`;
     }
   }
   return meta;

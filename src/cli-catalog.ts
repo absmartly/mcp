@@ -8,6 +8,7 @@ import { withPathIdGuard } from "./path-id-guard.js";
 import {
   buildPowerMatrixConfig,
   checkSummaryRange,
+  columnarToRows,
   filterAllUsers,
   filterColumnarRows,
   filterMetrics,
@@ -2757,7 +2758,7 @@ const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
         config = { datasource_id: params.datasourceId, query: params.query, ...(params.limit !== undefined && { limit: params.limit }) };
       }
       const result = await CORE_MODULES.datasources.previewDatasourceQuery(client, { config }) as { data: unknown };
-      return params.raw === true ? result : { data: CORE_MODULES.datasources.columnarToRows(result.data) };
+      return params.raw === true ? result : { data: columnarToRows(result.data) };
     },
     ...Object.fromEntries(DATASOURCE_DIRECT_COMMANDS.map((c) => [c, async (client: ApiClientLike, params: Record<string, unknown>) => {
       await (client as unknown as Record<string, (id: unknown) => Promise<unknown>>)[c](params.datasourceId);
@@ -2806,6 +2807,15 @@ const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
     createMetricVersion: async (client, params) => {
       const fields = normalizeMetricCommandParams(CREATE_METRIC_COMMAND, { ...(isRecord(params.data) ? params.data : {}) });
       return runMetricVersion(client, { ...fields, id: params.metricId, reason: params.reason }, params.activate === true);
+    },
+  },
+  notifications: {
+    // CLI cores before 1.17 ignore limit; applying it here gives the same result on every peer version.
+    listNotifications: async (client, params) => {
+      const result = await CORE_MODULES.notifications.listNotifications(client, params) as { data: unknown[]; warnings?: string[] };
+      const limit = params.limit;
+      if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || result.data.length <= limit) return result;
+      return { ...result, data: result.data.slice(0, limit) };
     },
   },
   statistics: {
@@ -2913,7 +2923,7 @@ export const RUNNER_EXTRA_CORE_FUNCTIONS: Record<string, string[]> = {
   'experiments.getExportStatus': ['fetchExportStatus'],
   'experiments.findRecentExport': ['findRecentDownload'],
   ...Object.fromEntries(BULK_COMMANDS.map((c) => [`experiments.${c}`, ['collectBulkIds']])),
-  'datasources.previewDatasourceQuery': ['previewDatasourceQuery', 'columnarToRows'],
+  'datasources.previewDatasourceQuery': ['previewDatasourceQuery'],
   'platformconfig.getPlatformConfig': ['listPlatformConfigs'],
   'platformconfig.updatePlatformConfig': ['listPlatformConfigs'],
 };

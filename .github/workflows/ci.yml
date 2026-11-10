@@ -42,6 +42,15 @@ jobs:
       - name: CLI option parity fixture is current
         run: npm run parity:cli -- --check
 
+      # The catalog must also work with the lowest @absmartly/cli the peer
+      # range allows, not just the pinned devDependency.
+      - name: Catalog works with the minimum peer @absmartly/cli
+        run: |
+          MIN=$(node -p "require('./package.json').peerDependencies['@absmartly/cli'].match(/>=\\s*([0-9.]+)/)[1]")
+          mkdir -p "$RUNNER_TEMP/peer-min"
+          npm install --prefix "$RUNNER_TEMP/peer-min" --ignore-scripts --no-audit --no-fund "@absmartly/cli@$MIN"
+          npx tsx scripts/peer-cli-check.ts "$RUNNER_TEMP/peer-min/node_modules/@absmartly/cli"
+
       # executeCommand must dispatch as 2.0.1 did, apart from the listed
       # intentional differences (#66). The baseline is pinned to the 2.0.1
       # commit (scripts/parity-main.ts PARITY_BASELINE, printed by
