@@ -11,15 +11,13 @@ import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   getGroupSummary,
-  hasCommandRunner,
   RUNNER_API_METHODS,
   RUNNER_EXTRA_CORE_FUNCTIONS,
   RUNNERS_WITHOUT_NAMED_CORE_FUNCTION,
 } from "../src/cli-catalog.js";
 
-// Catalog groups whose core module is a sub-path of another group's
-// directory, or that have no core module (every command is a runner).
-const CORE_DIRS: Record<string, string | null> = { analyze: "experiments/analyze", api: null };
+// Catalog groups whose core module is a sub-path of another group's directory.
+const CORE_DIRS: Record<string, string> = { analyze: "experiments/analyze" };
 
 /** Every core function (as "dir.fn") and APIClient method the catalog can call. */
 export function requiredCliSurface(): { coreFunctions: string[]; apiMethods: string[] } {
@@ -28,7 +26,7 @@ export function requiredCliSurface(): { coreFunctions: string[]; apiMethods: str
   for (const { group, commands } of getGroupSummary()) {
     for (const command of commands) {
       const key = `${group}.${command}`;
-      const named = RUNNERS_WITHOUT_NAMED_CORE_FUNCTION.has(key) || (hasCommandRunner(group, command) && CORE_DIRS[group] === null) ? [] : [command];
+      const named = RUNNERS_WITHOUT_NAMED_CORE_FUNCTION.has(key) ? [] : [command];
       for (const ref of [...named, ...(RUNNER_EXTRA_CORE_FUNCTIONS[key] ?? [])]) {
         const [g, fn] = ref.includes(".") ? ref.split(".") : [group, ref];
         core.add(`${CORE_DIRS[g] ?? g}.${fn}`);

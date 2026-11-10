@@ -394,7 +394,6 @@ export default async function runTests() {
     try { checkScreenshotSources({ screenshot: [`0:${source}`] }); } catch { accepted = false; }
     check(accepted === source.startsWith('data:'), `screenshot guard agrees with the resolver for ${JSON.stringify(source)}`);
   }
-  // The pinned CLI has every core function and APIClient method the catalog calls (CI checks the peer minimum the same way).
   eq(await missingFrom(join(dirname(require.resolve('@absmartly/cli/api-client')), '..', '..')), [], 'the installed CLI provides every core function and APIClient method the catalog calls');
   const stop = getCommandEntry('experiments', 'bulkStop')!;
   eq([isDangerousCall(stop, { ids: [1] }), isDangerousCall(stop, { state: 'running', dryRun: true }), isDangerousCall(getCommandEntry('experiments', 'stopExperiment')!, { dryRun: true })],

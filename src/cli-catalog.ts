@@ -2658,9 +2658,11 @@ async function activateCreated(client: ApiClientLike, created: { id: number }, r
   }
 }
 
+const METRIC_FIELD_API_NAMES = Object.fromEntries(Object.entries(METRIC_FIELD_ALIASES).map(([api, camel]) => [camel, api]));
+
 /** Camel-case metric fields (as normalizeMetricFields leaves them) back to API names; unknown keys pass through. */
 function metricApiPayload(fields: Record<string, unknown>): Record<string, unknown> {
-  const camelToApi = Object.fromEntries(Object.entries(METRIC_FIELD_ALIASES).map(([api, camel]) => [camel, api]));
+  const camelToApi = METRIC_FIELD_API_NAMES;
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(fields)) {
     if (value === undefined || key === 'metricId' || key === 'activate') continue;
@@ -2711,16 +2713,15 @@ const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
   users: {
     listUsers: async (client, raw) => {
       const params = sortDirection(raw);
-      const native = {
+      if (!hasUserFilters(params)) return CORE_MODULES.users.listUsers(client, params);
+      // The APIClient.listUsers options the scan honours on every page.
+      const nativeOptions = {
         ...(params.includeArchived !== undefined && { includeArchived: params.includeArchived }),
         ...(params.search !== undefined && { search: params.search }),
         ...(params.sort !== undefined && { sort: params.sort }),
-        ...(params.sortAsc !== undefined && { sortAsc: params.sortAsc }),
+        ...(params.sortAsc !== undefined && { sort_asc: params.sortAsc }),
         ...(params.ids !== undefined && { ids: params.ids }),
       };
-      if (!hasUserFilters(params)) return CORE_MODULES.users.listUsers(client, { ...params, ...native });
-      const nativeOptions = { ...native, ...(params.sortAsc !== undefined && { sort_asc: params.sortAsc }) };
-      delete (nativeOptions as Record<string, unknown>).sortAsc;
       const matched = await filterAllUsers(client, params, nativeOptions);
       const items = Number(params.items ?? USER_FILTER_SCAN_PAGE_SIZE);
       const page = Number(params.page ?? 1);
@@ -2770,10 +2771,17 @@ const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
     listMetrics: async (client, params) => {
       const adapted = normalizeMetricCommandParams('listMetrics', sortDirection(params));
       if (!hasMetricFilters(params)) return CORE_MODULES.metrics.listMetrics(client, adapted);
+      // As the CLI's listAllMetrics: owner/team names resolved once, raw pages from the APIClient.
+      const owners = typeof adapted.owners === 'string' ? await CORE_MODULES.metrics.resolveOwnerIds(client, adapted.owners) : undefined;
+      const teams = typeof adapted.teams === 'string' ? await CORE_MODULES.metrics.resolveTeamIds(client, adapted.teams) : undefined;
+      const scanOptions = {
+        archived: adapted.archived, include_drafts: adapted.include_drafts, search: adapted.search, sort: adapted.sort,
+        sort_asc: adapted.sortAsc, ids: adapted.ids, owners, teams, review_status: adapted.reviewStatus,
+      };
       const all: Record<string, unknown>[] = [];
       let truncated = true;
       for (let page = 1; page <= METRIC_SCAN_MAX_PAGES; page++) {
-        const { data } = await CORE_MODULES.metrics.listMetrics(client, { ...adapted, items: METRIC_SCAN_PAGE_SIZE, page }) as { data: Record<string, unknown>[] };
+        const data = await client.listMetrics({ ...scanOptions, items: METRIC_SCAN_PAGE_SIZE, page } as any) as Record<string, unknown>[];
         all.push(...data);
         if (data.length < METRIC_SCAN_PAGE_SIZE) {
           truncated = false;
@@ -2917,13 +2925,13 @@ export const RUNNER_EXTRA_CORE_FUNCTIONS: Record<string, string[]> = {
   ...Object.fromEntries(GOAL_ACCESS_COMMANDS.map((c) => [`goals.${c}`, ['assetroles.listAssetRoles']])),
   'storageconfigs.testStorageConfig': ['getStorageConfig'],
   'experiments.updateExperiment': ['buildUpdateChanges'],
-  'experiments.restartExperiment': ['buildRestartChanges'],
+  'metrics.listMetrics': ['resolveOwnerIds', 'resolveTeamIds'],
+  'experiments.restartExperiment': ['buildRestartChanges', 'validateRestartParams'],
   'experiments.createExperimentFromOptions': ['buildCreatePayloadFromOptions', 'createExperiment'],
   'experiments.analyzeExperiment': ['analyze.analyzeExperiment'],
   'experiments.getExportStatus': ['fetchExportStatus'],
   'experiments.findRecentExport': ['findRecentDownload'],
   ...Object.fromEntries(BULK_COMMANDS.map((c) => [`experiments.${c}`, ['collectBulkIds']])),
-  'datasources.previewDatasourceQuery': ['previewDatasourceQuery'],
   'platformconfig.getPlatformConfig': ['listPlatformConfigs'],
   'platformconfig.updatePlatformConfig': ['listPlatformConfigs'],
 };
@@ -2950,6 +2958,7 @@ export const RUNNERS_WITHOUT_NAMED_CORE_FUNCTION = new Set([
 export const RUNNER_API_METHODS: Record<string, string[]> = {
   'metrics.createMetric': ['activateMetric', 'createMetricVersion'],
   'metrics.createMetricVersion': ['createMetricVersion', 'activateMetric'],
+  'metrics.listMetrics': ['listMetrics'],
   'users.listUsers': ['listUsers', 'listRoles'],
   'users.createUser': ['createUser', 'listRoles'],
   'users.updateUser': ['updateUser', 'listRoles'],
