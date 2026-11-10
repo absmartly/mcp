@@ -119,8 +119,15 @@ export interface CommandEntry {
   example?: Record<string, unknown>;
 }
 
-/** True when this call must be confirmed by the user: always for `dangerous`, or when `dangerousWhen` says so. */
+const DRY_RUN_PARAM = 'dryRun';
+
+/**
+ * True when this call must be confirmed by the user: for `dangerous`, or when
+ * `dangerousWhen` says so. A documented dryRun changes nothing, so it is never
+ * confirmed (the CLI's --dry-run does not prompt either).
+ */
 export function isDangerousCall(entry: CommandEntry, params: Record<string, unknown>): boolean {
+  if (params[DRY_RUN_PARAM] === true && entry.params.some((p) => p.name === DRY_RUN_PARAM)) return false;
   return entry.dangerous === true || entry.dangerousWhen?.(params) === true;
 }
 
@@ -2471,8 +2478,7 @@ async function runUpdateExperiment(client: ApiClientLike, params: Record<string,
     warnings = built.warnings;
   }
   if (!explicit && !usesFields) {
-    // As in 2.0: the core is called with what was given (it reads params.changes).
-    return experimentsCore.updateExperiment(client, params);
+    throw new Error('experiments.updateExperiment needs "changes" or at least one field to update (e.g. name, state, percentages)');
   }
   if (params.dryRun === true) {
     return { data: { dryRun: true, experimentId: params.experimentId, changes, note: params.note }, warnings };

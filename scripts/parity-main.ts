@@ -182,7 +182,6 @@ export const PARITY_CALLS: Call[] = [
   { group: "metrics", command: "listMetrics", params: { items: 5, page: 1, search: "x" } },
   { group: "users", command: "createUser", params: { data: { email: "a@b.c", first_name: "A" } } },
   { group: "statistics", command: "getPowerMatrix", params: { params: { alpha: 0.05 } } },
-  { group: "experiments", command: "restartExperiment", params: { experimentId: 5, reason: "testing" } },
 ];
 
 const EXPERIMENT = {

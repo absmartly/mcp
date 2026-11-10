@@ -113,6 +113,9 @@ const CASES: Case[] = [
     respond: () => body({ experiment: EXPERIMENT }),
     select: onlyMethod('PUT'), expected: [],
     result: (r) => r.data, expectedResult: { dryRun: true, experimentId: 5, changes: { name: 'n' } } },
+  { name: 'updateExperiment with nothing to change is an error, not an empty PUT', group: 'experiments', command: 'updateExperiment',
+    params: { experimentId: 5, note: 'n' },
+    expectedError: 'experiments.updateExperiment needs "changes" or at least one field to update (e.g. name, state, percentages)', expected: [] },
   { name: 'updateExperiment refuses a local screenshot path', group: 'experiments', command: 'updateExperiment',
     params: { experimentId: 5, screenshot: ['0:/etc/passwd'] },
     expectedError: 'Screenshot "0:/etc/passwd": the source must be an http(s) URL or a data: URI; local file paths are not read by the MCP server', expected: [] },
@@ -333,6 +336,9 @@ export default async function runTests() {
   const raw = getCommandEntry('api', 'rawRequest')!;
   eq([undefined, 'GET', 'get', 'POST', 'put', 'DELETE'].map((method) => isDangerousCall(raw, method === undefined ? {} : { method })),
     [false, false, false, true, true, true], 'api.rawRequest: only non-GET methods need confirmation');
+  const stop = getCommandEntry('experiments', 'bulkStop')!;
+  eq([isDangerousCall(stop, { ids: [1] }), isDangerousCall(stop, { state: 'running', dryRun: true }), isDangerousCall(getCommandEntry('experiments', 'stopExperiment')!, { dryRun: true })],
+    [true, false, true], 'dryRun skips confirmation only on commands that document it');
   check(CLI_GROUPS.includes('api') && getGroupCommands('api').length === 1, 'the api group has exactly rawRequest');
 
   // Through the tool: a POST without confirmed returns the confirmation prompt and sends nothing.
