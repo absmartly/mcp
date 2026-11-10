@@ -220,11 +220,26 @@ const CASES: Case[] = [
   { name: 'executeCommand passes a core-only option through to the core (includeArchived)', group: 'users', command: 'listUsers',
     params: { items: 10, page: 1, includeArchived: true },
     expected: [{ method: 'GET', url: '/users', params: { items: '10', page: '1', include_archived: '1' } }] },
-  { name: 'an undocumented ID-named key must still be a positive integer', group: 'experiments', command: 'getMetricResults',
+  { name: 'getMetricResults cached reads the previewer cache (use_cache=1)', group: 'experiments', command: 'getMetricResults',
+    params: { experimentId: 99, cached: true, raw: true },
+    respond: (config) => (config.url === '/experiments/99/metrics/main'
+      ? { columnNames: ['metric_id'], rows: [] }
+      : { experiment: { id: 99, name: 'e', variants: [], secondary_metrics: [], primary_metric_id: 7, primary_metric: { id: 7, name: 'm' } } }),
+    expected: [
+      { method: 'GET', url: '/experiments/99' },
+      { method: 'GET', url: '/experiments/99/metrics/main', params: { use_cache: '1' } },
+    ] },
+  { name: 'getMetricResults metricId queries one metric with a time window', group: 'experiments', command: 'getMetricResults',
+    params: { experimentId: 99, metricId: 7, from: '1700000000000', to: '1700000500000' },
+    respond: (config) => (config.url === '/experiments/99'
+      ? { experiment: { id: 99, name: 'e', variants: [] } }
+      : config.url === '/metrics/7' ? { metric: { id: 7, name: 'm' } } : { columnNames: [], rows: [] }),
+    select: (requests) => requests.filter((r) => r.method === 'POST'),
+    expected: [{ method: 'POST', url: '/experiments/99/metrics/7', data: { filters: { from: 1700000000000, to: 1700000500000 } } }] },
+  { name: 'getMetricResults metricId must be a positive integer', group: 'experiments', command: 'getMetricResults',
     params: { experimentId: 3, metricId: '1/../x' },
-    // Checked where the APIClient builds the path (withPathIdGuard).
-    select: (requests) => requests.filter((r) => r.url.includes('metric')),
-    expectedError: 'Invalid ID "1/../x" for getMetric: a path ID must be a positive integer.', expected: [] },
+    // Documented since 2.2.0, so normalizeIdParams rejects it before any request.
+    expectedError: 'Param "metricId" for experiments.getMetricResults must be a positive integer ID.', expected: [] },
   { name: 'executeCommand rejects a deprecated metrics roleId that is not an integer', group: 'metrics', command: 'revokeMetricAccessUser',
     params: { metricId: 8, userId: 4, roleId: '4/x' },
     expectedError: 'Param "roleId" for metrics.revokeMetricAccessUser must be a positive integer ID.', expected: [] },
