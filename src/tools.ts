@@ -19,6 +19,7 @@ import {
   getTotalCommandCount,
   validateCommandParams,
   isDangerousCall,
+  checkTemplateScreenshots,
 } from "./cli-catalog.js";
 import type { CommandEntry } from "./cli-catalog.js";
 import {
@@ -534,6 +535,7 @@ To create experiments, use group "experiments", command "createExperimentFromTem
             };
           }
           try {
+            checkTemplateScreenshots(templateContent);
             const template = parseExperimentMarkdown(templateContent);
             if (commandParams.name) template.name = commandParams.name as string;
             if (commandParams.displayName) (template as any).display_name = commandParams.displayName as string;

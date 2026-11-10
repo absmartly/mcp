@@ -244,7 +244,7 @@ layout with savings badges will increase plan upgrade rate by at least 8%.
 ## A/B Test with Screenshots
 
 Variant screenshots help reviewers understand what each variant looks like.
-Reference screenshots by file path or URL.
+Through the MCP server, give a screenshot as a `data:` URI (`data:image/png;base64,...`) or reference an existing upload with `screenshot_id:`. The server does not read file paths or fetch URLs (they would be the server's files and network, not yours); the `abs` CLI, which runs on your machine, also accepts paths and URLs.
 
 ```markdown
 ---
@@ -278,7 +278,7 @@ tags:
 
 name: control
 config: {"hero_style": "static_image", "cta_text": "Get Started"}
-![Control - Static hero banner](screenshots/hero_control.png)
+![Control - Static hero banner](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAwS2OUAAAAABJRU5ErkJggg==)
 
 ---
 
@@ -286,7 +286,7 @@ config: {"hero_style": "static_image", "cta_text": "Get Started"}
 
 name: video_hero
 config: {"hero_style": "autoplay_video", "cta_text": "Watch Demo"}
-![Treatment - Video hero banner](screenshots/hero_treatment.png)
+screenshot_id: 1234
 
 ---
 
@@ -474,7 +474,7 @@ by at least 5% in click-through rate.
 Each variant is a `### variant_N` section with:
 - `name:` — variant name
 - `config:` — JSON configuration string
-- `![label](path)` — optional screenshot (file path or URL)
+- `![label](source)` — optional screenshot: a `data:` URI through MCP (the CLI also takes a file path or URL)
 - `screenshot_id:` — optional existing screenshot upload ID
 
 ### Audience Section

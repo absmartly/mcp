@@ -570,7 +570,7 @@ Execute any ABsmartly command. Common commands are listed in the tool descriptio
 
 Deprecated params (still accepted, not shown in docs) are kept for callers written against 2.0.x.
 
-**CLI option parity.** Every option of every `abs` CLI command that changes what is sent or returned has an `execute_command` param, e.g. `abs experiments metrics results 99 --cached` is `experiments.getMetricResults { experimentId: 99, cached: true }`. `tests/fixtures/cli-command-options.json` maps each CLI command and option to its command and param (or to the reason it does not apply: terminal rendering, local files, interactive prompts, local CLI config); `npm run parity:cli -- --check` fails when an installed CLI adds an unmapped option. Variant screenshot sources (`screenshot`) must be http(s) URLs or `data:` URIs: the server never reads local file paths.
+**CLI option parity.** Every option of every `abs` CLI command that changes what is sent or returned has an `execute_command` param, e.g. `abs experiments metrics results 99 --cached` is `experiments.getMetricResults { experimentId: 99, cached: true }`. `tests/fixtures/cli-command-options.json` maps each CLI command and option to its command and param (or to the reason it does not apply: terminal rendering, local files, interactive prompts, local CLI config); `npm run parity:cli -- --check` fails when an installed CLI adds an unmapped option. Variant screenshots (`screenshot`, and in templates) must be `data:` URIs or existing upload IDs: the server never reads file paths or fetches URLs.
 
 **Raw API requests** (`abs api`): `api.rawRequest` sends a request with the session's credentials, through the same `APIClient.rawRequest` the CLI uses (path checks included).
 

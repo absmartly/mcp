@@ -2,6 +2,7 @@
 // Each entry stores a reference to the core function, its description, and param docs.
 // All core functions follow the signature: (client: APIClient, params: object) => Promise<CommandResult<T>>
 
+import { parseExperimentMarkdown } from "@absmartly/cli/api-client";
 import type { ApiClientLike } from "./api-client-like.js";
 import { withPathIdGuard } from "./path-id-guard.js";
 import {
@@ -273,7 +274,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           { name: 'percentages', type: 'string', required: false, description: 'Comma-separated traffic split per variant (e.g. 50,50)' },
           { name: 'percentageOfTraffic', type: 'number', required: false, description: 'Percentage of total traffic, 0-100 (default: 100)' },
           { name: 'owner', type: 'array', required: false, description: 'Owner user IDs' },
-          { name: 'screenshot', type: 'array', required: false, description: 'Variant screenshots as "variant_index:source"; source is an http(s) URL or a data: URI (local file paths are refused)' },
+          { name: 'screenshot', type: 'array', required: false, description: 'Variant screenshots as "variant_index:data:image/png;base64,..." (data: URIs only; the server does not read files or fetch URLs)' },
           { name: 'secondaryMetrics', type: 'string', required: false, description: 'Comma-separated secondary metric names or IDs' },
           { name: 'guardrailMetrics', type: 'string', required: false, description: 'Comma-separated guardrail metric names or IDs' },
           { name: 'exploratoryMetrics', type: 'string', required: false, description: 'Comma-separated exploratory metric names or IDs' },
@@ -318,7 +319,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           { name: 'percentages', type: 'string', required: false, description: 'Comma-separated traffic split per variant (e.g. 50,50)' },
           { name: 'percentageOfTraffic', type: 'number', required: false, description: 'Percentage of total traffic (0-100)' },
           { name: 'owner', type: 'array', required: false, description: 'Owner user IDs' },
-          { name: 'screenshot', type: 'array', required: false, description: 'Variant screenshots as "variant_index:source"; source is an http(s) URL or a data: URI (local file paths are refused)' },
+          { name: 'screenshot', type: 'array', required: false, description: 'Variant screenshots as "variant_index:data:image/png;base64,..." (data: URIs only; the server does not read files or fetch URLs)' },
           { name: 'screenshotId', type: 'array', required: false, description: 'Variant screenshots by existing upload ID, as "variant_index:upload_id"' },
           { name: 'teams', type: 'string', required: false, description: 'Comma-separated team names or IDs' },
           { name: 'tags', type: 'string', required: false, description: 'Comma-separated tag names or IDs' },
@@ -2425,22 +2426,42 @@ function userFields(data: unknown): Record<string, unknown> {
   return isRecord(data) ? data : {};
 }
 
-// Variant screenshot sources the MCP server may load: URLs and data URIs. A
-// local file path would be read from the server's own disk (on the Worker or
-// a hosted Node server, not the caller's), so it is refused.
-const REMOTE_SCREENSHOT_SOURCE = /^(?:https?:\/\/|data:)/i;
+/**
+ * Variant screenshots the MCP server will load: data: URIs only. The CLI's
+ * resolver reads a local path from the disk it runs on and fetches a URL
+ * from the network it runs on; on the server those are the server's, not the
+ * caller's, and the loaded bytes are returned in the payload. An existing
+ * upload is referenced by screenshotId / screenshot_id instead.
+ */
+const SERVER_SCREENSHOT_SOURCE = /^data:/i;
 const SCREENSHOT_PARAM = 'screenshot';
+const TEMPLATE_PARAMS = ['templateContent', 'overrideContent'];
+const SCREENSHOT_SOURCE_RULE = 'the source must be a data: URI (data:image/png;base64,...); the MCP server does not read file paths or fetch URLs. Reference an existing upload by its ID instead (screenshotId / screenshot_id)';
 
-function checkScreenshotSources(params: Record<string, unknown>): void {
+/** Refuses screenshot sources the server must not load, in the screenshot param and in any template param. */
+export function checkScreenshotSources(params: Record<string, unknown>): void {
   const entries = params[SCREENSHOT_PARAM];
-  if (entries === undefined) return;
-  if (!Array.isArray(entries) || entries.some((e) => typeof e !== 'string')) {
-    throw new Error(`"${SCREENSHOT_PARAM}" must be an array of "variant_index:source" strings`);
+  if (entries !== undefined && entries !== null) {
+    if (!Array.isArray(entries) || entries.some((e) => typeof e !== 'string')) {
+      throw new Error(`"${SCREENSHOT_PARAM}" must be an array of "variant_index:source" strings`);
+    }
+    for (const entry of entries as string[]) {
+      if (!SERVER_SCREENSHOT_SOURCE.test(entry.slice(entry.indexOf(':') + 1))) {
+        throw new Error(`Screenshot "${entry}": ${SCREENSHOT_SOURCE_RULE}`);
+      }
+    }
   }
-  for (const entry of entries as string[]) {
-    const source = entry.slice(entry.indexOf(':') + 1);
-    if (!REMOTE_SCREENSHOT_SOURCE.test(source)) {
-      throw new Error(`Screenshot "${entry}": the source must be an http(s) URL or a data: URI; local file paths are not read by the MCP server`);
+  for (const key of TEMPLATE_PARAMS) {
+    if (typeof params[key] === 'string') checkTemplateScreenshots(params[key] as string);
+  }
+}
+
+/** The same rule for screenshots inside a markdown template (![label](source) or screenshot: source). */
+export function checkTemplateScreenshots(templateContent: string): void {
+  for (const variant of parseExperimentMarkdown(templateContent).variants ?? []) {
+    const source = (variant as { screenshot?: string }).screenshot;
+    if (source && !SERVER_SCREENSHOT_SOURCE.test(source)) {
+      throw new Error(`Screenshot for variant "${variant.name}": ${SCREENSHOT_SOURCE_RULE}`);
     }
   }
 }
@@ -2461,7 +2482,6 @@ const CUSTOM_FIELDS_PARAM = 'customFields';
 
 /** experiments update: CLI-style fields through the core's buildUpdateChanges, merged under explicit `changes`. */
 async function runUpdateExperiment(client: ApiClientLike, params: Record<string, unknown>): Promise<unknown> {
-  checkScreenshotSources(params);
   const explicit = isRecord(params.changes) ? params.changes : undefined;
   const usesFields = UPDATE_FIELD_PARAMS.some((k) => params[k] !== undefined) || params[CUSTOM_FIELDS_PARAM] !== undefined;
   let changes: Record<string, unknown> = explicit ?? {};
@@ -2504,7 +2524,6 @@ async function runRestartExperiment(client: ApiClientLike, params: Record<string
 
 /** experiments create (flag form): the core's buildCreatePayloadFromOptions, then createExperiment. */
 async function runCreateExperimentFromOptions(client: ApiClientLike, params: Record<string, unknown>): Promise<unknown> {
-  checkScreenshotSources(params);
   const payload = await experimentsCore.buildCreatePayloadFromOptions(client, {
     name: params.name,
     displayName: params.displayName,
@@ -2552,39 +2571,30 @@ const DATASOURCE_DIRECT_COMMANDS = ['deleteDatasource', 'createDatasourceJsonLay
 /**
  * List commands whose core only forwards items/page, while the CLI command
  * sends its generic list options (search, sort, asc/desc, archived, ids)
- * straight to the APIClient list method. Runs that call, then hands the
- * page to the core's row summarizer by running the core with a client that
- * returns it.
+ * straight to the APIClient list method: group → command → that method.
+ * The runner makes that call, then runs the core with a client that returns
+ * the page, so the core still adds its summarized rows and pagination.
  */
-const GENERIC_LIST_COMMANDS = {
-  goals: ['listGoals'],
-  segments: ['listSegments'],
-  apps: ['listApps'],
-  envs: ['listEnvs'],
-  units: ['listUnits'],
-  tags: ['listTags'],
-  goaltags: ['listGoalTags'],
-  metrictags: ['listMetricTags'],
-  metriccategories: ['listMetricCategories'],
-  apikeys: ['listApiKeys'],
-  webhooks: ['listWebhooks'],
-  roles: ['listRoles'],
-  teams: ['listTeams'],
-  customfields: ['listCustomFields'],
-} as const;
-// The APIClient list method each generic list command's core calls.
-const GENERIC_LIST_API_METHODS: Record<string, string> = {
-  'goals.listGoals': 'listGoals', 'segments.listSegments': 'listSegments', 'apps.listApps': 'listApplications',
-  'envs.listEnvs': 'listEnvironments', 'units.listUnits': 'listUnitTypes', 'tags.listTags': 'listExperimentTags',
-  'goaltags.listGoalTags': 'listGoalTags', 'metrictags.listMetricTags': 'listMetricTags',
-  'metriccategories.listMetricCategories': 'listMetricCategories', 'apikeys.listApiKeys': 'listApiKeys',
-  'webhooks.listWebhooks': 'listWebhooks', 'roles.listRoles': 'listRoles', 'teams.listTeams': 'listTeams',
-  'customfields.listCustomFields': 'listCustomSectionFields',
+const GENERIC_LIST_COMMANDS: Record<string, Record<string, string>> = {
+  goals: { listGoals: 'listGoals' },
+  segments: { listSegments: 'listSegments' },
+  apps: { listApps: 'listApplications' },
+  envs: { listEnvs: 'listEnvironments' },
+  units: { listUnits: 'listUnitTypes' },
+  tags: { listTags: 'listExperimentTags' },
+  goaltags: { listGoalTags: 'listGoalTags' },
+  metrictags: { listMetricTags: 'listMetricTags' },
+  metriccategories: { listMetricCategories: 'listMetricCategories' },
+  apikeys: { listApiKeys: 'listApiKeys' },
+  webhooks: { listWebhooks: 'listWebhooks' },
+  roles: { listRoles: 'listRoles' },
+  teams: { listTeams: 'listTeams' },
+  customfields: { listCustomFields: 'listCustomSectionFields' },
 };
 const LIST_FILTER_KEYS = ['search', 'sort', 'asc', 'desc', 'archived', 'ids'];
 
 function genericListRunner(group: string, command: string): CommandRunner {
-  const apiMethod = GENERIC_LIST_API_METHODS[`${group}.${command}`];
+  const apiMethod = GENERIC_LIST_COMMANDS[group][command];
   return async (client, params) => {
     const core = CORE_MODULES[group][command];
     if (!LIST_FILTER_KEYS.some((k) => params[k] !== undefined)) return core(client, params);
@@ -2599,7 +2609,6 @@ function genericListRunner(group: string, command: string): CommandRunner {
       ...(params.includeArchived !== undefined && { includeArchived: params.includeArchived }),
     };
     const page = await (client as unknown as Record<string, (o: unknown) => Promise<unknown>>)[apiMethod](options);
-    // The core function adds its summarized rows and pagination to the page it is given.
     const replay = new Proxy(client as object, {
       get: (target, prop, receiver) => (prop === apiMethod ? async () => page : Reflect.get(target, prop, receiver)),
     });
@@ -2624,8 +2633,26 @@ async function runMetricVersion(client: ApiClientLike, fields: Record<string, un
   const { id, reason, ...rest } = fields;
   const data = metricApiPayload(rest);
   const created = await client.createMetricVersion(id as any, data as any, reason as string | undefined) as { id: number };
-  if (activate) await client.activateMetric(created.id as any, String(reason));
-  return { data: created };
+  if (!activate) return { data: created };
+  return activateCreated(client, created, String(reason), 'metric version');
+}
+
+/**
+ * Activates a metric that was just created. Creation already succeeded, so a
+ * failed activation is reported with the created entity (and its ID) rather
+ * than as an error: retrying the "failed" call would create a duplicate.
+ */
+async function activateCreated(client: ApiClientLike, created: { id: number }, reason: string, label: string): Promise<unknown> {
+  try {
+    await client.activateMetric(created.id as any, reason);
+    return { data: { ...created, activated: true } };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      data: { ...created, activated: false, activationError: message },
+      warnings: [`The ${label} was created (id ${created.id}) but activation failed: ${message}. Do not create it again; activate it with metrics.activateMetric { metricId: ${created.id}, reason }.`],
+    };
+  }
 }
 
 /** Camel-case metric fields (as normalizeMetricFields leaves them) back to API names; unknown keys pass through. */
@@ -2689,7 +2716,6 @@ const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
         ...(params.ids !== undefined && { ids: params.ids }),
       };
       if (!hasUserFilters(params)) return CORE_MODULES.users.listUsers(client, { ...params, ...native });
-      // As the CLI: scan every page with the native filters, filter, then page the matches.
       const nativeOptions = { ...native, ...(params.sortAsc !== undefined && { sort_asc: params.sortAsc }) };
       delete (nativeOptions as Record<string, unknown>).sortAsc;
       const matched = await filterAllUsers(client, params, nativeOptions);
@@ -2716,7 +2742,7 @@ const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
   },
   goals: {
     ...Object.fromEntries(GOAL_ACCESS_COMMANDS.map((c) => [c, accessRunner('goals', c, GOAL_ID_PARAM, ID_PARAM)])),
-    ...Object.fromEntries(GENERIC_LIST_COMMANDS.goals.map((c) => [c, genericListRunner('goals', c)])),
+    ...Object.fromEntries(Object.keys(GENERIC_LIST_COMMANDS.goals).map((c) => [c, genericListRunner('goals', c)])),
   },
   datasources: {
     ...Object.fromEntries(DATASOURCE_CONFIG_COMMANDS.map((c) => [c, datasourceRunner(c)])),
@@ -2741,17 +2767,29 @@ const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
     listMetrics: async (client, params) => {
       const adapted = normalizeMetricCommandParams('listMetrics', sortDirection(params));
       if (!hasMetricFilters(params)) return CORE_MODULES.metrics.listMetrics(client, adapted);
-      // As the CLI: client-side filters see every page, then the matches are paged.
       const all: Record<string, unknown>[] = [];
+      let truncated = true;
       for (let page = 1; page <= METRIC_SCAN_MAX_PAGES; page++) {
         const { data } = await CORE_MODULES.metrics.listMetrics(client, { ...adapted, items: METRIC_SCAN_PAGE_SIZE, page }) as { data: Record<string, unknown>[] };
         all.push(...data);
-        if (data.length < METRIC_SCAN_PAGE_SIZE) break;
+        if (data.length < METRIC_SCAN_PAGE_SIZE) {
+          truncated = false;
+          break;
+        }
       }
       const matched = filterMetrics(all, params);
       const items = Number(params.items ?? METRIC_SCAN_PAGE_SIZE);
       const page = Number(params.page ?? 1);
-      return { data: matched.slice((page - 1) * items, page * items), pagination: { page, items, hasMore: page * items < matched.length, total: matched.length } };
+      const data = matched.slice((page - 1) * items, page * items);
+      if (!truncated) {
+        return { data, pagination: { page, items, hasMore: page * items < matched.length, total: matched.length } };
+      }
+      // The scan stopped at the page cap, so later metrics were never filtered: the count is a lower bound.
+      return {
+        data,
+        pagination: { page, items, hasMore: true, scanIncomplete: true, matchedInScan: matched.length },
+        warnings: [`Scanned the first ${all.length} metrics (the ${METRIC_SCAN_MAX_PAGES}-page cap) and stopped: later metrics were not filtered, so matches may be missing. Narrow the scan with search, owners, teams or ids.`],
+      };
     },
     createMetric: async (client, params) => {
       const fields = normalizeMetricCommandParams(CREATE_METRIC_COMMAND, params);
@@ -2761,8 +2799,8 @@ const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
         return runMetricVersion(client, { ...metricFields, id: newVersion, reason }, activate === true);
       }
       const result = await CORE_MODULES.metrics.createMetric(client, metricFields) as { data: { id: number } };
-      if (activate === true) await client.activateMetric(result.data.id as any, typeof reason === 'string' ? reason : DEFAULT_ACTIVATION_REASON);
-      return result;
+      if (activate !== true) return result;
+      return activateCreated(client, result.data, typeof reason === 'string' ? reason : DEFAULT_ACTIVATION_REASON, 'metric');
     },
     createMetricVersion: async (client, params) => {
       const fields = normalizeMetricCommandParams(CREATE_METRIC_COMMAND, { ...(isRecord(params.data) ? params.data : {}) });
@@ -2814,7 +2852,7 @@ const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
   },
   ...Object.fromEntries(Object.entries(GENERIC_LIST_COMMANDS)
     .filter(([group]) => group !== 'goals')
-    .map(([group, commands]) => [group, Object.fromEntries(commands.map((c) => [c, genericListRunner(group, c)]))])),
+    .map(([group, commands]) => [group, Object.fromEntries(Object.keys(commands).map((c) => [c, genericListRunner(group, c)]))])),
   api: {
     rawRequest: async (client, params) => {
       const { path, query, body, headers } = params;
@@ -2908,7 +2946,7 @@ export const RUNNER_API_METHODS: Record<string, string[]> = {
   'datasources.previewDatasourceJsonLayouts': ['previewDatasourceJsonLayouts'],
   'events.getEventsSummary': ['getEventsSummary'],
   ...Object.fromEntries(Object.entries(GENERIC_LIST_COMMANDS).flatMap(([group, commands]) =>
-    commands.map((c) => [`${group}.${c}`, [GENERIC_LIST_API_METHODS[`${group}.${c}`]]]))),
+    Object.entries(commands).map(([c, apiMethod]) => [`${group}.${c}`, [apiMethod]]))),
   'api.rawRequest': ['rawRequest'],
 };
 
@@ -2967,6 +3005,8 @@ export async function executeCommand(
   // aliases are mapped. Required catalog params are not checked here; that is
   // execute_command's validation (validateCommandParams), as in 2.0.
   const idSafeParams = normalizeIdParams(entry, params, { checkRequired: false });
+  // Before any core can resolve a screenshot (every command, any route).
+  checkScreenshotSources(idSafeParams);
   // Whatever reaches a request path, by any route (top level, inside `data`,
   // a core-name key), is checked where the APIClient builds the path. Clients
   // this package creates are already guarded (wrapping is idempotent); this

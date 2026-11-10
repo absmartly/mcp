@@ -176,7 +176,7 @@ export const PARITY_CALLS: Call[] = [
   { group: "storageconfigs", command: "testStorageConfig", params: { configId: 3 } },
   { group: "teams", command: "addTeamMembers", params: { teamId: 1, userIds: ["2"] } },
   { group: "experiments", command: "createAnnotation", params: { experimentId: "5", data: { type: "x" } } },
-  // 2.2.0 additions: 2.0 call shapes that must be unchanged by the new runners.
+  // 2.0 call shapes now served by runners; they must dispatch as before.
   { group: "goals", command: "listGoals", params: { items: 5, page: 1 } },
   { group: "users", command: "listUsers", params: { items: 5, page: 1, includeArchived: true } },
   { group: "metrics", command: "listMetrics", params: { items: 5, page: 1, search: "x" } },

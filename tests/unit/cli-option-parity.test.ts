@@ -49,6 +49,11 @@ interface Case {
   expectedResult?: unknown;
 }
 
+const SCREENSHOT_RULE = 'the source must be a data: URI (data:image/png;base64,...); the MCP server does not read file paths or fetch URLs. Reference an existing upload by its ID instead (screenshotId / screenshot_id)';
+const PIXEL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAwS2OUAAAAABJRU5ErkJggg==';
+const TEMPLATE_WITH_SCREENSHOT = (source: string) =>
+  `---\nname: e\ntype: test\n---\n\n## Variants\n\n### variant_0\n\nname: control\nconfig: {}\n![shot](${source})\n`;
+
 const onlyMethod = (method: string) => (rs: Recorded[]) => rs.filter((r) => r.method === method);
 const onlyUrl = (url: string) => (rs: Recorded[]) => rs.filter((r) => r.url === url);
 
@@ -117,8 +122,27 @@ const CASES: Case[] = [
     params: { experimentId: 5, note: 'n' },
     expectedError: 'experiments.updateExperiment needs "changes" or at least one field to update (e.g. name, state, percentages)', expected: [] },
   { name: 'updateExperiment refuses a local screenshot path', group: 'experiments', command: 'updateExperiment',
-    params: { experimentId: 5, screenshot: ['0:/etc/passwd'] },
-    expectedError: 'Screenshot "0:/etc/passwd": the source must be an http(s) URL or a data: URI; local file paths are not read by the MCP server', expected: [] },
+    params: { experimentId: 5, screenshot: ['0:/etc/passwd'], dryRun: true },
+    expectedError: `Screenshot "0:/etc/passwd": ${SCREENSHOT_RULE}`, expected: [] },
+  { name: 'updateExperiment refuses a screenshot URL (no server-side fetch)', group: 'experiments', command: 'updateExperiment',
+    params: { experimentId: 5, screenshot: ['0:http://127.0.0.1:9/private'], dryRun: true },
+    expectedError: `Screenshot "0:http://127.0.0.1:9/private": ${SCREENSHOT_RULE}`, expected: [] },
+  { name: 'updateExperiment refuses a file screenshot inside templateContent', group: 'experiments', command: 'updateExperiment',
+    params: { experimentId: 5, templateContent: TEMPLATE_WITH_SCREENSHOT('package.json'), dryRun: true },
+    expectedError: `Screenshot for variant "control": ${SCREENSHOT_RULE}`, expected: [] },
+  { name: 'restartExperiment refuses a URL screenshot inside templateContent', group: 'experiments', command: 'restartExperiment',
+    params: { experimentId: 5, reason: 'testing', templateContent: TEMPLATE_WITH_SCREENSHOT('https://example.test/a.png'), dryRun: true },
+    expectedError: `Screenshot for variant "control": ${SCREENSHOT_RULE}`, expected: [] },
+  { name: 'cloneExperiment refuses a file screenshot in its template overrides', group: 'experiments', command: 'cloneExperiment',
+    params: { experimentId: 5, name: 'c', templateContent: TEMPLATE_WITH_SCREENSHOT('/etc/hosts'), dryRun: true },
+    expectedError: `Screenshot for variant "control": ${SCREENSHOT_RULE}`, expected: [] },
+  { name: 'createExperimentFromTemplate refuses a file screenshot', group: 'experiments', command: 'createExperimentFromTemplate',
+    params: { templateContent: TEMPLATE_WITH_SCREENSHOT('package.json') },
+    expectedError: `Screenshot for variant "control": ${SCREENSHOT_RULE}`, expected: [] },
+  { name: 'updateExperiment accepts a data: URI screenshot', group: 'experiments', command: 'updateExperiment',
+    params: { experimentId: 5, screenshot: [`0:${PIXEL}`], dryRun: true },
+    respond: () => body({ experiment: EXPERIMENT }),
+    result: (r) => r.data.changes.variant_screenshots[0].file_upload.content_type, expectedResult: 'image/png' },
   { name: 'createExperimentFromOptions dryRun returns the built payload', group: 'experiments', command: 'createExperimentFromOptions',
     params: { name: 'exp', variants: 'control,treatment', percentages: '50,50', unitType: 1, applicationId: 2, dryRun: true },
     respond: () => body(),
@@ -168,6 +192,20 @@ const CASES: Case[] = [
     respond: () => ({ metric: { id: 40 } }),
     select: (rs) => rs.map(({ method, url }) => ({ method, url })),
     expected: [{ method: 'POST', url: '/metrics' }, { method: 'PUT', url: '/metrics/40/activate' }] },
+  { name: 'listMetrics reports an incomplete scan at the page cap', group: 'metrics', command: 'listMetrics',
+    params: { items: 20, page: 1, metricType: 'goal_ratio' },
+    respond: () => ({ metrics: Array.from({ length: 200 }, (_, i) => ({ id: i, type: 'goal_count' })) }),
+    result: (r) => ({ requests: undefined, pagination: r.pagination, warned: /were not filtered/.test(r.warnings?.[0] ?? '') }),
+    expectedResult: { pagination: { page: 1, items: 20, hasMore: true, scanIncomplete: true, matchedInScan: 0 }, warned: true } },
+  { name: 'createMetric keeps the created ID when activation fails', group: 'metrics', command: 'createMetric',
+    params: { data: { name: 'm', type: 'goal_count', description: 'd', goal_id: 3 }, activate: true },
+    respond: (c) => (c.method === 'POST' ? { metric: { id: 40 } } : { ok: false, errors: ['activation forbidden'] }),
+    result: (r) => ({ id: r.data.id, activated: r.data.activated, warned: /created \(id 40\) but activation failed/.test(r.warnings[0]) }),
+    expectedResult: { id: 40, activated: false, warned: true } },
+  { name: 'createMetricVersion keeps the version ID when activation fails', group: 'metrics', command: 'createMetricVersion',
+    params: { metricId: 8, reason: 'r', activate: true },
+    respond: (c) => (c.method === 'POST' ? { metric: { id: 41 } } : { ok: false, errors: ['nope'] }),
+    result: (r) => ({ id: r.data.id, activated: r.data.activated }), expectedResult: { id: 41, activated: false } },
   { name: 'createMetricVersion posts a version with a reason', group: 'metrics', command: 'createMetricVersion',
     params: { metricId: 8, reason: 'tweak', data: { format_str: '{}%' } },
     respond: () => ({ metric: { id: 41 } }),
@@ -245,7 +283,8 @@ const CASES: Case[] = [
     expected: [{ method: 'POST', url: '/events/unit_data', data: { units: [{ unit_type_id: 1, uid: 'abc' }] } }] },
   { name: 'getEventsSummary rolls up by period', group: 'events', command: 'getEventsSummary',
     params: { from: '1767225600000', to: '1767398400000', period: 'month' },
-    respond: () => ({ teams: [{ id: 1, name: 'T' }], events: [{ date: 1767225600000, team_id: 1, count: 2, type: 'goal' }, { date: 1767312000000, team_id: 1, count: 3, type: 'exposure' }] }),
+    // Midday UTC: the same calendar month in every time zone (bucketStart uses local time).
+    respond: () => ({ teams: [{ id: 1, name: 'T' }], events: [{ date: 1767268800000, team_id: 1, count: 2, type: 'goal' }, { date: 1767355200000, team_id: 1, count: 3, type: 'exposure' }] }),
     expected: [{ method: 'GET', url: '/events/summary', params: { from: 1767225600000, to: 1767398400000 } }],
     result: (r) => r.data.rows.map((x: any) => x.total), expectedResult: [5] },
   { name: 'getEventsSummary refuses a range over 100 days', group: 'events', command: 'getEventsSummary',
@@ -332,7 +371,6 @@ export default async function runTests() {
     }
   }
 
-  // Confirmation: rawRequest is destructive for every method but GET.
   const raw = getCommandEntry('api', 'rawRequest')!;
   eq([undefined, 'GET', 'get', 'POST', 'put', 'DELETE'].map((method) => isDangerousCall(raw, method === undefined ? {} : { method })),
     [false, false, false, true, true, true], 'api.rawRequest: only non-GET methods need confirmation');
@@ -341,7 +379,6 @@ export default async function runTests() {
     [true, false, true], 'dryRun skips confirmation only on commands that document it');
   check(CLI_GROUPS.includes('api') && getGroupCommands('api').length === 1, 'the api group has exactly rawRequest');
 
-  // Through the tool: a POST without confirmed returns the confirmation prompt and sends nothing.
   {
     const http = new Recorder(() => body());
     const tools = new Map<string, Function>();
@@ -354,6 +391,9 @@ export default async function runTests() {
     check(http.requests.length === 1 && http.requests[0].method === 'POST', 'a confirmed raw POST is sent', confirmed.content[0].text);
     const get = await exec({ group: 'api', command: 'rawRequest', params: { path: '/experiments/99/metrics/main?use_cache=1' } });
     check(http.requests.length === 2 && http.requests[1].url === '/experiments/99/metrics/main?use_cache=1', 'a raw GET runs without confirmation', get.content[0].text);
+    const preview = await exec({ group: 'experiments', command: 'createExperimentFromTemplate', params: { templateContent: TEMPLATE_WITH_SCREENSHOT('package.json') } });
+    check(preview.content[0].text.includes(SCREENSHOT_RULE) && !preview.content[0].text.includes('file_upload') && http.requests.length === 2,
+      'the template preview refuses a file screenshot before resolving it', preview.content[0].text);
   }
 
   // End to end over the real FetchHttpClient: the reported endpoint reaches

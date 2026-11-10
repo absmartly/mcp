@@ -33,6 +33,8 @@ export {
   getTotalCommandCount,
   IdParamError,
   isDangerousCall,
+  checkScreenshotSources,
+  checkTemplateScreenshots,
   normalizeIdParams,
   searchCommands,
   validateCommandParams,
