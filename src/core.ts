@@ -32,6 +32,7 @@ export {
   getGroupSummary,
   getTotalCommandCount,
   IdParamError,
+  isDangerousCall,
   normalizeIdParams,
   searchCommands,
   validateCommandParams,

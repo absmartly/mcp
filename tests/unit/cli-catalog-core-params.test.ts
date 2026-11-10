@@ -748,9 +748,9 @@ export default async function runTests() {
       'insights: a nested params key inside the bag is rejected',
     );
     assertEquals(
-      getCommandEntry('experiments', 'restartExperiment')!.params.some((p) => p.name === 'defaultType'),
-      false,
-      'restartExperiment does not document defaultType, which the core never reads',
+      getCommandEntry('experiments', 'restartExperiment')!.params.some((p) => p.name === 'defaultType' && !p.required),
+      true,
+      'restartExperiment documents defaultType as optional (used to resolve templateContent and customFields)',
     );
   }
 

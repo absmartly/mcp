@@ -49,15 +49,20 @@ function coreDtsPath(group: string): string {
   return require.resolve(`@absmartly/cli/core/${group}`).replace(/\.js$/, ".d.ts");
 }
 
+// Groups with no @absmartly/cli core module: every command has a runner.
+const RUNNER_ONLY_GROUPS = new Set(["api"]);
+const CORE_GROUPS = CLI_GROUPS.filter((g) => !RUNNER_ONLY_GROUPS.has(g));
+
 function loadCoreShapes(): Map<string, Map<string, CoreProp> | null> {
-  const program = ts.createProgram(CLI_GROUPS.map(coreDtsPath), { skipLibCheck: true, strict: true });
+  const program = ts.createProgram(CORE_GROUPS.map(coreDtsPath), { skipLibCheck: true, strict: true });
   const checker = program.getTypeChecker();
   const shapes = new Map<string, Map<string, CoreProp> | null>();
-  for (const group of CLI_GROUPS) {
+  for (const group of CORE_GROUPS) {
     const sf = program.getSourceFile(coreDtsPath(group));
     const moduleSymbol = sf && checker.getSymbolAtLocation(sf);
     const exports = moduleSymbol ? checker.getExportsOfModule(moduleSymbol) : [];
     for (const entry of getGroupCommands(group)) {
+      if (hasCommandRunner(group, entry.command)) continue;
       const exp = exports.find((s) => s.name === entry.command);
       if (!exp) throw new Error(`Core function ${group}.${entry.command} not found`);
       const resolved = exp.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(exp) : exp;
@@ -67,7 +72,7 @@ function loadCoreShapes(): Map<string, Map<string, CoreProp> | null> {
         shapes.set(`${group}.${entry.command}`, new Map());
         continue;
       }
-      const paramType = checker.getTypeOfSymbol(params[1]);
+      const paramType = checker.getNonNullableType(checker.getTypeOfSymbol(params[1]));
       if (checker.isArrayType(paramType)) {
         shapes.set(`${group}.${entry.command}`, null); // positional, not an object of params
         continue;
@@ -104,7 +109,7 @@ function readView(translated: Record<string, unknown>, core: Map<string, CorePro
 export function auditCatalogParams(): CatalogParamFinding[] {
   const shapes = loadCoreShapes();
   const findings: CatalogParamFinding[] = [];
-  for (const group of CLI_GROUPS) {
+  for (const group of CORE_GROUPS) {
     for (const entry of getGroupCommands(group)) {
       if (hasCommandRunner(group, entry.command)) continue;
       const key = `${group}.${entry.command}`;

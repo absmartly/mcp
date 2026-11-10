@@ -72,7 +72,7 @@ export default async function runTests() {
   {
     const client = {} as any;
     const handler = getExecuteHandler(client);
-    const res = await handler({ group: 'permissions', command: 'listPermissions', params: { bogus: true } });
+    const res = await handler({ group: 'webhooks', command: 'listWebhookEvents', params: { bogus: true } });
     const text = res.content[0].text as string;
     assert(text.includes('bogus'), 'error for a zero-param command still names the bad param', text.slice(0, ERROR_PREVIEW_CHARS));
     assert(text.includes(ZERO_PARAM_PHRASE), 'error for a zero-param command uses formatParamSummary\'s exact phrase', text.slice(0, LONG_ERROR_PREVIEW_CHARS));

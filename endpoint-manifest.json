@@ -137,6 +137,10 @@
       "path": "/v1/datasources"
     },
     {
+      "method": "DELETE",
+      "path": "/v1/datasources/{id}"
+    },
+    {
       "method": "GET",
       "path": "/v1/datasources/{id}"
     },
@@ -150,7 +154,31 @@
     },
     {
       "method": "POST",
+      "path": "/v1/datasources/{id}/json_layouts/create"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/datasources/{id}/json_layouts/preview"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/datasources/{id}/json_layouts/recreate"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/datasources/{id}/schema"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/datasources/{id}/set_default"
+    },
+    {
+      "method": "POST",
       "path": "/v1/datasources/introspect"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/datasources/preview_query"
     },
     {
       "method": "POST",
@@ -187,6 +215,26 @@
     {
       "method": "POST",
       "path": "/v1/events/history"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/events/json_layouts"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/events/json_values"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/events/summary"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/events/unit_data"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/events/unit_data"
     },
     {
       "method": "GET",
@@ -465,6 +513,10 @@
       "path": "/v1/export_configs"
     },
     {
+      "method": "PUT",
+      "path": "/v1/export_configs/{exportConfigId}/export_histories/{historyId}/cancel"
+    },
+    {
       "method": "GET",
       "path": "/v1/export_configs/{id}"
     },
@@ -697,6 +749,14 @@
       "path": "/v1/metrics/{id}/review/request"
     },
     {
+      "method": "POST",
+      "path": "/v1/metrics/{id}/version"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/metrics/usages"
+    },
+    {
       "method": "GET",
       "path": "/v1/notifications/has-new"
     },
@@ -874,6 +934,14 @@
     },
     {
       "method": "DELETE",
+      "path": "/v1/users/{userId}/api_keys/{keyId}"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/users/{userId}/api_keys/{keyId}"
+    },
+    {
+      "method": "PUT",
       "path": "/v1/users/{userId}/api_keys/{keyId}"
     },
     {
@@ -1128,6 +1196,10 @@
           "path": "/v1/datasources"
         },
         {
+          "method": "DELETE",
+          "path": "/v1/datasources/{id}"
+        },
+        {
           "method": "GET",
           "path": "/v1/datasources/{id}"
         },
@@ -1141,7 +1213,31 @@
         },
         {
           "method": "POST",
+          "path": "/v1/datasources/{id}/json_layouts/create"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/datasources/{id}/json_layouts/preview"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/datasources/{id}/json_layouts/recreate"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/datasources/{id}/schema"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/datasources/{id}/set_default"
+        },
+        {
+          "method": "POST",
           "path": "/v1/datasources/introspect"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/datasources/preview_query"
         },
         {
           "method": "POST",
@@ -1178,6 +1274,26 @@
         {
           "method": "POST",
           "path": "/v1/events/history"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/events/json_layouts"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/events/json_values"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/events/summary"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/events/unit_data"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/events/unit_data"
         },
         {
           "method": "GET",
@@ -1456,6 +1572,10 @@
           "path": "/v1/export_configs"
         },
         {
+          "method": "PUT",
+          "path": "/v1/export_configs/{exportConfigId}/export_histories/{historyId}/cancel"
+        },
+        {
           "method": "GET",
           "path": "/v1/export_configs/{id}"
         },
@@ -1688,6 +1808,14 @@
           "path": "/v1/metrics/{id}/review/request"
         },
         {
+          "method": "POST",
+          "path": "/v1/metrics/{id}/version"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics/usages"
+        },
+        {
           "method": "GET",
           "path": "/v1/notifications/has-new"
         },
@@ -1865,6 +1993,14 @@
         },
         {
           "method": "DELETE",
+          "path": "/v1/users/{userId}/api_keys/{keyId}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users/{userId}/api_keys/{keyId}"
+        },
+        {
+          "method": "PUT",
           "path": "/v1/users/{userId}/api_keys/{keyId}"
         },
         {
@@ -2379,11 +2515,64 @@
         }
       ]
     },
+    "experiments.createExperimentFromOptions": {
+      "apiMethods": [
+        "createExperiment",
+        "listCustomSectionFields",
+        "resolveMetrics",
+        "resolveTags",
+        "resolveTeams"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_section_fields"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_tags"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/experiments"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        }
+      ]
+    },
     "experiments.updateExperiment": {
       "apiMethods": [
+        "listApplications",
+        "listCustomSectionFields",
+        "listExperimentTags",
+        "listMetrics",
+        "listTeams",
+        "listUnitTypes",
+        "listUsers",
+        "resolveMetrics",
+        "resolveTags",
+        "resolveTeams",
         "updateExperiment"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/applications"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_section_fields"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_tags"
+        },
         {
           "method": "GET",
           "path": "/v1/experiments/{id}"
@@ -2391,6 +2580,22 @@
         {
           "method": "PUT",
           "path": "/v1/experiments/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/unit_types"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users"
         }
       ]
     },
@@ -2434,9 +2639,28 @@
     },
     "experiments.restartExperiment": {
       "apiMethods": [
+        "listApplications",
+        "listCustomSectionFields",
+        "listExperimentTags",
+        "listMetrics",
+        "listTeams",
+        "listUnitTypes",
+        "listUsers",
         "restartExperiment"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/applications"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_section_fields"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiment_tags"
+        },
         {
           "method": "GET",
           "path": "/v1/experiments/{id}"
@@ -2444,6 +2668,22 @@
         {
           "method": "PUT",
           "path": "/v1/experiments/{id}/restart"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/metrics"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/teams"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/unit_types"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users"
         }
       ]
     },
@@ -2536,6 +2776,48 @@
         }
       ]
     },
+    "experiments.analyzeExperiment": {
+      "apiMethods": [
+        "getExperiment",
+        "getExperimentMetricsCached",
+        "listExperimentAlerts",
+        "listExperiments"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiment_alerts"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiments"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{experimentId}/metrics/main"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}"
+        }
+      ]
+    },
+    "experiments.watchExperimentTick": {
+      "apiMethods": [
+        "getExperiment",
+        "getExperimentMetricData"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/experiments/{experimentId}/metrics/{metricId}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/experiments/{id}"
+        }
+      ]
+    },
     "experiments.exportExperiment": {
       "apiMethods": [
         "exportExperimentData"
@@ -2544,6 +2826,35 @@
         {
           "method": "POST",
           "path": "/v1/experiments/{id}/export_data"
+        }
+      ]
+    },
+    "experiments.getExportStatus": {
+      "apiMethods": [
+        "getApiBaseUrl",
+        "getExportConfig",
+        "listExportHistories"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/export_configs/{id}"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/export_configs/{id}/export_histories"
+        }
+      ]
+    },
+    "experiments.findRecentExport": {
+      "apiMethods": [
+        "getApiBaseUrl",
+        "listExportConfigs"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/export_configs"
         }
       ]
     },
@@ -2727,6 +3038,17 @@
         {
           "method": "POST",
           "path": "/v1/experiments/{experimentId}/metrics/{metricId}/remove_impact"
+        }
+      ]
+    },
+    "experiments.getMetricDeps": {
+      "apiMethods": [
+        "listMetricUsages"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/metrics/usages"
         }
       ]
     },
@@ -2972,9 +3294,14 @@
     },
     "experiments.bulkStart": {
       "apiMethods": [
+        "listExperiments",
         "startExperiment"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiments"
+        },
         {
           "method": "PUT",
           "path": "/v1/experiments/{id}/start"
@@ -2983,9 +3310,14 @@
     },
     "experiments.bulkStop": {
       "apiMethods": [
+        "listExperiments",
         "stopExperiment"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiments"
+        },
         {
           "method": "PUT",
           "path": "/v1/experiments/{id}/stop"
@@ -2994,9 +3326,14 @@
     },
     "experiments.bulkArchive": {
       "apiMethods": [
-        "archiveExperiment"
+        "archiveExperiment",
+        "listExperiments"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiments"
+        },
         {
           "method": "PUT",
           "path": "/v1/experiments/{id}/archive"
@@ -3005,9 +3342,14 @@
     },
     "experiments.bulkDevelopment": {
       "apiMethods": [
-        "developmentExperiment"
+        "developmentExperiment",
+        "listExperiments"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiments"
+        },
         {
           "method": "PUT",
           "path": "/v1/experiments/{id}/development"
@@ -3016,9 +3358,14 @@
     },
     "experiments.bulkFullOn": {
       "apiMethods": [
-        "fullOnExperiment"
+        "fullOnExperiment",
+        "listExperiments"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiments"
+        },
         {
           "method": "PUT",
           "path": "/v1/experiments/{id}/full_on"
@@ -3114,12 +3461,22 @@
     },
     "metrics.createMetric": {
       "apiMethods": [
-        "createMetric"
+        "activateMetric",
+        "createMetric",
+        "createMetricVersion"
       ],
       "endpoints": [
         {
           "method": "POST",
           "path": "/v1/metrics"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/metrics/{id}/activate"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/metrics/{id}/version"
         }
       ]
     },
@@ -3153,6 +3510,22 @@
         {
           "method": "PUT",
           "path": "/v1/metrics/{id}/activate"
+        }
+      ]
+    },
+    "metrics.createMetricVersion": {
+      "apiMethods": [
+        "activateMetric",
+        "createMetricVersion"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/metrics/{id}/activate"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/metrics/{id}/version"
         }
       ]
     },
@@ -3618,9 +3991,14 @@
     },
     "users.listUsers": {
       "apiMethods": [
+        "listRoles",
         "listUsers"
       ],
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/roles"
+        },
         {
           "method": "GET",
           "path": "/v1/users"
@@ -3705,6 +4083,38 @@
         {
           "method": "GET",
           "path": "/v1/users/{userId}/api_keys"
+        }
+      ]
+    },
+    "users.getUserApiKey": {
+      "apiMethods": [
+        "getUserApiKeyByUserId",
+        "resolveUsers"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/users"
+        },
+        {
+          "method": "GET",
+          "path": "/v1/users/{userId}/api_keys/{keyId}"
+        }
+      ]
+    },
+    "users.updateUserApiKey": {
+      "apiMethods": [
+        "resolveUsers",
+        "updateUserApiKeyByUserId"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/users"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/users/{userId}/api_keys/{keyId}"
         }
       ]
     },
@@ -4196,6 +4606,17 @@
       ]
     },
     "auth.resetMyPassword": {
+      "apiMethods": [
+        "updateCurrentUser"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/auth/current-user"
+        }
+      ]
+    },
+    "auth.editProfile": {
       "apiMethods": [
         "updateCurrentUser"
       ],
@@ -4783,6 +5204,83 @@
         }
       ]
     },
+    "datasources.previewDatasourceQuery": {
+      "apiMethods": [
+        "previewDatasourceQuery"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/datasources/preview_query"
+        }
+      ]
+    },
+    "datasources.setDefaultDatasource": {
+      "apiMethods": [
+        "setDefaultDatasource"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/datasources/{id}/set_default"
+        }
+      ]
+    },
+    "datasources.getDatasourceSchema": {
+      "apiMethods": [
+        "getDatasourceSchema"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/datasources/{id}/schema"
+        }
+      ]
+    },
+    "datasources.deleteDatasource": {
+      "apiMethods": [
+        "deleteDatasource"
+      ],
+      "endpoints": [
+        {
+          "method": "DELETE",
+          "path": "/v1/datasources/{id}"
+        }
+      ]
+    },
+    "datasources.createDatasourceJsonLayouts": {
+      "apiMethods": [
+        "createDatasourceJsonLayouts"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/datasources/{id}/json_layouts/create"
+        }
+      ]
+    },
+    "datasources.recreateDatasourceJsonLayouts": {
+      "apiMethods": [
+        "recreateDatasourceJsonLayouts"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/datasources/{id}/json_layouts/recreate"
+        }
+      ]
+    },
+    "datasources.previewDatasourceJsonLayouts": {
+      "apiMethods": [
+        "previewDatasourceJsonLayouts"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/datasources/{id}/json_layouts/preview"
+        }
+      ]
+    },
     "exportconfigs.listExportConfigs": {
       "apiMethods": [
         "listExportConfigs"
@@ -4857,6 +5355,17 @@
         {
           "method": "GET",
           "path": "/v1/export_configs/{id}/export_histories"
+        }
+      ]
+    },
+    "exportconfigs.cancelExportHistory": {
+      "apiMethods": [
+        "cancelExportHistory"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/export_configs/{exportConfigId}/export_histories/{historyId}/cancel"
         }
       ]
     },
@@ -5077,6 +5586,61 @@
         }
       ]
     },
+    "events.getEventUnitData": {
+      "apiMethods": [
+        "getEventUnitData"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/events/unit_data"
+        }
+      ]
+    },
+    "events.deleteEventUnitData": {
+      "apiMethods": [
+        "deleteEventUnitData"
+      ],
+      "endpoints": [
+        {
+          "method": "DELETE",
+          "path": "/v1/events/unit_data"
+        }
+      ]
+    },
+    "events.getEventJsonValues": {
+      "apiMethods": [
+        "getEventJsonValues"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/events/json_values"
+        }
+      ]
+    },
+    "events.getEventJsonLayouts": {
+      "apiMethods": [
+        "getEventJsonLayouts"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/events/json_layouts"
+        }
+      ]
+    },
+    "events.getEventsSummary": {
+      "apiMethods": [
+        "getEventsSummary"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/events/summary"
+        }
+      ]
+    },
     "storageconfigs.listStorageConfigs": {
       "apiMethods": [
         "listStorageConfigs"
@@ -5137,6 +5701,67 @@
         }
       ]
     },
+    "customfields.listCustomFields": {
+      "apiMethods": [
+        "listCustomSectionFields"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_section_fields"
+        }
+      ]
+    },
+    "customfields.getCustomField": {
+      "apiMethods": [
+        "getCustomSectionField"
+      ],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/v1/experiment_custom_section_fields/{id}"
+        }
+      ]
+    },
+    "customfields.createCustomField": {
+      "apiMethods": [
+        "createCustomSectionField"
+      ],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/experiment_custom_section_fields"
+        }
+      ]
+    },
+    "customfields.updateCustomField": {
+      "apiMethods": [
+        "updateCustomSectionField"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_custom_section_fields/{id}"
+        }
+      ]
+    },
+    "customfields.archiveCustomField": {
+      "apiMethods": [
+        "archiveCustomSectionField"
+      ],
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/experiment_custom_section_fields/{id}/archive"
+        }
+      ]
+    },
+    "api.rawRequest": {
+      "apiMethods": [
+        "rawRequest"
+      ],
+      "endpoints": []
+    },
     "actiondialogfields.listActionDialogFields": {
       "apiMethods": [
         "listExperimentActionDialogFields"
@@ -5182,5 +5807,7 @@
       ]
     }
   },
-  "dynamicApiMethods": []
+  "dynamicApiMethods": [
+    "rawRequest"
+  ]
 }
