@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { APIClient } from '@absmartly/cli/api-client';
 import type { HttpClient, HttpRequestConfig, HttpResponse } from '@absmartly/cli/api-client';
-import { CLI_GROUPS, executeCommand, getCommandEntry, getGroupCommands, isDangerousCall } from '../../src/cli-catalog';
+import { CLI_GROUPS, checkScreenshotSources, executeCommand, getCommandEntry, getGroupCommands, isDangerousCall } from '../../src/cli-catalog';
 import { setupTools, type ToolContext } from '../../src/tools';
 import { buildFixture, serializeFixture, FIXTURE_PATH } from '../../scripts/cli-option-parity';
 import { FetchHttpClient } from '../../src/fetch-adapter';
@@ -124,6 +124,12 @@ const CASES: Case[] = [
   { name: 'updateExperiment refuses a local screenshot path', group: 'experiments', command: 'updateExperiment',
     params: { experimentId: 5, screenshot: ['0:/etc/passwd'], dryRun: true },
     expectedError: `Screenshot "0:/etc/passwd": ${SCREENSHOT_RULE}`, expected: [] },
+  { name: 'updateExperiment refuses an upper-case DATA: source (the resolver would read it as a file)', group: 'experiments', command: 'updateExperiment',
+    params: { experimentId: 5, screenshot: ['0:DATA:probe'], dryRun: true },
+    expectedError: `Screenshot "0:DATA:probe": ${SCREENSHOT_RULE}`, expected: [] },
+  { name: 'createExperimentFromTemplate refuses an upper-case DATA: template screenshot', group: 'experiments', command: 'createExperimentFromTemplate',
+    params: { templateContent: TEMPLATE_WITH_SCREENSHOT('DATA:image/png;base64,AAAA') },
+    expectedError: `Screenshot for variant "control": ${SCREENSHOT_RULE}`, expected: [] },
   { name: 'updateExperiment refuses a screenshot URL (no server-side fetch)', group: 'experiments', command: 'updateExperiment',
     params: { experimentId: 5, screenshot: ['0:http://127.0.0.1:9/private'], dryRun: true },
     expectedError: `Screenshot "0:http://127.0.0.1:9/private": ${SCREENSHOT_RULE}`, expected: [] },
@@ -196,7 +202,7 @@ const CASES: Case[] = [
     params: { items: 20, page: 1, metricType: 'goal_ratio' },
     respond: () => ({ metrics: Array.from({ length: 200 }, (_, i) => ({ id: i, type: 'goal_count' })) }),
     result: (r) => ({ requests: undefined, pagination: r.pagination, warned: /were not filtered/.test(r.warnings?.[0] ?? '') }),
-    expectedResult: { pagination: { page: 1, items: 20, hasMore: true, scanIncomplete: true, matchedInScan: 0 }, warned: true } },
+    expectedResult: { pagination: { page: 1, items: 20, hasMore: false, scanIncomplete: true, matchedInScan: 0 }, warned: true } },
   { name: 'createMetric keeps the created ID when activation fails', group: 'metrics', command: 'createMetric',
     params: { data: { name: 'm', type: 'goal_count', description: 'd', goal_id: 3 }, activate: true },
     respond: (c) => (c.method === 'POST' ? { metric: { id: 40 } } : { ok: false, errors: ['activation forbidden'] }),
@@ -374,6 +380,12 @@ export default async function runTests() {
   const raw = getCommandEntry('api', 'rawRequest')!;
   eq([undefined, 'GET', 'get', 'POST', 'put', 'DELETE'].map((method) => isDangerousCall(raw, method === undefined ? {} : { method })),
     [false, false, false, true, true, true], 'api.rawRequest: only non-GET methods need confirmation');
+  // Every source the guard accepts must be one the CLI resolver treats as a data URI, never as a path.
+  for (const source of ['data:image/png;base64,AAAA', 'DATA:x', 'Data:x', ' data:x', '/etc/hosts', 'https://h/x', 'package.json']) {
+    let accepted = true;
+    try { checkScreenshotSources({ screenshot: [`0:${source}`] }); } catch { accepted = false; }
+    check(accepted === source.startsWith('data:'), `screenshot guard agrees with the resolver for ${JSON.stringify(source)}`);
+  }
   const stop = getCommandEntry('experiments', 'bulkStop')!;
   eq([isDangerousCall(stop, { ids: [1] }), isDangerousCall(stop, { state: 'running', dryRun: true }), isDangerousCall(getCommandEntry('experiments', 'stopExperiment')!, { dryRun: true })],
     [true, false, true], 'dryRun skips confirmation only on commands that document it');

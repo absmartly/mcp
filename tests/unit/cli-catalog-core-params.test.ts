@@ -238,7 +238,6 @@ const CASES: Case[] = [
     expected: [{ method: 'POST', url: '/experiments/99/metrics/7', data: { filters: { from: 1700000000000, to: 1700000500000 } } }] },
   { name: 'getMetricResults metricId must be a positive integer', group: 'experiments', command: 'getMetricResults',
     params: { experimentId: 3, metricId: '1/../x' },
-    // A documented ID: normalizeIdParams rejects it before any request.
     expectedError: 'Param "metricId" for experiments.getMetricResults must be a positive integer ID.', expected: [] },
   { name: 'executeCommand rejects a deprecated metrics roleId that is not an integer', group: 'metrics', command: 'revokeMetricAccessUser',
     params: { metricId: 8, userId: 4, roleId: '4/x' },

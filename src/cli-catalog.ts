@@ -2433,7 +2433,9 @@ function userFields(data: unknown): Record<string, unknown> {
  * caller's, and the loaded bytes are returned in the payload. An existing
  * upload is referenced by screenshotId / screenshot_id instead.
  */
-const SERVER_SCREENSHOT_SOURCE = /^data:/i;
+// Case-sensitive, exactly as the CLI resolver classifies a data URI
+// (value.startsWith('data:')); "DATA:x" would be read as a file named so.
+const SERVER_SCREENSHOT_SOURCE = /^data:/;
 const SCREENSHOT_PARAM = 'screenshot';
 const TEMPLATE_PARAMS = ['templateContent', 'overrideContent'];
 const SCREENSHOT_SOURCE_RULE = 'the source must be a data: URI (data:image/png;base64,...); the MCP server does not read file paths or fetch URLs. Reference an existing upload by its ID instead (screenshotId / screenshot_id)';
@@ -2784,10 +2786,9 @@ const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
       if (!truncated) {
         return { data, pagination: { page, items, hasMore: page * items < matched.length, total: matched.length } };
       }
-      // The scan stopped at the page cap, so later metrics were never filtered: the count is a lower bound.
       return {
         data,
-        pagination: { page, items, hasMore: true, scanIncomplete: true, matchedInScan: matched.length },
+        pagination: { page, items, hasMore: page * items < matched.length, scanIncomplete: true, matchedInScan: matched.length },
         warnings: [`Scanned the first ${all.length} metrics (the ${METRIC_SCAN_MAX_PAGES}-page cap) and stopped: later metrics were not filtered, so matches may be missing. Narrow the scan with search, owners, teams or ids.`],
       };
     },
@@ -3005,7 +3006,6 @@ export async function executeCommand(
   // aliases are mapped. Required catalog params are not checked here; that is
   // execute_command's validation (validateCommandParams), as in 2.0.
   const idSafeParams = normalizeIdParams(entry, params, { checkRequired: false });
-  // Before any core can resolve a screenshot (every command, any route).
   checkScreenshotSources(idSafeParams);
   // Whatever reaches a request path, by any route (top level, inside `data`,
   // a core-name key), is checked where the APIClient builds the path. Clients

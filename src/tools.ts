@@ -241,9 +241,12 @@ export function formatResultMeta(cmdResult: Record<string, unknown>, cap: boolea
     meta += `\n\nWarnings:\n${warningLines.join('\n')}`;
   }
   if (cmdResult.pagination) {
-    const pg = cmdResult.pagination as { page: number; items: number; hasMore: boolean };
+    const pg = cmdResult.pagination as { page: number; items: number; hasMore: boolean; scanIncomplete?: boolean };
     if (pg.hasMore) {
       meta += `\n\n(Page ${pg.page}, ${pg.items} items per page. More results available — increase page number.)`;
+    }
+    if (pg.scanIncomplete) {
+      meta += `\n\n(The scan stopped at its page cap: a later page cannot find more matches. Narrow the filters instead.)`;
     }
   }
   return meta;
