@@ -11,7 +11,7 @@ const MS_PER_WEEK = 7 * MS_PER_DAY;
 const DAYS_PER_MONTH = 30;
 const DAYS_PER_YEAR = 365;
 const DAYS_PER_WEEK = 7;
-const DUPLICATE_COLUMNS_ERROR = "Duplicate column names in query result; retry with raw: true";
+const DUPLICATE_COLUMNS_ERROR = "Duplicate column names in query result; retry with params.raw: true";
 
 // ─── lib/utils/date-parser.js ────────────────────────────────────────────────
 

@@ -279,7 +279,7 @@ const CASES: Case[] = [
   { name: 'previewDatasourceQuery refuses to collapse duplicate column names', group: 'datasources', command: 'previewDatasourceQuery',
     params: { datasourceId: 2, query: 'select a.id, b.id' },
     respond: () => ({ columnNames: ['id', 'id'], rows: [[1, 2]] }),
-    expectedError: 'Duplicate column names in query result; retry with raw: true' },
+    expectedError: 'Duplicate column names in query result; retry with params.raw: true' },
   { name: 'previewDatasourceQuery raw keeps duplicate column names', group: 'datasources', command: 'previewDatasourceQuery',
     params: { datasourceId: 2, query: 'select a.id, b.id', raw: true },
     respond: () => ({ columnNames: ['id', 'id'], rows: [[1, 2]] }),
