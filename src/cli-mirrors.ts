@@ -11,6 +11,7 @@ const MS_PER_WEEK = 7 * MS_PER_DAY;
 const DAYS_PER_MONTH = 30;
 const DAYS_PER_YEAR = 365;
 const DAYS_PER_WEEK = 7;
+const DUPLICATE_COLUMNS_ERROR = "Duplicate column names in query result; retry with raw: true";
 
 // ─── lib/utils/date-parser.js ────────────────────────────────────────────────
 
@@ -110,6 +111,10 @@ export function filterColumnarRows(data: unknown, column: string, opts: Columnar
 /** A columnar result ({ columnNames, rows }) as row objects (core/events/events.js columnarToRows; not in the CLI 1.7 datasources index). */
 export function columnarToRows(data: unknown): unknown[] {
   if (isColumnar(data)) {
+    // Unlike the CLI, refuse repeated names (e.g. "select a.id, b.id"): row objects would keep only the last value.
+    if (data.rows.length > 0 && new Set(data.columnNames).size !== data.columnNames.length) {
+      throw new Error(DUPLICATE_COLUMNS_ERROR);
+    }
     return data.rows.map((row) => Object.fromEntries(data.columnNames.map((name, i) => [name, row[i]])));
   }
   if (Array.isArray(data)) return data;
