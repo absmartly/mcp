@@ -20,7 +20,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getGroupSummary, RUNNER_EXTRA_CORE_FUNCTIONS } from "../src/cli-catalog.js";
+import { getGroupSummary, RUNNER_API_METHODS, RUNNER_EXTRA_CORE_FUNCTIONS, RUNNERS_WITHOUT_NAMED_CORE_FUNCTION } from "../src/cli-catalog.js";
 import type { Endpoint, EndpointHttpMethod as HttpMethod, EndpointManifest } from "../src/endpoint-manifest.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -178,7 +178,7 @@ const CLI_CATALOG_SOURCE = readFileSync(join(ROOT, "src", "cli-catalog.ts"), "ut
 // Mirrors the CORE_MODULES map in src/cli-catalog.ts (group → @absmartly/cli/core/<dir>).
 function coreModuleFile(group: string): string {
   const alias = CLI_CATALOG_SOURCE.match(new RegExp(`^\\s+${group}: (\\w+) as unknown`, "m"))?.[1];
-  const dir = alias && CLI_CATALOG_SOURCE.match(new RegExp(`import \\* as ${alias} from "@absmartly/cli/core/([\\w-]+)"`))?.[1];
+  const dir = alias && CLI_CATALOG_SOURCE.match(new RegExp(`import \\* as ${alias} from "@absmartly/cli/core/([\\w/-]+)"`))?.[1];
   if (!dir) throw new Error(`Cannot find the @absmartly/cli core module for catalog group "${group}"`);
   return join(CLI_DIST, "core", dir, "index.js");
 }
@@ -214,15 +214,17 @@ export function buildEndpointManifest(): EndpointManifest {
   const commands: EndpointManifest["commands"] = {};
   for (const { group, commands: names } of getGroupSummary()) {
     for (const command of names) {
-      const called = new Set<string>();
-      for (const ref of [command, ...(RUNNER_EXTRA_CORE_FUNCTIONS[`${group}.${command}`] ?? [])]) {
+      const key = `${group}.${command}`;
+      const called = new Set<string>(RUNNER_API_METHODS[key] ?? []);
+      const named = RUNNERS_WITHOUT_NAMED_CORE_FUNCTION.has(key) ? [] : [command];
+      for (const ref of [...named, ...(RUNNER_EXTRA_CORE_FUNCTIONS[key] ?? [])]) {
         const [fnGroup, fn] = ref.includes(".") ? ref.split(".") : [group, ref];
         const target = resolveExport(coreModuleFile(fnGroup), fn);
         if (!target) throw new Error(`Core function ${fnGroup}.${fn} not found`);
         collectApiMethods(target.file, target.body, apiMethodNames, new Set(), called);
       }
       const sorted = [...called].sort();
-      commands[`${group}.${command}`] = { apiMethods: sorted, endpoints: endpointsFor(sorted) };
+      commands[key] = { apiMethods: sorted, endpoints: endpointsFor(sorted) };
     }
   }
 

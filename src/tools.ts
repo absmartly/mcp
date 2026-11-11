@@ -18,6 +18,8 @@ import {
   isListCommand,
   getTotalCommandCount,
   validateCommandParams,
+  isDangerousCall,
+  checkTemplateScreenshots,
 } from "./cli-catalog.js";
 import type { CommandEntry } from "./cli-catalog.js";
 import {
@@ -39,6 +41,9 @@ const USER_FIELD_TYPE = 'user';
 const ENTITY_DEPENDENT_COMMAND = 'createExperiment';
 export const MAX_RESPONSE_CHARS = 25_000;
 const MAX_COMMANDS_PER_LISTING = 30;
+// Leaves room under MAX_RESPONSE_CHARS for the names of the commands not shown.
+const LISTING_BUDGET_CHARS = 15_000;
+const COMMAND_SEPARATOR = '\n\n---\n\n';
 export const MAX_WARNINGS_SHOWN = 20;
 export const MAX_WARNING_CHARS = 300;
 export const REDUCTION_NOTICE_RESERVE_CHARS = 1_000;
@@ -87,22 +92,35 @@ export interface ToolContext {
   ensureEntities?: () => Promise<void>;
 }
 
-function formatCommandList(entries: CommandEntry[]): string {
-  const shown = entries.slice(0, MAX_COMMANDS_PER_LISTING);
-  const rendered = shown.map(m => {
-    const params = documentedParams(m);
-    const paramList = params.length > 0
-      ? params.map(p => `  - \`${p.name}\` (${p.type}${p.required ? ', required' : ''}): ${p.description}`).join('\n')
-      : '  (no parameters)';
-    return `### ${m.group}.${m.command}\n${m.description}\n${m.dangerous ? '**WARNING: Destructive operation**\n' : ''}**Params:**\n${paramList}\n**Returns:** ${m.returns}`;
-  }).join('\n\n---\n\n');
+function formatCommandEntry(m: CommandEntry): string {
+  const params = documentedParams(m);
+  const paramList = params.length > 0
+    ? params.map(p => `  - \`${p.name}\` (${p.type}${p.required ? ', required' : ''}): ${p.description}`).join('\n')
+    : '  (no parameters)';
+  return `### ${m.group}.${m.command}\n${m.description}\n${m.dangerous ? '**WARNING: Destructive operation**\n' : m.dangerousNote ? `**WARNING: ${m.dangerousNote}**\n` : ''}**Params:**\n${paramList}\n**Returns:** ${m.returns}`;
+}
 
-  if (entries.length <= MAX_COMMANDS_PER_LISTING) {
-    return rendered;
+/**
+ * Full entries for as many commands as fit MAX_COMMANDS_PER_LISTING and the
+ * listing budget (commands with many params, like listExperiments, are long);
+ * the rest are named, with a hint to narrow the query.
+ */
+function formatCommandList(entries: CommandEntry[]): string {
+  const rendered: string[] = [];
+  let used = 0;
+  for (const entry of entries.slice(0, MAX_COMMANDS_PER_LISTING)) {
+    const text = formatCommandEntry(entry);
+    if (rendered.length > 0 && used + text.length + COMMAND_SEPARATOR.length > LISTING_BUDGET_CHARS) break;
+    rendered.push(text);
+    used += text.length + COMMAND_SEPARATOR.length;
   }
-  const remaining = entries.length - MAX_COMMANDS_PER_LISTING;
-  const names = entries.slice(MAX_COMMANDS_PER_LISTING).map(e => `${e.group}.${e.command}`).join(', ');
-  return rendered + `\n\n---\n\n(${remaining} more matching commands not shown: ${names}. Narrow your \`group\`/\`search\`, or use get_command_docs for a specific command's full details.)`;
+  const body = rendered.join(COMMAND_SEPARATOR);
+  if (rendered.length === entries.length) {
+    return body;
+  }
+  const rest = entries.slice(rendered.length);
+  const names = rest.map(e => `${e.group}.${e.command}`).join(', ');
+  return body + `${COMMAND_SEPARATOR}(${rest.length} more matching commands not shown: ${names}. Narrow your \`group\`/\`search\`, or use get_command_docs for a specific command's full details.)`;
 }
 
 export function autoPopulateCustomFields(
@@ -160,6 +178,8 @@ function buildCommandDoc(entry: CommandEntry, customFields: readonly any[]): str
   let doc = `# ${entry.group}.${entry.command}\n\n**Group:** ${entry.group}\n**Description:** ${entry.description}\n`;
   if (entry.dangerous) {
     doc += '**WARNING: This is a destructive/dangerous operation.**\n';
+  } else if (entry.dangerousNote) {
+    doc += `**WARNING: ${entry.dangerousNote}**\n`;
   }
   doc += `**Returns:** ${entry.returns}\n\n`;
 
@@ -221,9 +241,12 @@ export function formatResultMeta(cmdResult: Record<string, unknown>, cap: boolea
     meta += `\n\nWarnings:\n${warningLines.join('\n')}`;
   }
   if (cmdResult.pagination) {
-    const pg = cmdResult.pagination as { page: number; items: number; hasMore: boolean };
+    const pg = cmdResult.pagination as { page: number; items: number; hasMore: boolean; scanIncomplete?: boolean };
     if (pg.hasMore) {
       meta += `\n\n(Page ${pg.page}, ${pg.items} items per page. More results available — increase page number.)`;
+    }
+    if (pg.scanIncomplete) {
+      meta += `\n\n(The scan stopped at its page cap: paging only walks the matches found so far; metrics past the cap were not checked. Narrow the filters to cover them.)`;
     }
   }
   return meta;
@@ -454,7 +477,7 @@ To create experiments, use group "experiments", command "createExperimentFromTem
       }
 
       // Confirm destructive actions
-      if (entry.dangerous && !params.confirmed) {
+      if (isDangerousCall(entry, params.params || {}) && !params.confirmed) {
         const ASK_USER_FALLBACK_MESSAGE = `This is a destructive action: ${entry.description}. Ask the user to confirm before proceeding. Only if the user explicitly confirms, call execute_command again with the exact same group, command, and params, plus confirmed: true.`;
 
         // Try MCP elicitation first (works in interactive clients like Claude Desktop)
@@ -515,6 +538,7 @@ To create experiments, use group "experiments", command "createExperimentFromTem
             };
           }
           try {
+            checkTemplateScreenshots(templateContent);
             const template = parseExperimentMarkdown(templateContent);
             if (commandParams.name) template.name = commandParams.name as string;
             if (commandParams.displayName) (template as any).display_name = commandParams.displayName as string;

@@ -2,8 +2,26 @@
 // Each entry stores a reference to the core function, its description, and param docs.
 // All core functions follow the signature: (client: APIClient, params: object) => Promise<CommandResult<T>>
 
+import { parseExperimentMarkdown } from "@absmartly/cli/api-client";
 import type { ApiClientLike } from "./api-client-like.js";
 import { withPathIdGuard } from "./path-id-guard.js";
+import {
+  buildPowerMatrixConfig,
+  checkSummaryRange,
+  columnarToRows,
+  filterAllUsers,
+  filterColumnarRows,
+  filterMetrics,
+  hasMetricFilters,
+  hasUserFilters,
+  parseCliDate,
+  resolveRolesPayload,
+  summarizeEvents,
+  SUMMARY_EVENT_TYPES,
+  SUMMARY_GROUP_BY,
+  SUMMARY_PERIODS,
+  USER_FILTER_SCAN_PAGE_SIZE,
+} from "./cli-mirrors.js";
 
 // Static imports for all core modules — required for Cloudflare Workers bundling.
 import * as coreExperiments from "@absmartly/cli/core/experiments";
@@ -40,6 +58,7 @@ import * as coreEvents from "@absmartly/cli/core/events";
 import * as coreStorageconfigs from "@absmartly/cli/core/storageconfigs";
 import * as coreActiondialogfields from "@absmartly/cli/core/actiondialogfields";
 import * as coreCustomfields from "@absmartly/cli/core/customfields";
+import * as coreExperimentsAnalyze from "@absmartly/cli/core/experiments/analyze";
 
 const CORE_MODULES: Record<string, Record<string, Function>> = {
   experiments: coreExperiments as unknown as Record<string, Function>,
@@ -76,6 +95,7 @@ const CORE_MODULES: Record<string, Record<string, Function>> = {
   storageconfigs: coreStorageconfigs as unknown as Record<string, Function>,
   actiondialogfields: coreActiondialogfields as unknown as Record<string, Function>,
   customfields: coreCustomfields as unknown as Record<string, Function>,
+  analyze: coreExperimentsAnalyze as unknown as Record<string, Function>,
 };
 
 export interface CommandParam {
@@ -94,7 +114,23 @@ export interface CommandEntry {
   params: CommandParam[];
   returns: string;
   dangerous?: boolean;
+  /** Destructive only for some params (e.g. api.rawRequest with a non-GET method); confirmed like `dangerous`. */
+  dangerousWhen?: (params: Record<string, unknown>) => boolean;
+  /** Shown in docs when dangerousWhen is set. */
+  dangerousNote?: string;
   example?: Record<string, unknown>;
+}
+
+const DRY_RUN_PARAM = 'dryRun';
+
+/**
+ * True when this call must be confirmed by the user: for `dangerous`, or when
+ * `dangerousWhen` says so. A documented dryRun changes nothing, so it is never
+ * confirmed (the CLI's --dry-run does not prompt either).
+ */
+export function isDangerousCall(entry: CommandEntry, params: Record<string, unknown>): boolean {
+  if (params[DRY_RUN_PARAM] === true && entry.params.some((p) => p.name === DRY_RUN_PARAM)) return false;
+  return entry.dangerous === true || entry.dangerousWhen?.(params) === true;
 }
 
 export interface GroupSummary {
@@ -102,6 +138,37 @@ export interface GroupSummary {
   description: string;
   commands: string[];
 }
+
+// ─── Shared params (mirroring options many CLI commands share) ────────────────
+
+const PAGING_PARAMS: CommandParam[] = [
+  { name: 'items', type: 'number', required: false, description: 'Results per page' },
+  { name: 'page', type: 'number', required: false, description: 'Page number' },
+];
+/** The CLI's generic list options (lib/utils/list-command.js), passed to the API as query params. */
+const LIST_FILTER_PARAMS: CommandParam[] = [
+  { name: 'search', type: 'string', required: false, description: 'Search by name or description' },
+  { name: 'sort', type: 'string', required: false, description: 'Sort by field (e.g. name, created_at)' },
+  { name: 'asc', type: 'boolean', required: false, description: 'Sort in ascending order' },
+  { name: 'desc', type: 'boolean', required: false, description: 'Sort in descending order' },
+  { name: 'archived', type: 'boolean', required: false, description: 'Include archived items' },
+  { name: 'ids', type: 'string', required: false, description: 'Filter by IDs (comma-separated)' },
+];
+/** The CLI's global --show/--exclude/--show-only/--raw, for commands whose core summarizes an entity. */
+const PROJECTION_PARAMS: CommandParam[] = [
+  { name: 'show', type: 'array', required: false, description: 'Extra fields to add to the summary (dot paths allowed, e.g. owners.0.email)' },
+  { name: 'exclude', type: 'array', required: false, description: 'Fields to drop from the summary' },
+  { name: 'showOnly', type: 'array', required: false, description: 'Only these fields (not combinable with show/exclude)' },
+  { name: 'raw', type: 'boolean', required: false, description: 'Return the unsummarized API entity' },
+];
+const ALERT_FILTER_PARAMS: CommandParam[] = [
+  ['alertSrm', 'sample ratio mismatch'], ['alertCleanupNeeded', 'cleanup needed'], ['alertAudienceMismatch', 'audience mismatch'],
+  ['alertSampleSizeReached', 'sample size reached'], ['alertExperimentsInteract', 'experiments interact'],
+  ['alertGroupSequentialUpdated', 'group sequential updated'], ['alertAssignmentConflict', 'assignment conflict'],
+  ['alertMetricThresholdReached', 'metric threshold reached'],
+].map(([name, label]) => ({ name, type: 'boolean', required: false, description: `Filter by the ${label} alert: true (raised) or false (not raised)` }));
+const RAW_REQUEST_DEFAULT_METHOD = 'GET';
+const UNARCHIVE_PARAM: CommandParam = { name: 'unarchive', type: 'boolean', required: false, description: 'Unarchive instead of archive' };
 
 // ─── Catalog Definition ───────────────────────────────────────────────────────
 // Each group maps command names to their metadata. The actual function is loaded
@@ -124,9 +191,28 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           { name: 'owners', type: 'string', required: false, description: 'Filter by owner user IDs (comma-separated)' },
           { name: 'teams', type: 'string', required: false, description: 'Filter by team IDs (comma-separated)' },
           { name: 'tags', type: 'string', required: false, description: 'Filter by tag IDs (comma-separated)' },
-          { name: 'sort', type: 'string', required: false, description: 'Sort by field (created_at, name, state)' },
-          { name: 'show', type: 'array', required: false, description: 'Extra fields to include (e.g. experiment_report, audience)' },
-          { name: 'exclude', type: 'array', required: false, description: 'Fields to exclude from summary' },
+          { name: 'unitTypes', type: 'string', required: false, description: 'Filter by unit type names or IDs (comma-separated)' },
+          { name: 'ids', type: 'string', required: false, description: 'Filter by experiment IDs (comma-separated)' },
+          { name: 'impact', type: 'string', required: false, description: 'Impact range "min,max" (e.g. 1,5)' },
+          { name: 'confidence', type: 'string', required: false, description: 'Confidence range "min,max" (e.g. 90,100)' },
+          { name: 'significance', type: 'string', required: false, description: 'positive, negative, neutral or inconclusive' },
+          { name: 'iterations', type: 'number', required: false, description: 'Filter by iteration count' },
+          { name: 'iterationsOf', type: 'number', required: false, description: 'All iterations of this experiment ID' },
+          { name: 'metric', type: 'string', required: false, description: 'Experiments using this metric (ID or name) in any role; scans all pages' },
+          { name: 'metricRole', type: 'string', required: false, description: 'With metric: roles to match, comma-separated (primary, secondary, guardrail, exploratory)' },
+          { name: 'createdAfter', type: 'string', required: false, description: 'Created after (relative like 7d, ISO date/datetime, or epoch ms)' },
+          { name: 'createdBefore', type: 'string', required: false, description: 'Created before (same formats)' },
+          { name: 'startedAfter', type: 'string', required: false, description: 'Started after (same formats)' },
+          { name: 'startedBefore', type: 'string', required: false, description: 'Started before (same formats)' },
+          { name: 'stoppedAfter', type: 'string', required: false, description: 'Stopped after (same formats)' },
+          { name: 'stoppedBefore', type: 'string', required: false, description: 'Stopped before (same formats)' },
+          { name: 'analysisType', type: 'string', required: false, description: 'fixed_horizon or group_sequential' },
+          { name: 'runningType', type: 'string', required: false, description: 'full_on or experiment' },
+          ...ALERT_FILTER_PARAMS,
+          { name: 'sort', type: 'string', required: false, description: 'Sort by: id, name, display_name, created_at, state, iteration, unit_count, owners, confidence, impact, duration, progress' },
+          { name: 'asc', type: 'boolean', required: false, description: 'Sort ascending' },
+          { name: 'desc', type: 'boolean', required: false, description: 'Sort descending' },
+          ...PROJECTION_PARAMS,
         ],
         returns: 'Array of experiment summaries with pagination',
         example: { state: 'running', items: 10 },
@@ -147,8 +233,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         params: [
           { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
           { name: 'activity', type: 'boolean', required: false, description: 'Include activity notes' },
-          { name: 'show', type: 'array', required: false, description: 'Extra fields to include (e.g. audience, experiment_report)' },
-          { name: 'exclude', type: 'array', required: false, description: 'Fields to exclude' },
+          ...PROJECTION_PARAMS,
         ],
         returns: 'Experiment details with summary',
         example: { experimentId: 42 },
@@ -175,11 +260,79 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           templateContent: '---\nname: my_experiment\ntype: test\npercentages: 50/50\nunit_type: user_id\napplication: www\n---\n\n## Variants\n\n### variant_0\n\nname: control\nconfig: {}\n\n---\n\n### variant_1\n\nname: treatment\nconfig: {}',
         },
       },
+      createExperimentFromOptions: {
+        description: 'Create an experiment from CLI-style fields (like experiments create --name ... without --from-file). Names of metrics, teams and tags are resolved to IDs. Use dryRun to see the payload first.',
+        params: [
+          { name: 'name', type: 'string', required: true, description: 'Experiment name' },
+          { name: 'displayName', type: 'string', required: false, description: 'Display name' },
+          { name: 'type', type: 'string', required: false, description: 'test or feature (default: test)' },
+          { name: 'state', type: 'string', required: false, description: 'Initial state: created, ready or running (default: ready)' },
+          { name: 'variants', type: 'string', required: false, description: 'Comma-separated variant names' },
+          { name: 'variantConfig', type: 'array', required: false, description: 'Variant config JSON strings, one per variant, in order' },
+          { name: 'applicationId', type: 'number', required: false, description: 'Application ID' },
+          { name: 'unitType', type: 'number', required: false, description: 'Unit type ID' },
+          { name: 'primaryMetric', type: 'number', required: false, description: 'Primary metric ID' },
+          { name: 'percentages', type: 'string', required: false, description: 'Comma-separated traffic split per variant (e.g. 50,50)' },
+          { name: 'percentageOfTraffic', type: 'number', required: false, description: 'Percentage of total traffic, 0-100 (default: 100)' },
+          { name: 'owner', type: 'array', required: false, description: 'Owner user IDs' },
+          { name: 'screenshot', type: 'array', required: false, description: 'Variant screenshots as "variant_index:data:image/png;base64,..." (data: URIs only; the server does not read files or fetch URLs)' },
+          { name: 'secondaryMetrics', type: 'string', required: false, description: 'Comma-separated secondary metric names or IDs' },
+          { name: 'guardrailMetrics', type: 'string', required: false, description: 'Comma-separated guardrail metric names or IDs' },
+          { name: 'exploratoryMetrics', type: 'string', required: false, description: 'Comma-separated exploratory metric names or IDs' },
+          { name: 'teams', type: 'string', required: false, description: 'Comma-separated team names or IDs' },
+          { name: 'tags', type: 'string', required: false, description: 'Comma-separated tag names or IDs' },
+          { name: 'audience', type: 'string', required: false, description: 'Audience filter JSON string' },
+          { name: 'analysisType', type: 'string', required: false, description: 'group_sequential or fixed_horizon' },
+          { name: 'requiredAlpha', type: 'string', required: false, description: 'Required alpha (significance level)' },
+          { name: 'requiredPower', type: 'string', required: false, description: 'Required power' },
+          { name: 'baselineParticipants', type: 'string', required: false, description: 'Baseline participants per day' },
+          { name: 'mde', type: 'number', required: false, description: 'Minimum detectable effect (0.1-1000.0)' },
+          { name: 'baselineMean', type: 'number', required: false, description: 'Baseline primary metric mean' },
+          { name: 'baselineStdev', type: 'number', required: false, description: 'Baseline primary metric standard deviation' },
+          { name: 'gsFutilityType', type: 'string', required: false, description: 'Group sequential futility type: binding or non_binding' },
+          { name: 'gsAnalysisCount', type: 'number', required: false, description: 'Group sequential number of analyses' },
+          { name: 'gsMinAnalysisInterval', type: 'string', required: false, description: 'Group sequential min analysis interval (e.g. 1d)' },
+          { name: 'gsFirstAnalysisInterval', type: 'string', required: false, description: 'Group sequential first analysis interval (e.g. 7d)' },
+          { name: 'gsMaxDurationInterval', type: 'string', required: false, description: 'Group sequential max duration interval (e.g. 6w)' },
+          { name: 'customFields', type: 'object', required: false, description: 'Custom field values by field name (like --field name=value)' },
+          { name: 'dryRun', type: 'boolean', required: false, description: 'Return the request payload without creating anything' },
+        ],
+        returns: 'Created experiment with ID, name and type (or the payload, with dryRun)',
+        example: { name: 'checkout_button', variants: 'control,treatment', percentages: '50,50', unitType: 1, applicationId: 1, dryRun: true },
+      },
       updateExperiment: {
         description: 'Update an existing experiment',
         params: [
           { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
-          { name: 'changes', type: 'object', required: true, description: 'Fields to update — e.g. { state: "ready" }, { name: "new" }, { primary_metric: { metric_id: 123 } }, etc. (Core reads params.changes; calls with `data` are silently ignored.)' },
+          { name: 'changes', type: 'object', required: false, description: 'Raw API fields to update (or use the CLI-style fields below) — e.g. { state: "ready" }, { name: "new" }, { primary_metric: { metric_id: 123 } }, etc. (Core reads params.changes; calls with `data` are silently ignored.)' },
+          { name: 'note', type: 'string', required: false, description: 'Activity log note recorded with the update' },
+          { name: 'name', type: 'string', required: false, description: 'CLI-style field (like experiments update --name). Flag-style fields are built into changes by the CLI core (buildUpdateChanges); explicit changes win' },
+          { name: 'displayName', type: 'string', required: false, description: 'New display name' },
+          { name: 'state', type: 'string', required: false, description: 'Experiment state (created, ready, running)' },
+          { name: 'variants', type: 'string', required: false, description: 'Comma-separated variant names' },
+          { name: 'variantConfig', type: 'array', required: false, description: 'Variant config JSON strings, one per variant, in order' },
+          { name: 'applicationId', type: 'number', required: false, description: 'Application ID' },
+          { name: 'unitType', type: 'number', required: false, description: 'Unit type ID' },
+          { name: 'primaryMetric', type: 'number', required: false, description: 'Primary metric ID' },
+          { name: 'secondaryMetrics', type: 'string', required: false, description: 'Comma-separated secondary metric names or IDs' },
+          { name: 'guardrailMetrics', type: 'string', required: false, description: 'Comma-separated guardrail metric names or IDs' },
+          { name: 'exploratoryMetrics', type: 'string', required: false, description: 'Comma-separated exploratory metric names or IDs' },
+          { name: 'percentages', type: 'string', required: false, description: 'Comma-separated traffic split per variant (e.g. 50,50)' },
+          { name: 'percentageOfTraffic', type: 'number', required: false, description: 'Percentage of total traffic (0-100)' },
+          { name: 'owner', type: 'array', required: false, description: 'Owner user IDs' },
+          { name: 'screenshot', type: 'array', required: false, description: 'Variant screenshots as "variant_index:data:image/png;base64,..." (data: URIs only; the server does not read files or fetch URLs)' },
+          { name: 'screenshotId', type: 'array', required: false, description: 'Variant screenshots by existing upload ID, as "variant_index:upload_id"' },
+          { name: 'teams', type: 'string', required: false, description: 'Comma-separated team names or IDs' },
+          { name: 'tags', type: 'string', required: false, description: 'Comma-separated tag names or IDs' },
+          { name: 'audience', type: 'string', required: false, description: 'Audience filter JSON string' },
+          { name: 'analysisType', type: 'string', required: false, description: 'group_sequential or fixed_horizon' },
+          { name: 'requiredAlpha', type: 'string', required: false, description: 'Required alpha (significance level)' },
+          { name: 'requiredPower', type: 'string', required: false, description: 'Required power' },
+          { name: 'baselineParticipants', type: 'string', required: false, description: 'Baseline participants per day' },
+          { name: 'customFields', type: 'object', required: false, description: 'Custom field values by field name (like --field name=value)' },
+          { name: 'templateContent', type: 'string', required: false, description: 'Markdown template whose fields are applied as changes (like --from-file)' },
+          { name: 'defaultType', type: 'string', required: false, description: 'Experiment type for template/custom field resolution: test or feature (default: test)' },
+          { name: 'dryRun', type: 'boolean', required: false, description: 'Return the changes that would be sent without applying them' },
         ],
         returns: 'Updated experiment',
       },
@@ -221,6 +374,10 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           { name: 'state', type: 'string', required: false, description: 'State of the new iteration: running or development' },
           { name: 'reshuffle', type: 'boolean', required: false, description: 'Reshuffle variant assignment for the new iteration' },
           { name: 'note', type: 'string', required: false, description: 'Optional note' },
+          { name: 'templateContent', type: 'string', required: false, description: 'Markdown template whose fields are applied to the new iteration (like --from-file)' },
+          { name: 'customFields', type: 'object', required: false, description: 'Custom field values by field name (like --field name=value)' },
+          { name: 'defaultType', type: 'string', required: false, description: 'Experiment type for template/custom field resolution (default: test)' },
+          { name: 'dryRun', type: 'boolean', required: false, description: 'Return the changes/payload without applying them' },
         ],
         returns: 'Restart result with the new iteration ID',
         dangerous: true,
@@ -251,8 +408,10 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           { name: 'name', type: 'string', required: true, description: 'Name for the cloned experiment' },
           { name: 'displayName', type: 'string', required: false, description: 'Display name for the clone' },
           { name: 'state', type: 'string', required: false, description: 'Initial state (created, ready)' },
+          { name: 'templateContent', type: 'string', required: false, description: 'Markdown template overrides applied before cloning (like --from-file)' },
           { name: 'defaultType', type: 'string', required: false, description: 'Default experiment type' },
           { name: 'apiEndpoint', type: 'string', required: false, description: 'API endpoint (auto-filled)' },
+          { name: 'dryRun', type: 'boolean', required: false, description: 'Return the changes/payload without applying them' },
         ],
         returns: 'Cloned experiment with new ID',
       },
@@ -262,8 +421,24 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           { name: 'experimentId1', type: 'number', required: true, description: 'First experiment ID' },
           { name: 'experimentId2', type: 'number', required: false, description: 'Second experiment ID' },
           { name: 'iteration', type: 'number', required: false, description: 'Compare with iteration number' },
+          { name: 'raw', type: 'boolean', required: false, description: 'Compare the raw API entities instead of summaries' },
         ],
         returns: 'Array of differences between experiments',
+      },
+      analyzeExperiment: {
+        description: 'Analyze an experiment: design readout, heuristics, alerts and related-experiment benchmarks (CLI: experiments analyze)',
+        params: [
+          { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
+        ],
+        returns: 'Analysis result',
+      },
+      watchExperimentTick: {
+        description: 'One poll of live metric results for a running experiment (CLI: experiments watch, which repeats this every --interval seconds)',
+        params: [
+          { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
+          { name: 'variantIndex', type: 'boolean', required: false, description: 'Label variants by index (0, 1, 2) instead of name' },
+        ],
+        returns: 'Display name, state and formatted metric results',
       },
       exportExperiment: {
         description: 'Start a data export for an experiment (creates an export config)',
@@ -272,6 +447,21 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           { name: 'format', type: 'string', required: false, description: 'Ignored; accepted for backward compatibility', deprecated: true },
         ],
         returns: 'Experiment ID and the created export config ID',
+      },
+      getExportStatus: {
+        description: 'Status of an experiment data export: progress, rows and the download URL once complete (what experiments export --wait polls)',
+        params: [
+          { name: 'exportConfigId', type: 'number', required: true, description: 'Export config ID returned by exportExperiment' },
+        ],
+        returns: 'Export status with progress and download URL',
+      },
+      findRecentExport: {
+        description: 'Most recent completed export of an experiment with a download link (what experiments export checks before starting a new one)',
+        params: [
+          { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
+          { name: 'includeExpired', type: 'boolean', required: false, description: 'Also consider exports whose download has expired' },
+        ],
+        returns: 'Recent export (config ID, download URL, created at) or null',
       },
       generateTemplate: {
         description: 'Generate a blank markdown experiment template to fill in and pass to createExperimentFromTemplate. To start from an existing experiment, use cloneExperiment instead.',
@@ -304,6 +494,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         params: [
           { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
           { name: 'tasks', type: 'array', required: false, description: 'Tasks to request (e.g. update_data, sample_size)' },
+          { name: 'replaceGsa', type: 'boolean', required: false, description: 'Recompute the group sequential analysis from scratch' },
         ],
         returns: 'Update request result',
       },
@@ -330,9 +521,18 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         returns: 'Array of experiment metrics with results',
       },
       getMetricResults: {
-        description: 'Get detailed metric results for an experiment',
+        description: 'Get detailed metric results for an experiment (CLI: experiments metrics results)',
         params: [
           { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
+          { name: 'metricId', type: 'number', required: false, description: 'Only this metric (any metric ID, not just the ones assigned to the experiment)' },
+          { name: 'segment', type: 'array', required: false, description: 'Segment names or IDs to break the results down by (e.g. ["Device", "Country"])' },
+          { name: 'filter', type: 'string', required: false, description: 'Raw segment filter, as a JSON string' },
+          { name: 'from', type: 'string', required: false, description: 'Start time: relative (7d, 2w), ISO date or datetime, or epoch ms' },
+          { name: 'to', type: 'string', required: false, description: 'End time, same formats as from' },
+          { name: 'cached', type: 'boolean', required: false, description: 'Use the previewer cached results (GET /experiments/{id}/metrics/main?use_cache=1) instead of querying the engine' },
+          { name: 'ciBar', type: 'boolean', required: false, description: 'Render the confidence interval as a visual bar instead of [lower, upper]' },
+          { name: 'variantIndex', type: 'boolean', required: false, description: 'Label variants by index (0, 1, 2) instead of name' },
+          { name: 'raw', type: 'boolean', required: false, description: 'Return the unparsed API response (with cached: the raw cached payload)' },
         ],
         returns: 'Detailed metric results with statistical data',
       },
@@ -376,6 +576,13 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           { name: 'metricId', type: 'number', required: true, description: 'Metric ID' },
         ],
         returns: 'Removal result',
+      },
+      getMetricDeps: {
+        description: 'Where a metric is used: experiments and other dependents (CLI: experiments metrics deps)',
+        params: [
+          { name: 'metricId', type: 'number', required: true, description: 'Metric ID' },
+        ],
+        returns: 'Metric, shared metadata and usage',
       },
       // Experiment activity/notes
       listExperimentActivity: {
@@ -449,6 +656,8 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           { name: 'experimentId', type: 'number', required: true, description: 'Experiment ID' },
           { name: 'action', type: 'string', required: true, description: 'Action type (stop, full_on, etc.)' },
           { name: 'scheduledAt', type: 'string', required: true, description: 'ISO timestamp for scheduled execution' },
+          { name: 'note', type: 'string', required: false, description: 'Note for the scheduled action (default: Scheduled via CLI)' },
+          { name: 'reason', type: 'string', required: false, description: 'Reason for the action (e.g. for stop)' },
         ],
         returns: 'Created scheduled action',
       },
@@ -555,7 +764,10 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
       bulkStart: {
         description: 'Start multiple experiments at once',
         params: [
-          { name: 'ids', type: 'array', required: true, description: 'Array of experiment IDs' },
+          { name: 'ids', type: 'array', required: false, description: 'Array of experiment IDs (or select by state/app)' },
+          { name: 'state', type: 'string', required: false, description: 'With no ids: every experiment in this state' },
+          { name: 'app', type: 'string', required: false, description: 'With no ids: every experiment in this application' },
+          { name: 'dryRun', type: 'boolean', required: false, description: 'Return the experiments that would be affected without changing anything' },
           { name: 'note', type: 'string', required: false, description: 'Note recorded on each experiment' },
         ],
         returns: 'Bulk operation results',
@@ -564,7 +776,10 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
       bulkStop: {
         description: 'Stop multiple experiments at once',
         params: [
-          { name: 'ids', type: 'array', required: true, description: 'Array of experiment IDs' },
+          { name: 'ids', type: 'array', required: false, description: 'Array of experiment IDs (or select by state/app)' },
+          { name: 'state', type: 'string', required: false, description: 'With no ids: every experiment in this state' },
+          { name: 'app', type: 'string', required: false, description: 'With no ids: every experiment in this application' },
+          { name: 'dryRun', type: 'boolean', required: false, description: 'Return the experiments that would be affected without changing anything' },
           { name: 'reason', type: 'string', required: true, description: 'Stop reason, same enum as stopExperiment' },
           { name: 'note', type: 'string', required: false, description: 'Note recorded on each experiment' },
         ],
@@ -574,7 +789,10 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
       bulkArchive: {
         description: 'Archive multiple experiments at once',
         params: [
-          { name: 'ids', type: 'array', required: true, description: 'Array of experiment IDs' },
+          { name: 'ids', type: 'array', required: false, description: 'Array of experiment IDs (or select by state/app)' },
+          { name: 'state', type: 'string', required: false, description: 'With no ids: every experiment in this state' },
+          { name: 'app', type: 'string', required: false, description: 'With no ids: every experiment in this application' },
+          { name: 'dryRun', type: 'boolean', required: false, description: 'Return the experiments that would be affected without changing anything' },
           { name: 'note', type: 'string', required: false, description: 'Note recorded on each experiment' },
         ],
         returns: 'Bulk operation results',
@@ -583,7 +801,10 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
       bulkDevelopment: {
         description: 'Put multiple experiments into development mode',
         params: [
-          { name: 'ids', type: 'array', required: true, description: 'Array of experiment IDs' },
+          { name: 'ids', type: 'array', required: false, description: 'Array of experiment IDs (or select by state/app)' },
+          { name: 'state', type: 'string', required: false, description: 'With no ids: every experiment in this state' },
+          { name: 'app', type: 'string', required: false, description: 'With no ids: every experiment in this application' },
+          { name: 'dryRun', type: 'boolean', required: false, description: 'Return the experiments that would be affected without changing anything' },
           { name: 'note', type: 'string', required: false, description: 'Note recorded on each experiment' },
         ],
         returns: 'Bulk operation results',
@@ -592,7 +813,10 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
       bulkFullOn: {
         description: 'Set multiple experiments to full-on mode',
         params: [
-          { name: 'ids', type: 'array', required: true, description: 'Array of experiment IDs' },
+          { name: 'ids', type: 'array', required: false, description: 'Array of experiment IDs (or select by state/app)' },
+          { name: 'state', type: 'string', required: false, description: 'With no ids: every experiment in this state' },
+          { name: 'app', type: 'string', required: false, description: 'With no ids: every experiment in this application' },
+          { name: 'dryRun', type: 'boolean', required: false, description: 'Return the experiments that would be affected without changing anything' },
           { name: 'variant', type: 'number', required: true, description: 'Variant index to roll out to 100%' },
           { name: 'note', type: 'string', required: false, description: 'Note recorded on each experiment' },
         ],
@@ -604,6 +828,8 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         description: 'List custom field definitions for one experiment type',
         params: [
           { name: 'type', type: 'string', required: false, description: 'Custom section type: test or feature (default: test)' },
+          ...PAGING_PARAMS,
+          { name: 'raw', type: 'boolean', required: false, description: 'Return raw API entities instead of summaries' },
         ],
         returns: 'Array of custom field definitions',
       },
@@ -611,6 +837,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         description: 'Get a custom field definition',
         params: [
           { name: 'fieldId', type: 'number', required: true, description: 'Custom field ID' },
+          ...PROJECTION_PARAMS,
         ],
         returns: 'Custom field definition',
       },
@@ -633,6 +860,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         description: 'Archive a custom field',
         params: [
           { name: 'fieldId', type: 'number', required: true, description: 'Custom field ID' },
+          UNARCHIVE_PARAM,
         ],
         returns: 'Archive result',
         dangerous: true,
@@ -651,9 +879,22 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           { name: 'search', type: 'string', required: false, description: 'Search by name' },
           { name: 'archived', type: 'boolean', required: false, description: 'Include archived metrics' },
           { name: 'include_drafts', type: 'boolean', required: false, description: 'Include draft metrics' },
-          { name: 'owners', type: 'string', required: false, description: 'Filter by owner IDs (comma-separated)' },
-          { name: 'teams', type: 'string', required: false, description: 'Filter by team IDs (comma-separated)' },
-          { name: 'reviewStatus', type: 'string', required: false, description: 'Filter by review status' },
+          { name: 'owners', type: 'string', required: false, description: 'Filter by owners (comma-separated IDs, names or emails)' },
+          { name: 'teams', type: 'string', required: false, description: 'Filter by teams (comma-separated IDs or names)' },
+          { name: 'reviewStatus', type: 'string', required: false, description: 'Filter by review status (pending, approved, none)' },
+          { name: 'sort', type: 'string', required: false, description: 'Sort by field (e.g. name, created_at)' },
+          { name: 'asc', type: 'boolean', required: false, description: 'Sort ascending' },
+          { name: 'desc', type: 'boolean', required: false, description: 'Sort descending' },
+          { name: 'ids', type: 'string', required: false, description: 'Filter by IDs (comma-separated)' },
+          { name: 'metricType', type: 'string', required: false, description: 'Metric type(s), comma-separated (goal_count, goal_ratio, custom_sql, ...). Client-side: scans all pages' },
+          { name: 'goal', type: 'string', required: false, description: 'Goal names or IDs, comma-separated (numerator or denominator goal). Client-side' },
+          { name: 'outlierLimiting', type: 'boolean', required: false, description: 'true: only metrics with outlier limiting; false: only without. Client-side' },
+          { name: 'outlierMethod', type: 'string', required: false, description: 'Outlier limit method(s), comma-separated (unlimited, quantile, stdev, fixed). Client-side' },
+          { name: 'hasPropertyFilter', type: 'boolean', required: false, description: 'true: only metrics with a goal property filter; false: only without. Client-side' },
+          { name: 'propertyFilterPath', type: 'string', required: false, description: 'Property paths referenced in the property filter, comma-separated (substring match). Client-side' },
+          { name: 'propertyFilterContains', type: 'string', required: false, description: 'Substring anywhere in the serialized property filter. Client-side' },
+          { name: 'impactDirection', type: 'string', required: false, description: 'Impact direction(s), comma-separated (positive, negative, unknown). Client-side' },
+          { name: 'cuped', type: 'boolean', required: false, description: 'true: only metrics with CUPED; false: only without. Client-side' },
         ],
         returns: 'Array of metric summaries',
       },
@@ -661,6 +902,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         description: 'Get detailed metric information',
         params: [
           { name: 'metricId', type: 'number', required: true, description: 'Metric ID' },
+          ...PROJECTION_PARAMS,
         ],
         returns: 'Metric details',
       },
@@ -668,6 +910,9 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         description: 'Create a new metric',
         params: [
           { name: 'data', type: 'object', required: true, description: 'Metric data: { name, description, ... }' },
+          { name: 'activate', type: 'boolean', required: false, description: 'Activate the metric right after creating it' },
+          { name: 'newVersion', type: 'number', required: false, description: 'Create a new draft version of this metric ID instead of a new metric (requires reason)' },
+          { name: 'reason', type: 'string', required: false, description: 'Reason note (required with newVersion; used as the activation reason)' },
         ],
         returns: 'Created metric',
       },
@@ -675,7 +920,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         description: 'Update a metric',
         params: [
           { name: 'metricId', type: 'number', required: true, description: 'Metric ID' },
-          { name: 'data', type: 'object', required: true, description: 'Fields to update' },
+          { name: 'data', type: 'object', required: true, description: 'Fields to update: name, description, owner (user ID)' },
         ],
         returns: 'Updated metric',
       },
@@ -683,6 +928,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
         description: 'Archive a metric',
         params: [
           { name: 'metricId', type: 'number', required: true, description: 'Metric ID' },
+          UNARCHIVE_PARAM,
         ],
         returns: 'Archive result',
         dangerous: true,
@@ -694,6 +940,16 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
           { name: 'reason', type: 'string', required: true, description: 'Reason for activation' },
         ],
         returns: 'Activation result',
+      },
+      createMetricVersion: {
+        description: 'Create a new draft version of a metric with changed version-level fields (type, goal, format, ...). Fields not given are inherited (CLI: metrics version)',
+        params: [
+          { name: 'metricId', type: 'number', required: true, description: 'Metric ID' },
+          { name: 'reason', type: 'string', required: true, description: 'Reason note for the new version' },
+          { name: 'data', type: 'object', required: false, description: 'Changed metric fields, in API names (type, goal_id, format_str, ...)' },
+          { name: 'activate', type: 'boolean', required: false, description: 'Activate the new version right away' },
+        ],
+        returns: 'The new metric version',
       },
       requestMetricReview: {
         description: 'Request a review for a metric',
@@ -806,8 +1062,8 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   goals: {
     description: 'Goal definitions and access management',
     commands: {
-      listGoals: { description: 'List goals', params: [{ name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of goal summaries' },
-      getGoal: { description: 'Get goal details', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }], returns: 'Goal details' },
+      listGoals: { description: 'List goals', params: [...PAGING_PARAMS, ...LIST_FILTER_PARAMS], returns: 'Array of goal summaries' },
+      getGoal: { description: 'Get goal details', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }, ...PROJECTION_PARAMS], returns: 'Goal details' },
       createGoal: { description: 'Create a goal', params: [{ name: 'data', type: 'object', required: true, description: 'Goal data' }], returns: 'Created goal' },
       updateGoal: { description: 'Update a goal', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated goal' },
       followGoal: { description: 'Follow a goal', params: [{ name: 'goalId', type: 'number', required: true, description: 'Goal ID' }], returns: 'Follow result' },
@@ -824,8 +1080,8 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   segments: {
     description: 'Audience segment management',
     commands: {
-      listSegments: { description: 'List segments', params: [{ name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of segment summaries' },
-      getSegment: { description: 'Get segment details', params: [{ name: 'segmentId', type: 'number', required: true, description: 'Segment ID' }], returns: 'Segment details' },
+      listSegments: { description: 'List segments', params: [...PAGING_PARAMS, ...LIST_FILTER_PARAMS], returns: 'Array of segment summaries' },
+      getSegment: { description: 'Get segment details', params: [{ name: 'segmentId', type: 'number', required: true, description: 'Segment ID' }, ...PROJECTION_PARAMS], returns: 'Segment details' },
       createSegment: { description: 'Create a segment', params: [{ name: 'data', type: 'object', required: true, description: 'Segment data' }], returns: 'Created segment' },
       updateSegment: { description: 'Update a segment', params: [{ name: 'segmentId', type: 'number', required: true, description: 'Segment ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated segment' },
       deleteSegment: { description: 'Delete a segment', params: [{ name: 'segmentId', type: 'number', required: true, description: 'Segment ID' }], returns: 'Deletion result', dangerous: true },
@@ -835,13 +1091,13 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   teams: {
     description: 'Team management and membership',
     commands: {
-      listTeams: { description: 'List teams', params: [{ name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of team summaries' },
-      getTeam: { description: 'Get team details', params: [{ name: 'teamId', type: 'number', required: true, description: 'Team ID' }], returns: 'Team details' },
+      listTeams: { description: 'List teams', params: [...PAGING_PARAMS, ...LIST_FILTER_PARAMS, { name: 'includeArchived', type: 'boolean', required: false, description: 'Include archived teams' }], returns: 'Array of team summaries' },
+      getTeam: { description: 'Get team details', params: [{ name: 'teamId', type: 'number', required: true, description: 'Team ID' }, ...PROJECTION_PARAMS], returns: 'Team details' },
       createTeam: { description: 'Create a team', params: [{ name: 'data', type: 'object', required: true, description: 'Team data: { name, description }' }], returns: 'Created team' },
       updateTeam: { description: 'Update a team', params: [{ name: 'teamId', type: 'number', required: true, description: 'Team ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated team' },
-      archiveTeam: { description: 'Archive a team', params: [{ name: 'teamId', type: 'number', required: true, description: 'Team ID' }], returns: 'Archive result', dangerous: true },
+      archiveTeam: { description: 'Archive a team', params: [{ name: 'teamId', type: 'number', required: true, description: 'Team ID' }, UNARCHIVE_PARAM], returns: 'Archive result', dangerous: true },
       listTeamMembers: { description: 'List team members', params: [{ name: 'teamId', type: 'number', required: true, description: 'Team ID' }], returns: 'Array of team members' },
-      addTeamMembers: { description: 'Add members to a team', params: [{ name: 'teamId', type: 'number', required: true, description: 'Team ID' }, { name: 'userIds', type: 'array', required: true, description: 'Array of user IDs' }], returns: 'Updated membership' },
+      addTeamMembers: { description: 'Add members to a team', params: [{ name: 'teamId', type: 'number', required: true, description: 'Team ID' }, { name: 'userIds', type: 'array', required: true, description: 'Array of user IDs' }, { name: 'roleIds', type: 'array', required: false, description: 'Role IDs to give the new members' }], returns: 'Updated membership' },
       removeTeamMembers: { description: 'Remove members from a team', params: [{ name: 'teamId', type: 'number', required: true, description: 'Team ID' }, { name: 'userIds', type: 'array', required: true, description: 'Array of user IDs' }], returns: 'Updated membership', dangerous: true },
       editTeamMemberRoles: { description: 'Edit team member roles', params: [{ name: 'teamId', type: 'number', required: true, description: 'Team ID' }, { name: 'userId', type: 'number', required: true, description: 'User ID' }, { name: 'roles', type: 'array', required: true, description: 'New roles' }], returns: 'Updated member roles' },
     },
@@ -850,13 +1106,29 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   users: {
     description: 'User management and API keys',
     commands: {
-      listUsers: { description: 'List users', params: [{ name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of user summaries' },
-      getUser: { description: 'Get user details', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }], returns: 'User details' },
-      createUser: { description: 'Create a user', params: [{ name: 'data', type: 'object', required: true, description: 'User data: { email, first_name, last_name, ... }' }], returns: 'Created user' },
-      updateUser: { description: 'Update a user', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated user' },
-      archiveUser: { description: 'Archive a user', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }], returns: 'Archive result', dangerous: true },
+      listUsers: { description: 'List users', params: [
+        ...PAGING_PARAMS,
+        { name: 'includeArchived', type: 'boolean', required: false, description: 'Include archived users' },
+        { name: 'search', type: 'string', required: false, description: 'Server-side fuzzy search across name, email, department and job title' },
+        { name: 'sort', type: 'string', required: false, description: 'Sort by field (e.g. email, created_at)' },
+        { name: 'asc', type: 'boolean', required: false, description: 'Sort ascending' },
+        { name: 'desc', type: 'boolean', required: false, description: 'Sort descending' },
+        { name: 'ids', type: 'string', required: false, description: 'Filter by user IDs (comma-separated)' },
+        { name: 'department', type: 'string', required: false, description: 'Department, exact match (comma-separated; see contains). Scans all users' },
+        { name: 'role', type: 'string', required: false, description: 'Global role names or IDs (comma-separated). Scans all users' },
+        { name: 'jobTitle', type: 'string', required: false, description: 'Job title, exact match (comma-separated). Scans all users' },
+        { name: 'email', type: 'string', required: false, description: 'Email, exact match (comma-separated). Scans all users' },
+        { name: 'name', type: 'string', required: false, description: 'Full name, exact match (comma-separated). Scans all users' },
+        { name: 'contains', type: 'boolean', required: false, description: 'Match department/jobTitle/email/name as case-insensitive substrings' },
+      ], returns: 'Array of user summaries' },
+      getUser: { description: 'Get user details', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }, ...PROJECTION_PARAMS], returns: 'User details' },
+      createUser: { description: 'Create a user', params: [{ name: 'data', type: 'object', required: true, description: 'User data: { email, first_name, last_name, ... }' }, { name: 'role', type: 'string', required: false, description: 'Global role names or IDs (comma-separated), resolved to the roles payload' }], returns: 'Created user' },
+      updateUser: { description: 'Update a user', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }, { name: 'data', type: 'object', required: false, description: 'Updated fields' }, { name: 'role', type: 'string', required: false, description: 'Replace the global roles with these role names or IDs (comma-separated)' }], returns: 'Updated user' },
+      archiveUser: { description: 'Archive a user', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }, UNARCHIVE_PARAM], returns: 'Archive result', dangerous: true },
       resetUserPassword: { description: 'Reset a user password', params: [{ name: 'userId', type: 'number', required: true, description: 'User ID' }], returns: 'Reset result', dangerous: true },
-      listUserApiKeys: { description: 'List API keys for a user', params: [{ name: 'userId', type: 'string', required: true, description: 'User ID or email' }], returns: 'Array of API keys' },
+      listUserApiKeys: { description: 'List API keys for a user', params: [{ name: 'userId', type: 'string', required: true, description: 'User ID or email' }, ...PAGING_PARAMS], returns: 'Array of API keys' },
+      getUserApiKey: { description: 'Get an API key of a user', params: [{ name: 'userId', type: 'string', required: true, description: 'User ID or email' }, { name: 'keyId', type: 'number', required: true, description: 'API key ID' }], returns: 'API key details' },
+      updateUserApiKey: { description: 'Update an API key of a user', params: [{ name: 'userId', type: 'string', required: true, description: 'User ID or email' }, { name: 'keyId', type: 'number', required: true, description: 'API key ID' }, { name: 'data', type: 'object', required: true, description: 'Fields to update: { name, description }' }], returns: 'Update result' },
       createUserApiKey: { description: 'Create an API key for a user', params: [{ name: 'userId', type: 'string', required: true, description: 'User ID or email' }, { name: 'data', type: 'object', required: false, description: 'Key data' }], returns: 'Created API key' },
       deleteUserApiKey: { description: 'Delete a user API key', params: [{ name: 'userId', type: 'string', required: true, description: 'User ID or email' }, { name: 'keyId', type: 'number', required: true, description: 'API key ID' }], returns: 'Deletion result', dangerous: true },
     },
@@ -865,40 +1137,40 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   apps: {
     description: 'Application management',
     commands: {
-      listApps: { description: 'List applications', params: [{ name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of applications' },
+      listApps: { description: 'List applications', params: [...PAGING_PARAMS, ...LIST_FILTER_PARAMS], returns: 'Array of applications' },
       getApp: { description: 'Get application details', params: [{ name: 'appId', type: 'number', required: true, description: 'Application ID' }], returns: 'Application details' },
       createApp: { description: 'Create an application', params: [{ name: 'data', type: 'object', required: true, description: 'App data: { name }' }], returns: 'Created application' },
       updateApp: { description: 'Update an application', params: [{ name: 'appId', type: 'number', required: true, description: 'Application ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated application' },
-      archiveApp: { description: 'Archive an application', params: [{ name: 'appId', type: 'number', required: true, description: 'Application ID' }], returns: 'Archive result', dangerous: true },
+      archiveApp: { description: 'Archive an application', params: [{ name: 'appId', type: 'number', required: true, description: 'Application ID' }, UNARCHIVE_PARAM], returns: 'Archive result', dangerous: true },
     },
   },
 
   envs: {
     description: 'Environment management',
     commands: {
-      listEnvs: { description: 'List environments', params: [{ name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of environments' },
+      listEnvs: { description: 'List environments', params: [...PAGING_PARAMS, ...LIST_FILTER_PARAMS], returns: 'Array of environments' },
       getEnv: { description: 'Get environment details', params: [{ name: 'envId', type: 'number', required: true, description: 'Environment ID' }], returns: 'Environment details' },
       createEnv: { description: 'Create an environment', params: [{ name: 'data', type: 'object', required: true, description: 'Environment data' }], returns: 'Created environment' },
       updateEnv: { description: 'Update an environment', params: [{ name: 'envId', type: 'number', required: true, description: 'Environment ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated environment' },
-      archiveEnv: { description: 'Archive an environment', params: [{ name: 'envId', type: 'number', required: true, description: 'Environment ID' }], returns: 'Archive result', dangerous: true },
+      archiveEnv: { description: 'Archive an environment', params: [{ name: 'envId', type: 'number', required: true, description: 'Environment ID' }, UNARCHIVE_PARAM], returns: 'Archive result', dangerous: true },
     },
   },
 
   units: {
     description: 'Unit type management',
     commands: {
-      listUnits: { description: 'List unit types', params: [{ name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of unit types' },
+      listUnits: { description: 'List unit types', params: [...PAGING_PARAMS, ...LIST_FILTER_PARAMS], returns: 'Array of unit types' },
       getUnit: { description: 'Get unit type details', params: [{ name: 'unitId', type: 'number', required: true, description: 'Unit type ID' }], returns: 'Unit type details' },
       createUnit: { description: 'Create a unit type', params: [{ name: 'data', type: 'object', required: true, description: 'Unit type data' }], returns: 'Created unit type' },
       updateUnit: { description: 'Update a unit type', params: [{ name: 'unitId', type: 'number', required: true, description: 'Unit type ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated unit type' },
-      archiveUnit: { description: 'Archive a unit type', params: [{ name: 'unitId', type: 'number', required: true, description: 'Unit type ID' }], returns: 'Archive result', dangerous: true },
+      archiveUnit: { description: 'Archive a unit type', params: [{ name: 'unitId', type: 'number', required: true, description: 'Unit type ID' }, UNARCHIVE_PARAM], returns: 'Archive result', dangerous: true },
     },
   },
 
   tags: {
     description: 'Experiment tag management',
     commands: {
-      listTags: { description: 'List experiment tags', params: [{ name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of tags' },
+      listTags: { description: 'List experiment tags', params: [...PAGING_PARAMS, ...LIST_FILTER_PARAMS], returns: 'Array of tags' },
       getTag: { description: 'Get tag details', params: [{ name: 'tagId', type: 'number', required: true, description: 'Tag ID' }], returns: 'Tag details' },
       createTag: { description: 'Create a tag', params: [{ name: 'data', type: 'object', required: true, description: 'Tag data: { name }' }], returns: 'Created tag' },
       updateTag: { description: 'Update a tag', params: [{ name: 'tagId', type: 'number', required: true, description: 'Tag ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated tag' },
@@ -909,7 +1181,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   goaltags: {
     description: 'Goal tag management',
     commands: {
-      listGoalTags: { description: 'List goal tags', params: [{ name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of goal tags' },
+      listGoalTags: { description: 'List goal tags', params: [...PAGING_PARAMS, ...LIST_FILTER_PARAMS], returns: 'Array of goal tags' },
       getGoalTag: { description: 'Get goal tag details', params: [{ name: 'tagId', type: 'number', required: true, description: 'Tag ID' }], returns: 'Goal tag details' },
       createGoalTag: { description: 'Create a goal tag', params: [{ name: 'data', type: 'object', required: true, description: 'Tag data' }], returns: 'Created goal tag' },
       updateGoalTag: { description: 'Update a goal tag', params: [{ name: 'tagId', type: 'number', required: true, description: 'Tag ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated goal tag' },
@@ -920,7 +1192,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   metrictags: {
     description: 'Metric tag management',
     commands: {
-      listMetricTags: { description: 'List metric tags', params: [{ name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of metric tags' },
+      listMetricTags: { description: 'List metric tags', params: [...PAGING_PARAMS, ...LIST_FILTER_PARAMS], returns: 'Array of metric tags' },
       getMetricTag: { description: 'Get metric tag details', params: [{ name: 'tagId', type: 'number', required: true, description: 'Tag ID' }], returns: 'Metric tag details' },
       createMetricTag: { description: 'Create a metric tag', params: [{ name: 'data', type: 'object', required: true, description: 'Tag data' }], returns: 'Created metric tag' },
       updateMetricTag: { description: 'Update a metric tag', params: [{ name: 'tagId', type: 'number', required: true, description: 'Tag ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated metric tag' },
@@ -931,11 +1203,11 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   metriccategories: {
     description: 'Metric category management',
     commands: {
-      listMetricCategories: { description: 'List metric categories', params: [{ name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of metric categories' },
+      listMetricCategories: { description: 'List metric categories', params: [...PAGING_PARAMS, ...LIST_FILTER_PARAMS], returns: 'Array of metric categories' },
       getMetricCategory: { description: 'Get metric category details', params: [{ name: 'categoryId', type: 'number', required: true, description: 'Category ID' }], returns: 'Category details' },
       createMetricCategory: { description: 'Create a metric category', params: [{ name: 'data', type: 'object', required: true, description: 'Category data' }], returns: 'Created category' },
       updateMetricCategory: { description: 'Update a metric category', params: [{ name: 'categoryId', type: 'number', required: true, description: 'Category ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated category' },
-      archiveMetricCategory: { description: 'Archive a metric category', params: [{ name: 'categoryId', type: 'number', required: true, description: 'Category ID' }], returns: 'Archive result', dangerous: true },
+      archiveMetricCategory: { description: 'Archive a metric category', params: [{ name: 'categoryId', type: 'number', required: true, description: 'Category ID' }, UNARCHIVE_PARAM], returns: 'Archive result', dangerous: true },
     },
   },
 
@@ -949,13 +1221,14 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
       updateAuthApiKey: { description: 'Update one of your API keys', params: [{ name: 'keyId', type: 'number', required: true, description: 'API key ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated API key' },
       deleteAuthApiKey: { description: 'Delete one of your API keys', params: [{ name: 'keyId', type: 'number', required: true, description: 'API key ID' }], returns: 'Deletion result', dangerous: true },
       resetMyPassword: { description: 'Change your own password', params: [{ name: 'oldPassword', type: 'string', required: true, description: 'Current password' }, { name: 'newPassword', type: 'string', required: true, description: 'New password' }], returns: 'Reset result', dangerous: true },
+      editProfile: { description: 'Edit your own profile', params: [{ name: 'firstName', type: 'string', required: false, description: 'First name' }, { name: 'lastName', type: 'string', required: false, description: 'Last name' }, { name: 'department', type: 'string', required: false, description: 'Department' }, { name: 'jobTitle', type: 'string', required: false, description: 'Job title' }], returns: 'Updated profile' },
     },
   },
 
   apikeys: {
     description: 'Platform API key management (admin)',
     commands: {
-      listApiKeys: { description: 'List all API keys', params: [{ name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of API keys' },
+      listApiKeys: { description: 'List all API keys', params: [...PAGING_PARAMS, ...LIST_FILTER_PARAMS], returns: 'Array of API keys' },
       getApiKey: { description: 'Get API key details', params: [{ name: 'keyId', type: 'number', required: true, description: 'API key ID' }], returns: 'API key details' },
       createApiKey: { description: 'Create an API key', params: [{ name: 'data', type: 'object', required: true, description: 'Key data' }], returns: 'Created API key' },
       updateApiKey: { description: 'Update an API key', params: [{ name: 'keyId', type: 'number', required: true, description: 'API key ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated API key' },
@@ -966,8 +1239,8 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   webhooks: {
     description: 'Webhook management',
     commands: {
-      listWebhooks: { description: 'List webhooks', params: [{ name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of webhooks' },
-      getWebhook: { description: 'Get webhook details', params: [{ name: 'webhookId', type: 'number', required: true, description: 'Webhook ID' }], returns: 'Webhook details' },
+      listWebhooks: { description: 'List webhooks', params: [...PAGING_PARAMS, ...LIST_FILTER_PARAMS], returns: 'Array of webhooks' },
+      getWebhook: { description: 'Get webhook details', params: [{ name: 'webhookId', type: 'number', required: true, description: 'Webhook ID' }, ...PROJECTION_PARAMS], returns: 'Webhook details' },
       createWebhook: { description: 'Create a webhook', params: [{ name: 'data', type: 'object', required: true, description: 'Webhook data: { url, events, ... }' }], returns: 'Created webhook' },
       updateWebhook: { description: 'Update a webhook', params: [{ name: 'webhookId', type: 'number', required: true, description: 'Webhook ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated webhook' },
       deleteWebhook: { description: 'Delete a webhook', params: [{ name: 'webhookId', type: 'number', required: true, description: 'Webhook ID' }], returns: 'Deletion result', dangerous: true },
@@ -978,7 +1251,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   roles: {
     description: 'Role management',
     commands: {
-      listRoles: { description: 'List roles', params: [{ name: 'items', type: 'number', required: false, description: 'Results per page' }, { name: 'page', type: 'number', required: false, description: 'Page number' }], returns: 'Array of roles' },
+      listRoles: { description: 'List roles', params: [...PAGING_PARAMS, ...LIST_FILTER_PARAMS], returns: 'Array of roles' },
       getRole: { description: 'Get role details', params: [{ name: 'roleId', type: 'number', required: true, description: 'Role ID' }], returns: 'Role details' },
       createRole: { description: 'Create a role', params: [{ name: 'data', type: 'object', required: true, description: 'Role data' }], returns: 'Created role' },
       updateRole: { description: 'Update a role', params: [{ name: 'roleId', type: 'number', required: true, description: 'Role ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated role' },
@@ -989,16 +1262,16 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   permissions: {
     description: 'Permission and access control policy management',
     commands: {
-      listPermissions: { description: 'List all permissions', params: [], returns: 'Array of permissions' },
-      listPermissionCategories: { description: 'List permission categories', params: [], returns: 'Array of permission categories' },
-      listAccessControlPolicies: { description: 'List access control policies', params: [], returns: 'Array of access control policies' },
+      listPermissions: { description: 'List all permissions', params: [...PAGING_PARAMS], returns: 'Array of permissions' },
+      listPermissionCategories: { description: 'List permission categories', params: [...PAGING_PARAMS], returns: 'Array of permission categories' },
+      listAccessControlPolicies: { description: 'List access control policies', params: [...PAGING_PARAMS], returns: 'Array of access control policies' },
     },
   },
 
   assetroles: {
     description: 'Asset role management',
     commands: {
-      listAssetRoles: { description: 'List asset roles', params: [], returns: 'Array of asset roles' },
+      listAssetRoles: { description: 'List asset roles', params: [...PAGING_PARAMS], returns: 'Array of asset roles' },
       getAssetRole: { description: 'Get asset role details', params: [{ name: 'roleId', type: 'number', required: true, description: 'Asset role ID' }], returns: 'Asset role details' },
       createAssetRole: { description: 'Create an asset role', params: [{ name: 'data', type: 'object', required: true, description: 'Asset role data' }], returns: 'Created asset role' },
       updateAssetRole: { description: 'Update an asset role', params: [{ name: 'roleId', type: 'number', required: true, description: 'Asset role ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated asset role' },
@@ -1009,10 +1282,10 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   notifications: {
     description: 'Notification management',
     commands: {
-      listNotifications: { description: 'List notifications', params: [], returns: 'Array of notifications' },
-      checkNotifications: { description: 'Check for new notifications', params: [], returns: 'Notification status' },
+      listNotifications: { description: 'List notifications', params: [{ name: 'cursor', type: 'number', required: false, description: 'Pagination cursor' }, { name: 'limit', type: 'number', required: false, description: 'Maximum notifications to return' }], returns: 'Array of notifications' },
+      checkNotifications: { description: 'Check for new notifications', params: [{ name: 'lastId', type: 'number', required: false, description: 'Last known notification ID' }], returns: 'Notification status' },
       markNotificationsSeen: { description: 'Mark notifications as seen', params: [], returns: 'Mark result' },
-      markNotificationsRead: { description: 'Mark notifications as read', params: [], returns: 'Mark result' },
+      markNotificationsRead: { description: 'Mark notifications as read', params: [{ name: 'ids', type: 'array', required: false, description: 'Notification IDs (omit to mark all)' }], returns: 'Mark result' },
     },
   },
 
@@ -1037,7 +1310,7 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   cors: {
     description: 'CORS origin management',
     commands: {
-      listCorsOrigins: { description: 'List CORS origins', params: [], returns: 'Array of CORS origins' },
+      listCorsOrigins: { description: 'List CORS origins', params: [...PAGING_PARAMS], returns: 'Array of CORS origins' },
       getCorsOrigin: { description: 'Get CORS origin details', params: [{ name: 'originId', type: 'number', required: true, description: 'Origin ID' }], returns: 'CORS origin details' },
       createCorsOrigin: { description: 'Create a CORS origin', params: [{ name: 'data', type: 'object', required: true, description: 'Origin data: { origin }' }], returns: 'Created origin' },
       updateCorsOrigin: { description: 'Update a CORS origin', params: [{ name: 'originId', type: 'number', required: true, description: 'Origin ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated origin' },
@@ -1048,34 +1321,42 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   datasources: {
     description: 'Data source management',
     commands: {
-      listDatasources: { description: 'List data sources', params: [], returns: 'Array of data sources' },
+      listDatasources: { description: 'List data sources', params: [...PAGING_PARAMS], returns: 'Array of data sources' },
       getDatasource: { description: 'Get data source details', params: [{ name: 'datasourceId', type: 'number', required: true, description: 'Datasource ID' }], returns: 'Datasource details' },
       createDatasource: { description: 'Create a data source', params: [{ name: 'data', type: 'object', required: true, description: 'Datasource config' }], returns: 'Created datasource' },
       updateDatasource: { description: 'Update a data source', params: [{ name: 'datasourceId', type: 'number', required: true, description: 'Datasource ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated datasource' },
-      archiveDatasource: { description: 'Archive a data source', params: [{ name: 'datasourceId', type: 'number', required: true, description: 'Datasource ID' }], returns: 'Archive result', dangerous: true },
+      archiveDatasource: { description: 'Archive a data source', params: [{ name: 'datasourceId', type: 'number', required: true, description: 'Datasource ID' }, UNARCHIVE_PARAM], returns: 'Archive result', dangerous: true },
       testDatasource: { description: 'Test a saved data source connection. Stored secrets are used server-side, so they never pass through MCP.', params: [{ name: 'datasourceId', type: 'number', required: false, description: 'Datasource ID: tests the saved datasource with its stored secrets' }, { name: 'config', type: 'object', required: false, description: 'Instead of datasourceId: a whole datasource definition to test, sent as the request body. Include datasource_id in it to reuse stored secrets for fields left as "***".' }], returns: 'Test result' },
       introspectDatasource: { description: 'Introspect a saved data source schema (tables and columns)', params: [{ name: 'datasourceId', type: 'number', required: false, description: 'Datasource ID. Omit to introspect an unsaved definition given whole in config' }, { name: 'config', type: 'object', required: false, description: 'An unsaved datasource definition, used when datasourceId is omitted' }], returns: 'Schema data' },
       validateDatasourceQuery: { description: 'Validate a read-only SQL query against a saved data source', params: [{ name: 'datasourceId', type: 'number', required: false, description: 'Datasource ID. Omit to validate against an unsaved definition given whole in config' }, { name: 'query', type: 'string', required: false, description: 'SQL query to validate (required with datasourceId; otherwise put it in config)' }, { name: 'config', type: 'object', required: false, description: 'An unsaved datasource definition, used when datasourceId is omitted' }], returns: 'Validation result' },
+      previewDatasourceQuery: { description: 'Run a read-only SQL query against a saved data source and return the rows (CLI: datasources query / preview-query)', params: [{ name: 'datasourceId', type: 'number', required: false, description: 'Datasource ID' }, { name: 'query', type: 'string', required: false, description: 'SQL query (required with datasourceId)' }, { name: 'limit', type: 'number', required: false, description: 'Maximum rows to return' }, { name: 'config', type: 'object', required: false, description: 'Instead of the fields above: the whole request body' }, { name: 'raw', type: 'boolean', required: false, description: 'Return the columnar API response instead of row objects' }], returns: 'Query result rows' },
+      setDefaultDatasource: { description: 'Make a data source the default', params: [{ name: 'datasourceId', type: 'number', required: true, description: 'Datasource ID' }], returns: 'Result', dangerous: true },
+      getDatasourceSchema: { description: 'Fetch the stored schema of a data source', params: [{ name: 'datasourceId', type: 'number', required: true, description: 'Datasource ID' }], returns: 'Schema' },
+      deleteDatasource: { description: 'Delete a data source (fails if it is the default or used by a goal)', params: [{ name: 'datasourceId', type: 'number', required: true, description: 'Datasource ID' }], returns: 'Deletion result', dangerous: true },
+      createDatasourceJsonLayouts: { description: 'Create the json_layouts table on a data source', params: [{ name: 'datasourceId', type: 'number', required: true, description: 'Datasource ID' }], returns: 'Result' },
+      recreateDatasourceJsonLayouts: { description: 'Drop and recreate the json_layouts table on a data source', params: [{ name: 'datasourceId', type: 'number', required: true, description: 'Datasource ID' }], returns: 'Result', dangerous: true },
+      previewDatasourceJsonLayouts: { description: 'Preview the json_layouts table (row count and a 5-row sample)', params: [{ name: 'datasourceId', type: 'number', required: true, description: 'Datasource ID' }], returns: 'Preview' },
     },
   },
 
   exportconfigs: {
     description: 'Export configuration management',
     commands: {
-      listExportConfigs: { description: 'List export configurations', params: [], returns: 'Array of export configs' },
+      listExportConfigs: { description: 'List export configurations', params: [...PAGING_PARAMS, { name: 'statuses', type: 'string', required: false, description: 'Comma-separated export statuses (e.g. WAITING,IN_PROGRESS,COMPLETED)' }], returns: 'Array of export configs' },
       getExportConfig: { description: 'Get export config details', params: [{ name: 'configId', type: 'number', required: true, description: 'Config ID' }], returns: 'Export config details' },
       createExportConfig: { description: 'Create an export configuration', params: [{ name: 'data', type: 'object', required: true, description: 'Export config data' }], returns: 'Created export config' },
       updateExportConfig: { description: 'Update an export configuration', params: [{ name: 'configId', type: 'number', required: true, description: 'Config ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated export config' },
-      archiveExportConfig: { description: 'Archive an export configuration', params: [{ name: 'configId', type: 'number', required: true, description: 'Config ID' }], returns: 'Archive result', dangerous: true },
+      archiveExportConfig: { description: 'Archive an export configuration', params: [{ name: 'configId', type: 'number', required: true, description: 'Config ID' }, UNARCHIVE_PARAM], returns: 'Archive result', dangerous: true },
       pauseExportConfig: { description: 'Pause an export configuration', params: [{ name: 'configId', type: 'number', required: true, description: 'Config ID' }], returns: 'Pause result' },
       listExportHistories: { description: 'List export history for a config', params: [{ name: 'configId', type: 'number', required: true, description: 'Config ID' }], returns: 'Array of export history entries' },
+      cancelExportHistory: { description: 'Cancel a running export', params: [{ name: 'configId', type: 'number', required: true, description: 'Export config ID' }, { name: 'historyId', type: 'number', required: true, description: 'Export history ID' }, { name: 'reason', type: 'string', required: false, description: 'Cancellation reason' }], returns: 'Cancel result', dangerous: true },
     },
   },
 
   updateschedules: {
     description: 'Data update schedule management',
     commands: {
-      listUpdateSchedules: { description: 'List update schedules', params: [], returns: 'Array of update schedules' },
+      listUpdateSchedules: { description: 'List update schedules', params: [...PAGING_PARAMS], returns: 'Array of update schedules' },
       getUpdateSchedule: { description: 'Get update schedule details', params: [{ name: 'scheduleId', type: 'number', required: true, description: 'Schedule ID' }], returns: 'Schedule details' },
       createUpdateSchedule: { description: 'Create an update schedule', params: [{ name: 'data', type: 'object', required: true, description: 'Schedule data' }], returns: 'Created schedule' },
       updateUpdateSchedule: { description: 'Update an update schedule', params: [{ name: 'scheduleId', type: 'number', required: true, description: 'Schedule ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated schedule' },
@@ -1086,10 +1367,10 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   customsections: {
     description: 'Custom section management for experiments',
     commands: {
-      listCustomSections: { description: 'List custom sections', params: [], returns: 'Array of custom sections' },
+      listCustomSections: { description: 'List custom sections', params: [...PAGING_PARAMS, { name: 'type', type: 'string', required: false, description: 'Only sections of this type: test or feature' }], returns: 'Array of custom sections' },
       createCustomSection: { description: 'Create a custom section', params: [{ name: 'data', type: 'object', required: true, description: 'Section data' }], returns: 'Created section' },
       updateCustomSection: { description: 'Update a custom section', params: [{ name: 'sectionId', type: 'number', required: true, description: 'Section ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated section' },
-      archiveCustomSection: { description: 'Archive a custom section', params: [{ name: 'sectionId', type: 'number', required: true, description: 'Section ID' }], returns: 'Archive result', dangerous: true },
+      archiveCustomSection: { description: 'Archive a custom section', params: [{ name: 'sectionId', type: 'number', required: true, description: 'Section ID' }, UNARCHIVE_PARAM], returns: 'Archive result', dangerous: true },
       reorderCustomSections: { description: 'Reorder custom sections', params: [{ name: 'ids', type: 'array', required: true, description: 'Ordered array of section IDs' }], returns: 'Reorder result' },
     },
   },
@@ -1113,7 +1394,24 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
   statistics: {
     description: 'Statistical tools',
     commands: {
-      getPowerMatrix: { description: 'Get statistical power matrix for experiment design', params: [{ name: 'params', type: 'object', required: true, description: 'Power analysis parameters' }], returns: 'Power matrix data' },
+      getPowerMatrix: { description: 'Get statistical power matrix for experiment design', params: [
+        { name: 'params', type: 'object', required: false, description: 'The whole power analysis configuration in API names (like --json-config); overrides the fields below' },
+        { name: 'analysisType', type: 'string', required: false, description: 'Analysis type (e.g. group_sequential)' },
+        { name: 'metricType', type: 'string', required: false, description: 'Metric type (e.g. goal_count, goal_unique)' },
+        { name: 'metricMean', type: 'number', required: false, description: 'Metric mean' },
+        { name: 'metricVariance', type: 'number', required: false, description: 'Metric variance' },
+        { name: 'metricCustomStatisticsType', type: 'string', required: false, description: 'Custom statistics type' },
+        { name: 'alpha', type: 'number', required: false, description: 'Significance level' },
+        { name: 'powers', type: 'array', required: false, description: 'Power levels (e.g. [0.8, 0.9])' },
+        { name: 'split', type: 'array', required: false, description: 'Traffic split (e.g. [0.5, 0.5])' },
+        { name: 'sampleSizes', type: 'array', required: false, description: 'Sample sizes' },
+        { name: 'minimumDetectableEffects', type: 'array', required: false, description: 'Minimum detectable effects' },
+        { name: 'twoSided', type: 'boolean', required: false, description: 'Use a two-sided test' },
+        { name: 'participants', type: 'string', required: false, description: 'Participant rate as <count>/<day|week|month> (e.g. 1000/week); a plain number is per week' },
+        { name: 'futilityType', type: 'string', required: false, description: 'Futility type: binding or non_binding' },
+        { name: 'firstAnalysis', type: 'string', required: false, description: 'First analysis interval (e.g. 7d)' },
+        { name: 'minAnalysisInterval', type: 'string', required: false, description: 'Minimum interval between analyses (e.g. 1d)' },
+      ], returns: 'Power matrix data' },
     },
   },
 
@@ -1122,13 +1420,18 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
     commands: {
       listEvents: { description: 'List events', params: [{ name: 'from', type: 'number', required: false, description: 'Start time, epoch ms' }, { name: 'to', type: 'number', required: false, description: 'End time, epoch ms' }, { name: 'applications', type: 'array', required: false, description: 'Application IDs' }, { name: 'unitTypes', type: 'array', required: false, description: 'Unit type IDs' }, { name: 'eventTypes', type: 'array', required: false, description: 'Event types, e.g. exposure, goal' }, { name: 'eventNames', type: 'array', required: false, description: 'Event (goal or experiment) names' }, { name: 'unitUids', type: 'array', required: false, description: 'Unit UIDs' }, { name: 'environmentTypes', type: 'array', required: false, description: 'Environment types, e.g. production' }, { name: 'validExposures', type: 'boolean', required: false, description: 'true for only valid (effective) exposures, false for only invalid ones' }, { name: 'take', type: 'number', required: false, description: 'Number of events to return' }, { name: 'skip', type: 'number', required: false, description: 'Number of events to skip' }, { name: 'params', type: 'object', required: false, description: 'Deprecated: the same fields nested in one object', deprecated: true }], returns: 'Array of events' },
       listEventsHistory: { description: 'List event history', params: [{ name: 'from', type: 'number', required: false, description: 'Start time, epoch ms' }, { name: 'to', type: 'number', required: false, description: 'End time, epoch ms' }, { name: 'applications', type: 'array', required: false, description: 'Application IDs' }, { name: 'unitTypes', type: 'array', required: false, description: 'Unit type IDs' }, { name: 'eventTypes', type: 'array', required: false, description: 'Event types, e.g. exposure, goal' }, { name: 'eventNames', type: 'array', required: false, description: 'Event (goal or experiment) names' }, { name: 'unitUids', type: 'array', required: false, description: 'Unit UIDs' }, { name: 'environmentTypes', type: 'array', required: false, description: 'Environment types, e.g. production' }, { name: 'period', type: 'string', required: false, description: 'Bucket size, e.g. hour, day' }, { name: 'tzOffset', type: 'number', required: false, description: 'Timezone offset in minutes' }, { name: 'params', type: 'object', required: false, description: 'Deprecated: the same fields nested in one object', deprecated: true }], returns: 'Event counts over time' },
+      getEventUnitData: { description: 'Get the stored event data of units', params: [{ name: 'units', type: 'array', required: true, description: 'Units as "unit_type_id:uid" strings' }], returns: 'Unit event data' },
+      deleteEventUnitData: { description: 'Delete the stored event data of units (e.g. for a data deletion request)', params: [{ name: 'units', type: 'array', required: true, description: 'Units as "unit_type_id:uid" strings' }], returns: 'Deletion result', dangerous: true },
+      getEventJsonValues: { description: 'Distinct values seen at a JSON path in event payloads', params: [{ name: 'eventType', type: 'string', required: true, description: 'exposure, goal or attribute' }, { name: 'path', type: 'string', required: true, description: 'JSON path' }, { name: 'experimentId', type: 'number', required: false, description: 'Experiment ID' }, { name: 'goalId', type: 'number', required: false, description: 'Goal ID' }, { name: 'from', type: 'number', required: false, description: 'Start time, epoch ms' }, { name: 'to', type: 'number', required: false, description: 'End time, epoch ms' }, { name: 'match', type: 'string', required: false, description: 'Keep values matching this case-insensitive regex' }], returns: 'Columnar values' },
+      getEventJsonLayouts: { description: 'JSON paths seen in unit attributes or goal properties', params: [{ name: 'source', type: 'string', required: true, description: 'unit_attribute or unit_goal_property' }, { name: 'phase', type: 'string', required: true, description: 'before_enrichment or after_enrichment' }, { name: 'prefix', type: 'string', required: false, description: 'Path prefix' }, { name: 'sourceId', type: 'number', required: false, description: 'Source ID' }, { name: 'from', type: 'number', required: false, description: 'Start time, epoch ms' }, { name: 'to', type: 'number', required: false, description: 'End time, epoch ms' }, { name: 'match', type: 'string', required: false, description: 'Keep paths matching this case-insensitive regex' }, { name: 'topLevel', type: 'boolean', required: false, description: 'Only top-level paths (same as maxDepth 1)' }, { name: 'maxDepth', type: 'number', required: false, description: 'Only paths with at most this many segments' }], returns: 'Columnar paths' },
+      getEventsSummary: { description: 'Exposure and goal event counts by team and period (CLI: events summary)', params: [{ name: 'from', type: 'string', required: false, description: 'Start time (relative like 7d, month-start, ISO date, or epoch ms)' }, { name: 'to', type: 'string', required: false, description: 'End time (same formats)' }, { name: 'eventType', type: 'string', required: false, description: 'all, goal or exposure (default: all)' }, { name: 'period', type: 'string', required: false, description: 'Roll-up bucket: day, week or month (default: week)' }, { name: 'groupBy', type: 'string', required: false, description: 'total or team (default: total)' }, { name: 'cumulative', type: 'boolean', required: false, description: 'Running totals across periods' }, { name: 'transpose', type: 'boolean', required: false, description: 'With groupBy team: teams as rows' }, { name: 'raw', type: 'boolean', required: false, description: 'The API payload without aggregation' }], returns: 'Aggregated event counts' },
     },
   },
 
   storageconfigs: {
     description: 'Storage configuration management',
     commands: {
-      listStorageConfigs: { description: 'List storage configurations', params: [], returns: 'Array of storage configs' },
+      listStorageConfigs: { description: 'List storage configurations', params: [...PAGING_PARAMS], returns: 'Array of storage configs' },
       getStorageConfig: { description: 'Get storage config details', params: [{ name: 'configId', type: 'number', required: true, description: 'Config ID' }], returns: 'Storage config details' },
       createStorageConfig: { description: 'Create a storage configuration', params: [{ name: 'data', type: 'object', required: true, description: 'Storage config data' }], returns: 'Created storage config' },
       updateStorageConfig: { description: 'Update a storage configuration', params: [{ name: 'configId', type: 'number', required: true, description: 'Config ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated storage config' },
@@ -1136,10 +1439,41 @@ const CATALOG_GROUPS: Record<string, { description: string; commands: Record<str
     },
   },
 
+  customfields: {
+    description: 'Experiment custom section fields across all section types (CLI: custom-fields)',
+    commands: {
+      listCustomFields: { description: 'List custom section fields', params: [...PAGING_PARAMS, ...LIST_FILTER_PARAMS], returns: 'Array of custom fields' },
+      getCustomField: { description: 'Get a custom section field', params: [{ name: 'fieldId', type: 'number', required: true, description: 'Custom field ID' }, ...PROJECTION_PARAMS], returns: 'Custom field' },
+      createCustomField: { description: 'Create a custom section field', params: [{ name: 'data', type: 'object', required: true, description: 'Field data: { name, type (string, number, boolean, json), default_value }' }], returns: 'Created field' },
+      updateCustomField: { description: 'Update a custom section field', params: [{ name: 'fieldId', type: 'number', required: true, description: 'Custom field ID' }, { name: 'data', type: 'object', required: true, description: 'Fields to update: { name, type, default_value }' }], returns: 'Updated field' },
+      archiveCustomField: { description: 'Archive a custom section field', params: [{ name: 'fieldId', type: 'number', required: true, description: 'Custom field ID' }, UNARCHIVE_PARAM], returns: 'Archive result', dangerous: true },
+    },
+  },
+
+  api: {
+    description: 'Raw API requests, like the CLI\'s abs api command',
+    commands: {
+      rawRequest: {
+        description: 'Send a raw request to the ABsmartly API with this session\'s credentials (CLI: abs api). Use it for endpoints no command covers. GET runs directly; POST, PUT and DELETE are destructive and need confirmation.',
+        params: [
+          { name: 'path', type: 'string', required: true, description: 'API path under /v1, starting with "/"; may carry a query (e.g. /experiments/99/metrics/main?use_cache=1)' },
+          { name: 'method', type: 'string', required: false, description: 'GET, POST, PUT or DELETE (default: GET)' },
+          { name: 'query', type: 'object', required: false, description: 'Query parameters to add, e.g. { "use_cache": 1 }' },
+          { name: 'body', type: 'object', required: false, description: 'JSON request body (like abs api --data)' },
+          { name: 'headers', type: 'object', required: false, description: 'Extra request headers (like abs api --header); credentials cannot be overridden' },
+        ],
+        returns: 'The API response body',
+        dangerousWhen: (params) => String(params.method ?? RAW_REQUEST_DEFAULT_METHOD).toUpperCase() !== RAW_REQUEST_DEFAULT_METHOD,
+        dangerousNote: 'POST, PUT and DELETE are destructive and need confirmation; GET does not.',
+        example: { path: '/experiments/99/metrics/main', query: { use_cache: 1 } },
+      },
+    },
+  },
+
   actiondialogfields: {
     description: 'Action dialog field configuration',
     commands: {
-      listActionDialogFields: { description: 'List action dialog fields', params: [], returns: 'Array of action dialog fields' },
+      listActionDialogFields: { description: 'List action dialog fields', params: [...PAGING_PARAMS], returns: 'Array of action dialog fields' },
       getActionDialogField: { description: 'Get action dialog field details', params: [{ name: 'fieldId', type: 'number', required: true, description: 'Field ID' }], returns: 'Field details' },
       createActionDialogField: { description: 'Create an action dialog field', params: [{ name: 'data', type: 'object', required: true, description: 'Field data' }], returns: 'Created field' },
       updateActionDialogField: { description: 'Update an action dialog field', params: [{ name: 'fieldId', type: 'number', required: true, description: 'Field ID' }, { name: 'data', type: 'object', required: true, description: 'Updated fields' }], returns: 'Updated field' },
@@ -1208,7 +1542,7 @@ const ID_PARAM_NAME = /Id\d*$/;
 // Any ID-named key, for the params-bag conflict rule.
 const ID_KEY = /^id$|Id\d*$/;
 const USER_REF_KEYS = ['userId', 'userRef'];
-const USER_REF_COMMANDS = new Set(['users.listUserApiKeys', 'users.createUserApiKey', 'users.deleteUserApiKey']);
+const USER_REF_COMMANDS = new Set(['users.listUserApiKeys', 'users.getUserApiKey', 'users.createUserApiKey', 'users.updateUserApiKey', 'users.deleteUserApiKey']);
 const ID_LIST_PARAM = 'ids';
 // Digits only, after trimming; leading zeros are allowed ("05" is 5).
 const DIGITS = /^[0-9]+$/;
@@ -1229,7 +1563,7 @@ function idParams(entry: CommandEntry): CommandParam[] {
 // metrics objects, event filters) are not IDs and are left alone. `ids` on
 // bulk commands must be non-empty (an empty batch is a mistake); a body list
 // like editTeamMemberRoles `roles` may be empty (it clears the roles).
-const ID_LIST_PARAMS = new Set([ID_LIST_PARAM, 'userIds', 'roles']);
+const ID_LIST_PARAMS = new Set([ID_LIST_PARAM, 'userIds', 'roles', 'roleIds']);
 
 /** Params the execute_command tool layer adds itself (src/tools.ts); the audit ignores them too. */
 export const TOOL_INJECTED_PARAMS = {
@@ -1794,8 +2128,25 @@ const searchQuery: ParamAdapter = compose(renameTo('search', 'query'), renameTo(
 const NOTE_TEXT = renameTo('text', 'note');
 const FAVORITE_TARGET = compose(renameTo('entityType', 'type'), renameTo('entityId', ID_PARAM));
 
+/** CLI --asc/--desc as the core's sortAsc. */
+const sortDirection: ParamAdapter = (p) => {
+  const { asc, desc, ...rest } = p;
+  const sortAsc = asc === true ? true : desc === true ? false : undefined;
+  return sortAsc === undefined || rest.sortAsc !== undefined ? rest : { ...rest, sortAsc };
+};
+
+/** listExperiments alert filters: the core reads true or "1" as raised and "0" as not raised. */
+const ALERT_FILTERS = ['alertSrm', 'alertCleanupNeeded', 'alertAudienceMismatch', 'alertSampleSizeReached', 'alertExperimentsInteract', 'alertGroupSequentialUpdated', 'alertAssignmentConflict', 'alertMetricThresholdReached'];
+const alertFlags: ParamAdapter = (p) => {
+  const out = { ...p };
+  for (const key of ALERT_FILTERS) if (out[key] === false) out[key] = ALERT_NOT_RAISED;
+  return out;
+};
+const ALERT_NOT_RAISED = '0';
+
 const PARAM_ADAPTERS: Record<string, Record<string, ParamAdapter>> = {
   experiments: {
+    listExperiments: alertFlags,
     searchExperiments: searchQuery,
     // RestartExperimentParams types defaultType as required, but core
     // restartExperiment never reads it (only buildRestartChanges does), so it
@@ -1841,6 +2192,8 @@ const PARAM_ADAPTERS: Record<string, Record<string, ParamAdapter>> = {
     listUserApiKeys: userRefFromUserId,
     createUserApiKey: compose(userRefFromUserId, flattenData),
     deleteUserApiKey: userRefFromUserId,
+    getUserApiKey: userRefFromUserId,
+    updateUserApiKey: compose(userRefFromUserId, flattenData),
   },
   apps: entityAdapters('appId', { byId: ['getApp', 'archiveApp'], create: ['createApp'], update: ['updateApp'] }),
   envs: entityAdapters('envId', { byId: ['getEnv', 'archiveEnv'], create: ['createEnv'], update: ['updateEnv'] }),
@@ -1874,15 +2227,18 @@ const PARAM_ADAPTERS: Record<string, Record<string, ParamAdapter>> = {
   favorites: { addFavorite: FAVORITE_TARGET, removeFavorite: FAVORITE_TARGET },
   cors: entityAdapters('originId', { byId: ['getCorsOrigin', 'deleteCorsOrigin'], create: ['createCorsOrigin'], update: ['updateCorsOrigin'] }),
   datasources: configEntityAdapters('datasourceId', {
-    byId: ['getDatasource', 'archiveDatasource'],
+    byId: ['getDatasource', 'archiveDatasource', 'setDefaultDatasource', 'getDatasourceSchema'],
     create: ['createDatasource'],
     update: ['updateDatasource'],
   }),
-  exportconfigs: configEntityAdapters('configId', {
-    byId: ['getExportConfig', 'archiveExportConfig', 'pauseExportConfig', 'listExportHistories'],
-    create: ['createExportConfig'],
-    update: ['updateExportConfig'],
-  }),
+  exportconfigs: {
+    cancelExportHistory: renameTo('configId', 'exportConfigId'),
+    ...configEntityAdapters('configId', {
+      byId: ['getExportConfig', 'archiveExportConfig', 'pauseExportConfig', 'listExportHistories'],
+      create: ['createExportConfig'],
+      update: ['updateExportConfig'],
+    }),
+  },
   updateschedules: configEntityAdapters('scheduleId', {
     byId: ['getUpdateSchedule', 'deleteUpdateSchedule'],
     create: ['createUpdateSchedule'],
@@ -1896,7 +2252,12 @@ const PARAM_ADAPTERS: Record<string, Record<string, ParamAdapter>> = {
     }),
     reorderCustomSections: sectionOrder,
   },
-  statistics: { getPowerMatrix: renameTo(PARAMS_PARAM, CONFIG_PARAM) },
+  customfields: entityAdapters('fieldId', {
+    byId: ['getCustomField', 'archiveCustomField'],
+    create: ['createCustomField'],
+    update: ['updateCustomField'],
+    fieldAliases: { default_value: 'defaultValue' },
+  }),
   storageconfigs: configEntityAdapters('configId', {
     byId: ['getStorageConfig'],
     create: ['createStorageConfig'],
@@ -1941,8 +2302,14 @@ function bulkRunner(command: typeof BULK_COMMANDS[number]): CommandRunner {
     if (required !== undefined && params[required] === undefined) {
       throw new Error(`experiments.${command} requires "${required}"`);
     }
-    // Normalised by normalizeIdParams when given; absent ids stay an empty batch, as in 2.0.1.
-    const ids = Array.isArray(params[ID_LIST_PARAM]) ? params[ID_LIST_PARAM] as number[] : [];
+    // Normalised by normalizeIdParams when given; absent ids stay an empty batch, as in 2.0.1,
+    // unless state/app select the experiments (the CLI's bulk --state/--app).
+    const given = Array.isArray(params[ID_LIST_PARAM]) ? params[ID_LIST_PARAM] as number[] : [];
+    const select = given.length === 0 && (params.state !== undefined || params.app !== undefined);
+    const ids: number[] = select
+      ? await experimentsCore.collectBulkIds(client, [], { state: params.state, app: params.app })
+      : given;
+    if (params.dryRun === true) return { data: { dryRun: true, action: command, ids } };
     const extra = BULK_EXTRA_ARGS[command].map((name) => params[name]);
     return experimentsCore[command](client, ids, new Map(), ...extra);
   };
@@ -2060,7 +2427,261 @@ function userFields(data: unknown): Record<string, unknown> {
   return isRecord(data) ? data : {};
 }
 
+/**
+ * Variant screenshots the MCP server will load: data: URIs only. The CLI's
+ * resolver reads a local path from the disk it runs on and fetches a URL
+ * from the network it runs on; on the server those are the server's, not the
+ * caller's, and the loaded bytes are returned in the payload. An existing
+ * upload is referenced by screenshotId / screenshot_id instead.
+ */
+// Case-sensitive, exactly as the CLI resolver classifies a data URI
+// (value.startsWith('data:')); "DATA:x" would be read as a file named so.
+const SERVER_SCREENSHOT_SOURCE = /^data:/;
+const SCREENSHOT_PARAM = 'screenshot';
+const TEMPLATE_PARAMS = ['templateContent', 'overrideContent'];
+const SCREENSHOT_SOURCE_RULE = 'the source must be a data: URI (data:image/png;base64,...); the MCP server does not read file paths or fetch URLs. Reference an existing upload by its ID instead (screenshotId / screenshot_id)';
+
+/** Refuses screenshot sources the server must not load, in the screenshot param and in any template param. */
+export function checkScreenshotSources(params: Record<string, unknown>): void {
+  const entries = params[SCREENSHOT_PARAM];
+  if (entries !== undefined && entries !== null) {
+    if (!Array.isArray(entries) || entries.some((e) => typeof e !== 'string')) {
+      throw new Error(`"${SCREENSHOT_PARAM}" must be an array of "variant_index:source" strings`);
+    }
+    for (const entry of entries as string[]) {
+      if (!SERVER_SCREENSHOT_SOURCE.test(entry.slice(entry.indexOf(':') + 1))) {
+        throw new Error(`Screenshot "${entry}": ${SCREENSHOT_SOURCE_RULE}`);
+      }
+    }
+  }
+  for (const key of TEMPLATE_PARAMS) {
+    if (typeof params[key] === 'string') checkTemplateScreenshots(params[key] as string);
+  }
+}
+
+/** The same rule for screenshots inside a markdown template (![label](source) or screenshot: source). */
+export function checkTemplateScreenshots(templateContent: string): void {
+  for (const variant of parseExperimentMarkdown(templateContent).variants ?? []) {
+    const source = (variant as { screenshot?: string }).screenshot;
+    if (source && !SERVER_SCREENSHOT_SOURCE.test(source)) {
+      throw new Error(`Screenshot for variant "${variant.name}": ${SCREENSHOT_SOURCE_RULE}`);
+    }
+  }
+}
+
+/** CLI-style custom field values ({ name: value }) as the core reads them, as strings. */
+function customFieldValues(value: unknown): Record<string, string> | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) throw new Error('"customFields" must be an object of field name to value');
+  return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)]));
+}
+
+const UPDATE_FIELD_PARAMS = [
+  'name', 'displayName', 'state', 'percentageOfTraffic', 'percentages', 'analysisType', 'requiredAlpha', 'requiredPower',
+  'baselineParticipants', 'audience', 'primaryMetric', 'unitType', 'applicationId', 'owner', 'variants', 'variantConfig',
+  'secondaryMetrics', 'guardrailMetrics', 'exploratoryMetrics', 'teams', 'tags', 'screenshot', 'screenshotId', 'templateContent',
+];
+const CUSTOM_FIELDS_PARAM = 'customFields';
+
+/** experiments update: CLI-style fields through the core's buildUpdateChanges, merged under explicit `changes`. */
+async function runUpdateExperiment(client: ApiClientLike, params: Record<string, unknown>): Promise<unknown> {
+  const explicit = isRecord(params.changes) ? params.changes : undefined;
+  const usesFields = UPDATE_FIELD_PARAMS.some((k) => params[k] !== undefined) || params[CUSTOM_FIELDS_PARAM] !== undefined;
+  let changes: Record<string, unknown> = explicit ?? {};
+  let warnings: string[] = [];
+  if (usesFields) {
+    const built = await experimentsCore.buildUpdateChanges(client, {
+      ...Object.fromEntries(UPDATE_FIELD_PARAMS.map((k) => [k, params[k]])),
+      owner: Array.isArray(params.owner) ? params.owner.map(String) : undefined,
+      experimentId: params.experimentId,
+      customFieldValues: customFieldValues(params[CUSTOM_FIELDS_PARAM]),
+      defaultType: params.defaultType ?? DEFAULT_EXPERIMENT_TYPE,
+    }) as { changes: Record<string, unknown>; warnings: string[] };
+    changes = { ...built.changes, ...(explicit ?? {}) };
+    warnings = built.warnings;
+  }
+  if (!explicit && !usesFields) {
+    throw new Error('experiments.updateExperiment needs "changes" or at least one field to update (e.g. name, state, percentages)');
+  }
+  if (params.dryRun === true) {
+    return { data: { dryRun: true, experimentId: params.experimentId, changes, note: params.note }, warnings };
+  }
+  const result = await experimentsCore.updateExperiment(client, { experimentId: params.experimentId, changes, note: params.note });
+  return warnings.length > 0 ? { ...result, warnings } : result;
+}
+
+/** experiments restart: template/custom field changes through the core's buildRestartChanges. */
+async function runRestartExperiment(client: ApiClientLike, params: Record<string, unknown>): Promise<unknown> {
+  const restart = {
+    ...params,
+    asType: params.asType ?? params.type,
+    defaultType: params.defaultType ?? DEFAULT_EXPERIMENT_TYPE,
+    customFieldValues: customFieldValues(params[CUSTOM_FIELDS_PARAM]),
+  };
+  experimentsCore.validateRestartParams(restart);
+  const { changes, warnings } = await experimentsCore.buildRestartChanges(client, restart) as { changes?: Record<string, unknown>; warnings: string[] };
+  if (params.dryRun === true) return { data: { dryRun: true, experimentId: params.experimentId, changes: changes ?? null }, warnings };
+  const result = await experimentsCore.restartExperiment(client, restart, changes);
+  return warnings.length > 0 ? { ...result, warnings } : result;
+}
+
+/** experiments create (flag form): the core's buildCreatePayloadFromOptions, then createExperiment. */
+async function runCreateExperimentFromOptions(client: ApiClientLike, params: Record<string, unknown>): Promise<unknown> {
+  const payload = await experimentsCore.buildCreatePayloadFromOptions(client, {
+    name: params.name,
+    displayName: params.displayName,
+    defaultType: params.type ?? DEFAULT_EXPERIMENT_TYPE,
+    state: params.state ?? DEFAULT_CREATE_STATE,
+    variants: params.variants,
+    variantConfig: params.variantConfig,
+    percentages: params.percentages,
+    percentageOfTraffic: params.percentageOfTraffic ?? DEFAULT_PERCENTAGE_OF_TRAFFIC,
+    unitType: params.unitType,
+    applicationId: params.applicationId,
+    primaryMetric: params.primaryMetric,
+    screenshot: params.screenshot,
+    ownerIds: Array.isArray(params.owner) ? params.owner.map((id) => parseInt(String(id), 10)) : undefined,
+    secondaryMetrics: params.secondaryMetrics,
+    guardrailMetrics: params.guardrailMetrics,
+    exploratoryMetrics: params.exploratoryMetrics,
+    teams: params.teams,
+    tags: params.tags,
+    audience: params.audience,
+    analysisType: params.analysisType,
+    requiredAlpha: params.requiredAlpha,
+    requiredPower: params.requiredPower,
+    baselineParticipants: params.baselineParticipants,
+    minimumDetectableEffect: params.mde,
+    baselinePrimaryMetricMean: params.baselineMean,
+    baselinePrimaryMetricStdev: params.baselineStdev,
+    groupSequentialFutilityType: params.gsFutilityType,
+    groupSequentialAnalysisCount: params.gsAnalysisCount,
+    groupSequentialMinAnalysisInterval: params.gsMinAnalysisInterval,
+    groupSequentialFirstAnalysisInterval: params.gsFirstAnalysisInterval,
+    groupSequentialMaxDurationInterval: params.gsMaxDurationInterval,
+    customFields: customFieldValues(params[CUSTOM_FIELDS_PARAM]),
+  });
+  if (params.dryRun === true) return { data: { dryRun: true, payload } };
+  return experimentsCore.createExperiment(client, payload);
+}
+const DEFAULT_CREATE_STATE = 'ready';
+const DEFAULT_PERCENTAGE_OF_TRAFFIC = 100;
+
+// Datasource commands the core index does not export (core/datasources/datasources.js
+// has them, the package exports map does not reach it): the same APIClient call.
+const DATASOURCE_DIRECT_COMMANDS = ['deleteDatasource', 'createDatasourceJsonLayouts', 'recreateDatasourceJsonLayouts'] as const;
+
+/**
+ * List commands whose core only forwards items/page, while the CLI command
+ * sends its generic list options (search, sort, asc/desc, archived, ids)
+ * straight to the APIClient list method: group → command → that method.
+ * The runner makes that call, then runs the core with a client that returns
+ * the page, so the core still adds its summarized rows and pagination.
+ */
+const GENERIC_LIST_COMMANDS: Record<string, Record<string, string>> = {
+  goals: { listGoals: 'listGoals' },
+  segments: { listSegments: 'listSegments' },
+  apps: { listApps: 'listApplications' },
+  envs: { listEnvs: 'listEnvironments' },
+  units: { listUnits: 'listUnitTypes' },
+  tags: { listTags: 'listExperimentTags' },
+  goaltags: { listGoalTags: 'listGoalTags' },
+  metrictags: { listMetricTags: 'listMetricTags' },
+  metriccategories: { listMetricCategories: 'listMetricCategories' },
+  apikeys: { listApiKeys: 'listApiKeys' },
+  webhooks: { listWebhooks: 'listWebhooks' },
+  roles: { listRoles: 'listRoles' },
+  teams: { listTeams: 'listTeams' },
+  customfields: { listCustomFields: 'listCustomSectionFields' },
+};
+const LIST_FILTER_KEYS = ['search', 'sort', 'asc', 'desc', 'archived', 'ids'];
+
+function genericListRunner(group: string, command: string): CommandRunner {
+  const apiMethod = GENERIC_LIST_COMMANDS[group][command];
+  return async (client, params) => {
+    const core = CORE_MODULES[group][command];
+    if (!LIST_FILTER_KEYS.some((k) => params[k] !== undefined)) return core(client, params);
+    const options = {
+      items: params.items,
+      page: params.page,
+      search: params.search,
+      sort: params.sort,
+      sort_asc: params.asc === true ? true : params.desc === true ? false : undefined,
+      archived: params.archived,
+      ids: params.ids,
+      ...(params.includeArchived !== undefined && { includeArchived: params.includeArchived }),
+    };
+    const page = await (client as unknown as Record<string, (o: unknown) => Promise<unknown>>)[apiMethod](options);
+    const replay = new Proxy(client as object, {
+      get: (target, prop, receiver) => (prop === apiMethod ? async () => page : Reflect.get(target, prop, receiver)),
+    });
+    return core(replay, params);
+  };
+}
+
+const METRIC_SCAN_PAGE_SIZE = 200;
+const METRIC_SCAN_MAX_PAGES = 100;
+const DEFAULT_ACTIVATION_REASON = 'Initial activation';
+const DEFAULT_SUMMARY_PERIOD = 'week';
+const DEFAULT_SUMMARY_EVENT_TYPE = 'all';
+const DEFAULT_SUMMARY_GROUP_BY = 'total';
+
+/**
+ * metrics version / create --new-version: the CLI core's createMetricVersion
+ * (core/metrics/new-version.js, which the package does not export) is
+ * buildMetricPayload + APIClient.createMetricVersion. buildMetricPayload is
+ * also not exported, so the payload is the API-named fields as given.
+ */
+async function runMetricVersion(client: ApiClientLike, fields: Record<string, unknown>, activate: boolean): Promise<unknown> {
+  const { id, reason, ...rest } = fields;
+  const data = metricApiPayload(rest);
+  const created = await client.createMetricVersion(id as any, data as any, reason as string | undefined) as { id: number };
+  if (!activate) return { data: created };
+  return activateCreated(client, created, String(reason), 'metric version');
+}
+
+/**
+ * Activates a metric that was just created. Creation already succeeded, so a
+ * failed activation is reported with the created entity (and its ID) rather
+ * than as an error: retrying the "failed" call would create a duplicate.
+ */
+async function activateCreated(client: ApiClientLike, created: { id: number }, reason: string, label: string): Promise<unknown> {
+  try {
+    await client.activateMetric(created.id as any, reason);
+    return { data: { ...created, activated: true } };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      data: { ...created, activated: false, activationError: message },
+      warnings: [`The ${label} was created (id ${created.id}) but activation failed: ${message}. Do not create it again; activate it with metrics.activateMetric { metricId: ${created.id}, reason }.`],
+    };
+  }
+}
+
+const METRIC_FIELD_API_NAMES = Object.fromEntries(Object.entries(METRIC_FIELD_ALIASES).map(([api, camel]) => [camel, api]));
+
+/** Camel-case metric fields (as normalizeMetricFields leaves them) back to API names; unknown keys pass through. */
+function metricApiPayload(fields: Record<string, unknown>): Record<string, unknown> {
+  const camelToApi = METRIC_FIELD_API_NAMES;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if (value === undefined || key === 'metricId' || key === 'activate') continue;
+    if (key === 'owner') { out.owners = [{ user_id: value }]; continue; }
+    const api = camelToApi[key] ?? key;
+    if (out[api] === undefined) out[api] = value;
+  }
+  return out;
+}
+
 const EXPERIMENT_RUNNERS: Record<string, CommandRunner> = {
+  updateExperiment: runUpdateExperiment,
+  restartExperiment: runRestartExperiment,
+  createExperimentFromOptions: runCreateExperimentFromOptions,
+  analyzeExperiment: (client, params) => CORE_MODULES.analyze.analyzeExperiment(client, { experimentId: params.experimentId }),
+  getExportStatus: async (client, params) => ({ data: await experimentsCore.fetchExportStatus(client, params.exportConfigId) }),
+  findRecentExport: async (client, params) => ({
+    data: await experimentsCore.findRecentDownload(client, params.experimentId, { includeExpired: params.includeExpired === true }),
+  }),
   // core createExperiment(client, body) posts its second argument as the body.
   createExperiment: (client, params) =>
     experimentsCore.createExperiment(client, isRecord(params.data) ? params.data : {}),
@@ -2069,8 +2690,10 @@ const EXPERIMENT_RUNNERS: Record<string, CommandRunner> = {
   cloneExperiment: async (client, params) => {
     const { payload, warnings } = await experimentsCore.buildClonePayload(client, {
       ...params,
+      overrideContent: params.overrideContent ?? params.templateContent,
       defaultType: params.defaultType ?? DEFAULT_EXPERIMENT_TYPE,
     });
+    if (params.dryRun === true) return { data: { dryRun: true, payload }, warnings };
     const result = await experimentsCore.cloneExperiment(client, payload, params.experimentId);
     return warnings?.length ? { ...result, warnings: [...(result.warnings ?? []), ...warnings] } : result;
   },
@@ -2088,16 +2711,180 @@ const EXPERIMENT_RUNNERS: Record<string, CommandRunner> = {
 const COMMAND_RUNNERS: Record<string, Record<string, CommandRunner>> = {
   experiments: EXPERIMENT_RUNNERS,
   users: {
-    createUser: async (client, params) => ({ data: await client.createUser(userFields(params.data) as any) }),
+    listUsers: async (client, raw) => {
+      const params = sortDirection(raw);
+      if (!hasUserFilters(params)) return CORE_MODULES.users.listUsers(client, params);
+      const nativeOptions = {
+        ...(params.includeArchived !== undefined && { includeArchived: params.includeArchived }),
+        ...(params.search !== undefined && { search: params.search }),
+        ...(params.sort !== undefined && { sort: params.sort }),
+        ...(params.sortAsc !== undefined && { sort_asc: params.sortAsc }),
+        ...(params.ids !== undefined && { ids: params.ids }),
+      };
+      const matched = await filterAllUsers(client, params, nativeOptions);
+      const items = Number(params.items ?? USER_FILTER_SCAN_PAGE_SIZE);
+      const page = Number(params.page ?? 1);
+      const data = matched.slice((page - 1) * items, page * items);
+      return { data, pagination: { page, items, hasMore: page * items < matched.length, total: matched.length } };
+    },
+    createUser: async (client, params) => ({
+      data: await client.createUser({
+        ...userFields(params.data),
+        ...(typeof params.role === 'string' && { roles: await resolveRolesPayload(client, params.role) }),
+      } as any),
+    }),
     updateUser: async (client, params) => {
-      const data = userFields(params.data);
+      const data = {
+        ...userFields(params.data),
+        ...(typeof params.role === 'string' && { roles: await resolveRolesPayload(client, params.role) }),
+      };
       if (Object.keys(data).length === 0) throw new Error('At least one update field is required');
       await client.updateUser(params.userId as any, data as any);
       return { data: { id: params.userId } };
     },
   },
-  goals: Object.fromEntries(GOAL_ACCESS_COMMANDS.map((c) => [c, accessRunner('goals', c, GOAL_ID_PARAM, ID_PARAM)])),
-  datasources: Object.fromEntries(DATASOURCE_CONFIG_COMMANDS.map((c) => [c, datasourceRunner(c)])),
+  goals: {
+    ...Object.fromEntries(GOAL_ACCESS_COMMANDS.map((c) => [c, accessRunner('goals', c, GOAL_ID_PARAM, ID_PARAM)])),
+    ...Object.fromEntries(Object.keys(GENERIC_LIST_COMMANDS.goals).map((c) => [c, genericListRunner('goals', c)])),
+  },
+  datasources: {
+    ...Object.fromEntries(DATASOURCE_CONFIG_COMMANDS.map((c) => [c, datasourceRunner(c)])),
+    previewDatasourceQuery: async (client, params) => {
+      let config = params[CONFIG_PARAM];
+      if (config === undefined) {
+        if (params.datasourceId === undefined || typeof params.query !== 'string') {
+          throw new Error('datasources.previewDatasourceQuery needs "datasourceId" and "query", or a "config" object');
+        }
+        config = { datasource_id: params.datasourceId, query: params.query, ...(params.limit !== undefined && { limit: params.limit }) };
+      }
+      const result = await CORE_MODULES.datasources.previewDatasourceQuery(client, { config }) as { data: unknown };
+      return params.raw === true ? result : { data: columnarToRows(result.data) };
+    },
+    ...Object.fromEntries(DATASOURCE_DIRECT_COMMANDS.map((c) => [c, async (client: ApiClientLike, params: Record<string, unknown>) => {
+      await (client as unknown as Record<string, (id: unknown) => Promise<unknown>>)[c](params.datasourceId);
+      return { data: { id: params.datasourceId } };
+    }])),
+    previewDatasourceJsonLayouts: async (client, params) => ({ data: await client.previewDatasourceJsonLayouts(params.datasourceId as any) }),
+  },
+  metrics: {
+    listMetrics: async (client, params) => {
+      const adapted = normalizeMetricCommandParams('listMetrics', sortDirection(params));
+      if (!hasMetricFilters(params)) return CORE_MODULES.metrics.listMetrics(client, adapted);
+      // As the CLI's listAllMetrics: owner/team names resolved once, raw pages from the APIClient.
+      const owners = typeof adapted.owners === 'string' ? await CORE_MODULES.metrics.resolveOwnerIds(client, adapted.owners) : undefined;
+      const teams = typeof adapted.teams === 'string' ? await CORE_MODULES.metrics.resolveTeamIds(client, adapted.teams) : undefined;
+      const scanOptions = {
+        archived: adapted.archived, include_drafts: adapted.include_drafts, search: adapted.search, sort: adapted.sort,
+        sort_asc: adapted.sortAsc, ids: adapted.ids, owners, teams, review_status: adapted.reviewStatus,
+      };
+      const all: Record<string, unknown>[] = [];
+      let truncated = true;
+      for (let page = 1; page <= METRIC_SCAN_MAX_PAGES; page++) {
+        const data = await client.listMetrics({ ...scanOptions, items: METRIC_SCAN_PAGE_SIZE, page } as any) as Record<string, unknown>[];
+        all.push(...data);
+        if (data.length < METRIC_SCAN_PAGE_SIZE) {
+          truncated = false;
+          break;
+        }
+      }
+      const matched = filterMetrics(all, params);
+      const items = Number(params.items ?? METRIC_SCAN_PAGE_SIZE);
+      const page = Number(params.page ?? 1);
+      const data = matched.slice((page - 1) * items, page * items);
+      if (!truncated) {
+        return { data, pagination: { page, items, hasMore: page * items < matched.length, total: matched.length } };
+      }
+      return {
+        data,
+        pagination: { page, items, hasMore: page * items < matched.length, scanIncomplete: true, matchedInScan: matched.length },
+        warnings: [`Scanned the first ${all.length} metrics (the ${METRIC_SCAN_MAX_PAGES}-page cap) and stopped: later metrics were not filtered, so matches may be missing. Narrow the scan with search, owners, teams or ids.`],
+      };
+    },
+    createMetric: async (client, params) => {
+      const fields = normalizeMetricCommandParams(CREATE_METRIC_COMMAND, params);
+      const { activate, newVersion, reason, ...metricFields } = fields;
+      if (newVersion !== undefined) {
+        if (typeof reason !== 'string' || reason === '') throw new Error('metrics.createMetric: "reason" is required with "newVersion"');
+        return runMetricVersion(client, { ...metricFields, id: newVersion, reason }, activate === true);
+      }
+      const result = await CORE_MODULES.metrics.createMetric(client, metricFields) as { data: { id: number } };
+      if (activate !== true) return result;
+      return activateCreated(client, result.data, typeof reason === 'string' ? reason : DEFAULT_ACTIVATION_REASON, 'metric');
+    },
+    createMetricVersion: async (client, params) => {
+      const fields = normalizeMetricCommandParams(CREATE_METRIC_COMMAND, { ...(isRecord(params.data) ? params.data : {}) });
+      return runMetricVersion(client, { ...fields, id: params.metricId, reason: params.reason }, params.activate === true);
+    },
+  },
+  notifications: {
+    // CLI cores before 1.17 ignore limit; applying it here gives the same result on every peer version.
+    listNotifications: async (client, params) => {
+      const result = await CORE_MODULES.notifications.listNotifications(client, params) as { data: unknown[]; warnings?: string[] };
+      const limit = params.limit;
+      if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || result.data.length <= limit) return result;
+      return { ...result, data: result.data.slice(0, limit) };
+    },
+  },
+  statistics: {
+    getPowerMatrix: async (client, params) => CORE_MODULES.statistics.getPowerMatrix(client, {
+      config: isRecord(params[PARAMS_PARAM]) ? params[PARAMS_PARAM] : buildPowerMatrixConfig(params),
+    }),
+  },
+  events: {
+    getEventJsonValues: async (client, params) => {
+      const result = await CORE_MODULES.events.getEventJsonValues(client, params) as { data: unknown };
+      return { ...result, data: filterColumnarRows(result.data, 'value', { match: params.match as string | undefined }) };
+    },
+    getEventJsonLayouts: async (client, params) => {
+      const result = await CORE_MODULES.events.getEventJsonLayouts(client, params) as { data: unknown };
+      return {
+        ...result,
+        data: filterColumnarRows(result.data, 'key', {
+          match: params.match as string | undefined,
+          topLevel: params.topLevel === true,
+          maxDepth: params.maxDepth as number | undefined,
+        }),
+      };
+    },
+    getEventsSummary: async (client, params) => {
+      const from = parseCliDate(params.from as string | number | undefined);
+      const to = parseCliDate(params.to as string | number | undefined);
+      checkSummaryRange(from, to);
+      const data = await client.getEventsSummary({ from, to } as any) as Parameters<typeof summarizeEvents>[0];
+      if (params.raw === true) return { data };
+      const pick = <T extends string>(name: string, value: unknown, allowed: readonly T[], fallback: T): T => {
+        if (value === undefined) return fallback;
+        if (!allowed.includes(value as T)) throw new Error(`events.getEventsSummary: "${name}" must be one of ${allowed.join(', ')}`);
+        return value as T;
+      };
+      return {
+        data: summarizeEvents(data, {
+          period: pick('period', params.period, SUMMARY_PERIODS, DEFAULT_SUMMARY_PERIOD),
+          eventType: pick('eventType', params.eventType, SUMMARY_EVENT_TYPES, DEFAULT_SUMMARY_EVENT_TYPE),
+          groupBy: pick('groupBy', params.groupBy, SUMMARY_GROUP_BY, DEFAULT_SUMMARY_GROUP_BY),
+          cumulative: params.cumulative === true,
+          transpose: params.transpose === true,
+        }),
+      };
+    },
+  },
+  ...Object.fromEntries(Object.entries(GENERIC_LIST_COMMANDS)
+    .filter(([group]) => group !== 'goals')
+    .map(([group, commands]) => [group, Object.fromEntries(Object.keys(commands).map((c) => [c, genericListRunner(group, c)]))])),
+  api: {
+    rawRequest: async (client, params) => {
+      const { path, query, body, headers } = params;
+      const method = String(params.method ?? RAW_REQUEST_DEFAULT_METHOD).toUpperCase();
+      if (typeof path !== 'string') throw new Error('api.rawRequest requires "path" (e.g. /experiments)');
+      if (query !== undefined && !isRecord(query)) throw new Error('"query" must be an object of query parameters');
+      if (headers !== undefined && (!isRecord(headers) || Object.values(headers).some((v) => typeof v !== 'string'))) {
+        throw new Error('"headers" must be an object of string header values');
+      }
+      // The same call abs api makes: APIClient.rawRequest validates the path
+      // and method; the HttpClient adds the session's credentials last.
+      return { data: await client.rawRequest(withQuery(path, query), method, body, headers as Record<string, string> | undefined) };
+    },
+  },
   storageconfigs: {
     // The backend merges only the stored secret key (by storage_config_id); the
     // exporter validates the body as a whole StorageConfig (name, type and
@@ -2136,9 +2923,69 @@ export const RUNNER_EXTRA_CORE_FUNCTIONS: Record<string, string[]> = {
   ...Object.fromEntries(EXPERIMENT_ACCESS_COMMANDS.map((c) => [`experiments.${c}`, ['assetroles.listAssetRoles']])),
   ...Object.fromEntries(GOAL_ACCESS_COMMANDS.map((c) => [`goals.${c}`, ['assetroles.listAssetRoles']])),
   'storageconfigs.testStorageConfig': ['getStorageConfig'],
+  'experiments.updateExperiment': ['buildUpdateChanges'],
+  'metrics.listMetrics': ['resolveOwnerIds', 'resolveTeamIds'],
+  'experiments.restartExperiment': ['buildRestartChanges', 'validateRestartParams'],
+  'experiments.createExperimentFromOptions': ['buildCreatePayloadFromOptions', 'createExperiment'],
+  'experiments.analyzeExperiment': ['analyze.analyzeExperiment'],
+  'experiments.getExportStatus': ['fetchExportStatus'],
+  'experiments.findRecentExport': ['findRecentDownload'],
+  ...Object.fromEntries(BULK_COMMANDS.map((c) => [`experiments.${c}`, ['collectBulkIds']])),
   'platformconfig.getPlatformConfig': ['listPlatformConfigs'],
   'platformconfig.updatePlatformConfig': ['listPlatformConfigs'],
 };
+
+/**
+ * Commands whose runner calls no core function named after the command; the
+ * manifest walks only RUNNER_EXTRA_CORE_FUNCTIONS and RUNNER_API_METHODS for them.
+ */
+export const RUNNERS_WITHOUT_NAMED_CORE_FUNCTION = new Set([
+  'experiments.createExperimentFromOptions',
+  'experiments.analyzeExperiment',
+  'experiments.getExportStatus',
+  'experiments.findRecentExport',
+  'metrics.createMetricVersion',
+  'datasources.deleteDatasource',
+  'datasources.createDatasourceJsonLayouts',
+  'datasources.recreateDatasourceJsonLayouts',
+  'datasources.previewDatasourceJsonLayouts',
+  'events.getEventsSummary',
+  'api.rawRequest',
+]);
+
+/** APIClient methods a runner calls directly (not through a core function), for the manifest. */
+export const RUNNER_API_METHODS: Record<string, string[]> = {
+  'metrics.createMetric': ['activateMetric', 'createMetricVersion'],
+  'metrics.createMetricVersion': ['createMetricVersion', 'activateMetric'],
+  'metrics.listMetrics': ['listMetrics'],
+  'users.listUsers': ['listUsers', 'listRoles'],
+  'users.createUser': ['createUser', 'listRoles'],
+  'users.updateUser': ['updateUser', 'listRoles'],
+  ...Object.fromEntries(DATASOURCE_DIRECT_COMMANDS.map((c) => [`datasources.${c}`, [c]])),
+  'datasources.previewDatasourceJsonLayouts': ['previewDatasourceJsonLayouts'],
+  'events.getEventsSummary': ['getEventsSummary'],
+  ...Object.fromEntries(Object.entries(GENERIC_LIST_COMMANDS).flatMap(([group, commands]) =>
+    Object.entries(commands).map(([c, apiMethod]) => [`${group}.${c}`, [apiMethod]]))),
+  'api.rawRequest': ['rawRequest'],
+};
+
+const RAW_QUERY_SEPARATOR = '?';
+const RAW_QUERY_JOINER = '&';
+
+/**
+ * Appends `query` to `path`. rawRequest decodes the whole path once before
+ * sending, so each key and value is encoded twice: a value's own "&", "=" or
+ * "%" then survives as data.
+ */
+function withQuery(path: string, query: Record<string, unknown> | undefined): string {
+  if (!query) return path;
+  const encode = (v: string) => encodeURIComponent(encodeURIComponent(v));
+  const parts = Object.entries(query)
+    .filter(([, v]) => v !== undefined && v !== null)
+    .flatMap(([k, v]) => (Array.isArray(v) ? v : [v]).map((item) => `${encode(k)}=${encode(String(item))}`));
+  if (parts.length === 0) return path;
+  return `${path}${path.includes(RAW_QUERY_SEPARATOR) ? RAW_QUERY_JOINER : RAW_QUERY_SEPARATOR}${parts.join(RAW_QUERY_JOINER)}`;
+}
 
 /** True when a command is dispatched by a runner instead of a `(client, params)` core call. */
 export function hasCommandRunner(group: string, command: string): boolean {
@@ -2172,16 +3019,12 @@ export async function executeCommand(
     throw new Error(`Unknown command: ${group}.${command}`);
   }
 
-  const mod = CORE_MODULES[group];
-  if (!mod) {
-    throw new Error(`Unknown group: "${group}". Available: ${CLI_GROUPS.join(', ')}`);
-  }
-
   // The only addition to the 2.0 dispatch: ID safety. Every ID that can reach
   // a path is a positive integer (null or invalid is an error) and declared
   // aliases are mapped. Required catalog params are not checked here; that is
   // execute_command's validation (validateCommandParams), as in 2.0.
   const idSafeParams = normalizeIdParams(entry, params, { checkRequired: false });
+  checkScreenshotSources(idSafeParams);
   // Whatever reaches a request path, by any route (top level, inside `data`,
   // a core-name key), is checked where the APIClient builds the path. Clients
   // this package creates are already guarded (wrapping is idempotent); this
@@ -2191,6 +3034,11 @@ export async function executeCommand(
   const runner = COMMAND_RUNNERS[group]?.[command];
   if (runner) {
     return runner(guardedClient, idSafeParams);
+  }
+
+  const mod = CORE_MODULES[group];
+  if (!mod) {
+    throw new Error(`Unknown group: "${group}". Available: ${CLI_GROUPS.join(', ')}`);
   }
 
   const fn = mod[command];

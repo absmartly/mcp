@@ -94,9 +94,11 @@ export default async function runTests() {
   // Every execute_command command has a manifest entry with at least one endpoint.
   const catalogCommands = getGroupSummary().flatMap(g => g.commands.map(c => `${g.group}.${c}`)).sort();
   ok(JSON.stringify(catalogCommands) === JSON.stringify(Object.keys(manifest.commands).sort()), 'manifest.commands covers every catalog command');
+  // api.rawRequest (like `abs api`) takes its path at runtime: it is the one
+  // command with no fixed endpoints, and rawRequest the one dynamic method.
   const withoutEndpoints = Object.entries(manifest.commands).filter(([, c]) => c.endpoints.length === 0).map(([k]) => k);
-  ok(withoutEndpoints.length === 0, 'every command maps to at least one endpoint', withoutEndpoints.join(', '));
-  ok(manifest.dynamicApiMethods.length === 0, 'no command reaches a runtime-built path', manifest.dynamicApiMethods.join(', '));
+  ok(JSON.stringify(withoutEndpoints) === JSON.stringify(['api.rawRequest']), 'every command but api.rawRequest maps to at least one endpoint', withoutEndpoints.join(', '));
+  ok(JSON.stringify(manifest.dynamicApiMethods) === JSON.stringify(['rawRequest']), 'only api.rawRequest reaches a runtime-built path', manifest.dynamicApiMethods.join(', '));
 
   // The union list is well formed and contains every per-tool entry.
   const union = new Set(manifest.endpoints.map(e => `${e.method} ${e.path}`));
